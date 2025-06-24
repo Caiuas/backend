@@ -1,31 +1,36 @@
 services:
+
+  traefik:
+    image: traefik:2.11.2
+    command:
+    - "--api.dashboard=true"
+    - "--providers.docker=true"
+    - "--providers.docker.exposedbydefault=false"
+    - "--entrypoints.web.address=:80"
+    - "--entrypoints.websecure.address=:443"
+    - "--certificatesresolvers.letsencryptresolver.acme.httpchallenge=true"
+    - "--certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web"
+    - "--certificatesresolvers.letsencryptresolver.acme.email=opabloedu@gmail.com"
+    - "--certificatesresolvers.letsencryptresolver.acme.storage=/letsencrypt/acme.json"
+    - "--log.level=DEBUG"
+    ports:
+    - "80:80"
+    - "443:443"
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    - ./traefik/letsencrypt:/letsencrypt
+    restart: always
+
   flask_app:
-    build: .
-    # image: api_logix_flask_app
-    container_name: flask_app
-    # tty: true
-    environment:
-      TZ: America/Sao_Paulo
+    build: ./flask_app
+    container_name: app_flask
+    restart: always
     volumes:
       - ./flask_app:/app
-    #   - ./flask_app/sqlhosts:/opt/IBM/Informix_Client-SDK/etc/sqlhosts
-    #   - ./files:/app/static/files
-    # env_file:
-    #   - .env
-    # ports:
-    #   - "8000:8000"
-    # command: gunicorn --reload -w 1 -b 0.0.0.0:8000 wsgi:server
-    command: gunicorn --reload -w 1 -b 0.0.0.0:8000 wsgi:app
-  nginx:
-    image: nginx:latest
-  #   tty: true
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/certificado:/etc/nginx/certificado
-  #     - ./files:/files
-    depends_on:
-      - flask_app
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.flask-app.rule=Host(`backend.caiuas.com.br`)"
+      - "traefik.http.routers.flask-app.entrypoints=websecure"
+      - "traefik.http.routers.flask-app.tls.certresolver=letsencryptresolver"
+      - "traefik.http.services.flask-app.loadbalancer.server.port=5000" # Porta padrão do Flask
+    command: "flask run --host=0.0.0.0 --port=5000 --debug"

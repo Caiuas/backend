@@ -175,3 +175,4 @@ cython_debug/
 
 # certificados
 *.pem
+traefik/letsencrypt/acme.json
