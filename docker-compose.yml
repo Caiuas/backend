@@ -36,3 +36,24 @@ services:
       - "traefik.http.routers.flask-app.tls.certresolver=letsencryptresolver"
       - "traefik.http.services.flask-app.loadbalancer.server.port=5000" # Porta padrão do Flask
     command: "flask run --host=0.0.0.0 --port=5000 --debug"
+  
+  streamlit_app:
+    build: ./streamlit_app
+    container_name: app_streamlit
+    restart: always
+    # manter ligado
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./streamlit_app:/app
+    # libera rede para fora
+    ports:
+      - "8501:8501" # Porta padrão do Streamlit
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.streamlit-app.rule=Host(`bi.caiuas.com.br`)"
+      - "traefik.http.routers.streamlit-app.entrypoints=web,websecure"
+      - "traefik.http.routers.streamlit-app.tls.certresolver=letsencryptresolver"
+      - "traefik.http.services.streamlit-app.loadbalancer.server.port=8501" # Porta padrão do Streamlit
+    command: "streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
