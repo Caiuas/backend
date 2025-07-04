@@ -57,3 +57,13 @@ services:
       - "traefik.http.routers.streamlit-app.tls.certresolver=letsencryptresolver"
       - "traefik.http.services.streamlit-app.loadbalancer.server.port=8501" # Porta padrão do Streamlit
     command: "streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
+
+  worker_estoque_veiculos_des:
+    build: ./workers/estoque_veiculos_des
+    container_name: worker_estoque_veiculos_des
+    restart: always
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/estoque_veiculos_des:/app
+    command: "python3 app.py"
