@@ -98,7 +98,7 @@ while True:
     cur.execute(query)
     r = cur.fetchall()
     veiculos = []
-
+    print('Consultou o veículo')
     for i in r:
 
         veiculo = {
