@@ -81,7 +81,8 @@ def get_agendamento():
             oa.consultor,
             eu2.COD_FUNCAO,
             eu2.nome_completo,
-            oa.SERVICO_EXPRESSO
+            oa.SERVICO_EXPRESSO,
+            oa.status_agenda
         from os_agenda_servicos s
         LEFT JOIN CRM_EVENTOS ce ON 1=1
             AND ce.COD_EMPRESA = s.crm_cod_empresa 
@@ -137,8 +138,10 @@ def get_agendamento():
                 'consultor': row[13]  if row[14] in (26,38) else None,
                 'nome_consultor': row[15] if row[14] in (26,38) else None,
                 'express': row[16] if row[16] else None,
+                'status_agenda': row[17] if row[17] else None,
                 'reclamacoes': [],
-                'tags': []
+                'tags': [],
+                'whatsapp': []
             })
         for agenda in retorno['agendamentos']:
             query = f"""
@@ -171,6 +174,26 @@ def get_agendamento():
                     'id_tag_os_agenda': row[2]
                 })
         
+        for agenda in retorno['agendamentos']:
+            query = f"""
+            SELECT id_log, name, status, TO_CHAR(UPDATED_AT, 'YYYY-MM-DD"T"HH24:MI:SS') AS UPDATED_AT_ISO
+                FROM CAIUAS_LOG_WHATSAPP clw 
+                WHERE 1=1
+                    AND clw.COD_EMPRESA = {agenda['cod_empresa']}
+                    AND clw.COD_OS_AGENDA = {agenda['cod_os_agenda']}
+            """
+            cur_oracle.execute(query)
+            result = cur_oracle.fetchall()
+            # agenda['whatsapp'] = []
+            for row in result:
+                # return str(row[3])
+                updated_at = datetime.strptime(str(row[3]), '%Y-%m-%dT%H:%M:%S')
+                agenda['whatsapp'].append({
+                    'id_log': row[0],
+                    'name': row[1],
+                    'status': row[2],
+                    'updated_at': updated_at.isoformat() if updated_at else None
+                })
             
         query = f"""
          Select pbr.data_comeca, pbr.data_termina, pbr.motivo,pbr.prisma
@@ -189,8 +212,7 @@ def get_agendamento():
                 'data_fim': data_fim.isoformat() if data_fim else None,
                 'motivo': row[2],
                 'prisma': row[3]
-            })
-        
+            }) 
         
         return jsonify(retorno), 200
         
@@ -385,6 +407,77 @@ def remove_tag_os_agenda(id_tag_os_agenda):
         cur_oracle.execute(query)
         conn_oracle.commit()
         return jsonify({'status': 'success', 'message': 'Tag removed successfully'}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@agendamento_bp.route('/api/agenda/send_whatsapp_confirmation', methods=['POST'])
+def agenda_send_whatsapp_confirmation():
+    try:
+        data = request.get_json()
+        if 'cod_empresa' not in data or 'cod_os_agenda' not in data or 'message' not in data:
+            return jsonify({'status': 'error', 'message': 'Missing required parameters: cod_empresa, cod_os_agenda, and message'}), 400
+        query = f"""
+            select count(*) from os_agenda oa
+            where oa.cod_empresa = {data['cod_empresa']}
+            and oa.cod_os_agenda = {data['cod_os_agenda']}
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchone()
+        if result[0] == 0:
+            return jsonify({'status': 'error', 'message': 'OS Agenda not found for the given company code and OS Agenda code'}), 404
+        query = f"""
+            INSERT
+                INTO
+                CAIUAS_LOG_WHATSAPP (ID_LOG,
+                COD_EMPRESA,
+                COD_OS_AGENDA,
+                STATUS,
+                NAME,
+                UPDATED_AT)
+            VALUES(SEQ_CRM_WHATSAPP_LOG.NEXTVAL, {data['cod_empresa']}, {data['cod_os_agenda']}, 'pendente', '{data['message']}', CURRENT_TIMESTAMP)
+            """
+        # return query
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        return jsonify({'status': 'success', 'message': 'WhatsApp confirmation sent successfully'}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+@agendamento_bp.route('/api/agenda/confirm_visit', methods=['POST'])
+def confirm_visit():
+    try:
+        data = request.get_json()
+        if 'cod_empresa' not in data or 'cod_os_agenda' not in data:
+            return jsonify({'status': 'error', 'message': 'Missing required parameters: cod_empresa, cod_os_agenda'}), 400
+        query = f"""
+            select status_agenda from os_agenda oa
+            where oa.cod_empresa = {data['cod_empresa']}
+            and oa.cod_os_agenda = {data['cod_os_agenda']}
+        """
+        # return query
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        # return result
+        if len(result) == 0:
+            return jsonify({'status': 'error', 'message': 'OS Agenda not found for the given company code and OS Agenda code'}), 404
+        if result[0][0] in ('E','O','F'):
+            return jsonify({'status': 'error', 'message': 'Agendamento já foi encerrado'}), 400
+        if result[0][0] == 'C':
+            status_agenda = 'A'
+        elif result[0][0] == 'A':
+            status_agenda = 'C'
+        else:
+            status_agenda = result[0][0]
+        query = f"""
+            UPDATE os_agenda set status_agenda = '{status_agenda}'
+            WHERE cod_empresa = {data['cod_empresa']}
+            AND cod_os_agenda = {data['cod_os_agenda']}
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        return jsonify({'status': 'success', 'message': f'Status do agendamento atualizado'}), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
