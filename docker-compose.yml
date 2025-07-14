@@ -78,3 +78,15 @@ services:
     volumes:
       - ./workers/send_wpp_agendamento:/app
     command: "python3 app.py"
+
+  worker_update_questionario:
+    build: ./workers/update_questionario
+    container_name: worker_update_questionario
+    restart: always
+    # tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/update_questionario:/app
+    command: "python3 app.py"
+    
