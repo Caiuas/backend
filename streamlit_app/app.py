@@ -1,6 +1,7 @@
 
 import streamlit as st
 from database import oracle
+from datetime import datetime
 import pandas as pd
 
 def login():
@@ -84,7 +85,7 @@ if menu == "Estoque de peças":
     total_por_empresa["Custo Contabil"] = total_por_empresa["Custo Contabil"].apply(lambda x: f"R$ {float(x):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
     cur_oracle.close()
     conn_oracle.close()
-    st.write("**Data de atualização: 2025-06-28**")
+    st.write(f"**Data de atualização: {datetime.now()}**")
     st.dataframe(df_filtrado, hide_index=True)
     st.write("**Total por empresa**")
     st.write(f"**Valor total do estoque: R$ {valor_estoque_total:,.2f}**")
@@ -185,6 +186,62 @@ if menu == "Obsolescência de estoque":
             AND nm.serie_nbs = v.serie
             AND nm.numr_controle = v.controle
         WHERE 1=1
+            AND v.emissao BETWEEN SYSDATE - 180 AND SYSDATE
+            AND v.SERIE  IN ('3','5')
+            AND nm.status_nfe = 10
+            AND v.COD_OPERACAO IN (1,2,3,10,19,26,34)
+            GROUP BY 
+            em.nome,
+            vi.cod_item ,
+            igi.DESCRICAO,
+            i.DESCRICAO
+    """
+    cur_oracle.execute(query)
+    result_oracle = cur_oracle.fetchall()
+    faturamento_180_dias = pd.DataFrame(result_oracle, columns=[
+        "Empresa", "cod_item", "Grupo Interno", "Descrição Item",
+        "Quantidade", "Valor Líquido", "Valor Bruto"
+    ], dtype=str)
+    faturamento_180_dias["Quantidade"] = faturamento_180_dias["Quantidade"].astype(float)
+    faturamento_180_dias["Valor Líquido"] = faturamento_180_dias["Valor Líquido"].astype(float)
+    faturamento_180_dias["Valor Bruto"] = faturamento_180_dias["Valor Bruto"].astype(float)
+    
+    query = f"""
+        SELECT 
+            em.nome, 
+            vi.cod_item ,
+            igi.DESCRICAO grupo_interno,
+            i.DESCRICAO descricao_item,
+            sum(vi.QTDE) QTDE,
+            sum((vi.PRECO_LIQUIDO_FINAL)) valor_liquido,
+            sum((vi.QTDE * vi.PRECO_UNITARIO)) valor_bruto
+        FROM venda_itens vi
+        LEFT JOIN empresas em ON 1=1
+            AND em.COD_EMPRESA = vi.COD_EMPRESA
+        LEFT JOIN vendas v ON 1=1
+            AND v.cod_empresa = vi.cod_empresa
+            AND v.controle = vi.CONTROLE
+        LEFT JOIN OPERACOES o ON 1=1
+            AND o.COD_OPERACAO = v.COD_OPERACAO
+            AND v.cod_empresa = o.COD_EMPRESA
+        LEFT JOIN itens i ON 1=1
+            AND i.cod_item = vi.cod_item
+        LEFT JOIN ITENS_GRUPO_INTERNO igi ON 1=1
+            AND igi.COD_GRUPO_INTERNO = i.COD_GRUPO_INTERNO
+        LEFT JOIN ITENS_FORNECEDOR if2 ON 1=1
+            AND if2.COD_ITEM = vi.COD_ITEM
+            AND if2.COD_FORNECEDOR = vi.COD_FORNECEDOR
+        LEFT JOIN empresas em ON 1=1
+            AND em.COD_EMPRESA = vi.COD_EMPRESA
+        LEFT JOIN itens_custos ic ON 1=1
+            AND ic.cod_item = i.COD_ITEM
+            AND ic.COD_FORNECEDOR = vi.COD_FORNECEDOR
+            AND ic.COD_EMPRESA = vi.COD_EMPRESA
+        LEFT JOIN NFE_MOVIMENTO nm ON 1=1
+            AND nm.ID_EMPRESA = v.COD_EMPRESA
+            AND nm.serie_nbs = v.serie
+            AND nm.numr_controle = v.controle
+        WHERE 1=1
             AND v.emissao BETWEEN SYSDATE - 365 AND SYSDATE
             AND v.SERIE  IN ('3','5')
             AND nm.status_nfe = 10
@@ -243,6 +300,13 @@ if menu == "Obsolescência de estoque":
     itens_sem_faturamento_90['Quantidade'] = itens_sem_faturamento_90['Quantidade'].fillna(0).astype(float)
     itens_sem_faturamento_90 = itens_sem_faturamento_90[itens_sem_faturamento_90['Quantidade'] == 0]
     
+    itens_sem_faturamento_180 = pd.merge(estoque, 
+        faturamento_180_dias,
+        on=["Empresa", "Grupo Interno", "cod_item"],
+        how="left")
+    itens_sem_faturamento_180['Quantidade'] = itens_sem_faturamento_180['Quantidade'].fillna(0).astype(float)
+    itens_sem_faturamento_180 = itens_sem_faturamento_180[itens_sem_faturamento_180['Quantidade'] == 0]
+    
     itens_sem_faturamento_360 = pd.merge(estoque, 
         faturamento_360_dias,
         on=["Empresa", "Grupo Interno", "cod_item"],
@@ -251,38 +315,51 @@ if menu == "Obsolescência de estoque":
     itens_sem_faturamento_360 = itens_sem_faturamento_90[itens_sem_faturamento_360['Quantidade'] == 0]
     
     # Filtro por empresa
-    empresas = pd.concat([itens_sem_faturamento_90["Empresa"], itens_sem_faturamento_360["Empresa"]]).unique()
+    empresas = pd.concat([itens_sem_faturamento_90["Empresa"], itens_sem_faturamento_360["Empresa"], itens_sem_faturamento_180["Empresa"]]).unique()
     empresa_selecionada = st.sidebar.selectbox("Filtrar por empresa", ["Todas"] + list(empresas))
-    grupos = pd.concat([itens_sem_faturamento_90["Grupo Interno"], itens_sem_faturamento_360["Grupo Interno"]]).unique()
+    grupos = pd.concat([itens_sem_faturamento_90["Grupo Interno"], itens_sem_faturamento_360["Grupo Interno"], itens_sem_faturamento_180["Empresa"]]).unique()
     grupo_selecionado = st.sidebar.selectbox("Filtrar por grupo interno", ["Todos"] + list(grupos))
     
     # Aplicando os filtros
     df_filtrado_90 = itens_sem_faturamento_90.copy()
     df_filtrado_360 = itens_sem_faturamento_360.copy()
+    df_filtrado_180 = itens_sem_faturamento_180.copy()
     if empresa_selecionada != "Todas":
         df_filtrado_90 = df_filtrado_90[df_filtrado_90["Empresa"] == empresa_selecionada]
+        df_filtrado_180 = df_filtrado_180[df_filtrado_180["Empresa"] == empresa_selecionada]
         df_filtrado_360 = df_filtrado_360[df_filtrado_360["Empresa"] == empresa_selecionada]
     
     if grupo_selecionado != "Todos":
         df_filtrado_90 = df_filtrado_90[df_filtrado_90["Grupo Interno"] == grupo_selecionado]
+        df_filtrado_180 = df_filtrado_180[df_filtrado_180["Grupo Interno"] == grupo_selecionado]
         df_filtrado_360 = df_filtrado_360[df_filtrado_360["Grupo Interno"] == grupo_selecionado]
     
     valor_total_estoque_90 = df_filtrado_90["Custo Contabil"].sum()    
+    valor_total_estoque_180 = df_filtrado_180["Custo Contabil"].sum()
     valor_total_estoque_360 = df_filtrado_360["Custo Contabil"].sum()
     
     itens_sem_faturamento_90 = itens_sem_faturamento_90[['Empresa', 'Grupo Interno', 'cod_item', 'quantidade_estoque', 'Custo Contabil']]
     itens_sem_faturamento_90['Custo Contabil'] = itens_sem_faturamento_90['Custo Contabil'].apply(lambda x: f"R$ {float(x):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+    
+    itens_sem_faturamento_180 = itens_sem_faturamento_180[['Empresa', 'Grupo Interno', 'cod_item', 'quantidade_estoque', 'Custo Contabil']]
+    itens_sem_faturamento_180['Custo Contabil'] = itens_sem_faturamento_180['Custo Contabil'].apply(lambda x: f"R$ {float(x):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
 
     itens_sem_faturamento_360 = itens_sem_faturamento_360[['Empresa', 'Grupo Interno', 'cod_item', 'quantidade_estoque', 'Custo Contabil']]
     itens_sem_faturamento_360['Custo Contabil'] = itens_sem_faturamento_360['Custo Contabil'].apply(lambda x: f"R$ {float(x):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
 
     # Exibindo os dados filtrados
     
-    st.write("**Data de atualização: 2025-06-28**")
+    st.write(f"**Data de atualização: {datetime.now()}**")
     st.subheader("Itens sem faturamento nos últimos 90 dias")
     st.write(f"**Valor total do estoque: R$ {valor_total_estoque_90:,.2f}**")
     
     st.dataframe(df_filtrado_90[['Empresa','Grupo Interno','cod_item','quantidade_estoque','Custo Contabil']], hide_index=True)
+    
+    # Adicionado DF 180 dias
+    st.subheader("Itens sem faturamento nos últimos 180 dias")
+    st.write(f"**Valor total do estoque: R$ {valor_total_estoque_180:,.2f}**")
+    
+    st.dataframe(df_filtrado_180[['Empresa','Grupo Interno','cod_item','quantidade_estoque','Custo Contabil']], hide_index=True)
     
     # Adicionando DF 360 dias
     st.subheader("Itens sem faturamento nos últimos 365 dias")
