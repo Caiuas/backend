@@ -332,6 +332,9 @@ while True:
                 else:
                     print(f"Erro ao enviar mensagem para {telefone}: {response.status_code} - {response.text}")
         
+    cur.close()
+    conn.close()
+        
         # print(f"Registro atualizado: {row[0]} - {row[3]}")
         
         # Simulate sending a message
