@@ -35,7 +35,7 @@ services:
       - "traefik.http.routers.flask-app.entrypoints=websecure"
       - "traefik.http.routers.flask-app.tls.certresolver=letsencryptresolver"
       - "traefik.http.services.flask-app.loadbalancer.server.port=5000" # Porta padrão do Flask
-    command: "flask run --host=0.0.0.0 --port=5000 --debug"
+    command: "flask run --host=0.0.0.0 --port=5000"
   
   streamlit_app:
     build: ./streamlit_app
