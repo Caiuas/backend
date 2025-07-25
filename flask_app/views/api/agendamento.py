@@ -39,6 +39,8 @@ def get_agendamento():
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
         if len(result) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
             return jsonify({'status': 'error', 'message': 'No data found for the given parameters'}), 404
         retorno['parametros'] = {}
         retorno['parametros']['cod_empresa'] = result[0][0]
@@ -213,7 +215,8 @@ def get_agendamento():
                 'motivo': row[2],
                 'prisma': row[3]
             }) 
-        
+        cur_oracle.close()
+        conn_oracle.close()
         return jsonify(retorno), 200
         
     except Exception as e:
@@ -425,6 +428,8 @@ def agenda_send_whatsapp_confirmation():
         cur_oracle.execute(query)
         result = cur_oracle.fetchone()
         if result[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
             return jsonify({'status': 'error', 'message': 'OS Agenda not found for the given company code and OS Agenda code'}), 404
         query = f"""
             INSERT
@@ -440,6 +445,8 @@ def agenda_send_whatsapp_confirmation():
         # return query
         cur_oracle.execute(query)
         conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
         return jsonify({'status': 'success', 'message': 'WhatsApp confirmation sent successfully'}), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
@@ -477,7 +484,178 @@ def confirm_visit():
         """
         cur_oracle.execute(query)
         conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
         return jsonify({'status': 'success', 'message': f'Status do agendamento atualizado'}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+@agendamento_bp.route('/api/agenda/os_agenda', methods=['GET'])
+def get_os_agenda():
+    try:
+        cod_empresa = request.args.get('cod_empresa')
+        cod_os_agenda = request.args.get('cod_os_agenda')
+        if cod_empresa is None or cod_os_agenda is None:
+            return jsonify({'status': 'error', 'message': 'Missing required parameters: cod_empresa and cod_os_agenda'}), 400
+        if not cod_empresa.isdigit() or not cod_os_agenda.isdigit():
+            return jsonify({'status': 'error', 'message': 'cod_empresa and cod_os_agenda must be numbers'}), 400
+        query = f"""
+            SELECT oa.COD_EMPRESA, oa.COD_OS_AGENDA, oa.NUMERO_OS, oa.COD_CLIENTE, TO_CHAR(oa.DATA_AGENDADA , 'YYYY-MM-DD')
+            FROM OS_AGENDA oa 
+            WHERE 1=1
+            
+                AND oa.COD_EMPRESA = {cod_empresa}
+                AND oa.COD_OS_AGENDA = {cod_os_agenda}
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        if len(result) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'OS Agenda not found for the given company code and OS Agenda code'}), 404
+        data_emissao = str(result[0][4])
+        cod_os_agenda = result[0][1]
+        query = f"""
+            SELECT o.DATA_EMISSAO, o.NUMERO_OS, eu.NOME_COMPLETO
+            FROM OS o
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = o.nome
+            WHERE 1=1
+                --and o.complemento <> 'S'
+                AND o.ORCAMENTO <> 'S'
+                AND numero_os > 0
+                AND o.COD_CLIENTE = '{str(result[0][3])}'
+                AND o.COD_EMPRESA = {cod_empresa}
+                AND o.DATA_EMISSAO >= TO_DATE('{data_emissao}', 'YYYY-MM-DD')
+        """
+        
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        retorno = {}
+        retorno['list_os'] = []
+        for row in result:
+            retorno['list_os'].append({
+                'data_emissao': row[0],
+                'numero_os': row[1],
+                'nome_completo': row[2]
+            })
+        retorno['cod_empresa'] = cod_empresa
+        retorno['cod_os_agenda'] = cod_os_agenda
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@agendamento_bp.route('/api/agenda/os_agenda_public', methods=['GET'])
+def get_os_agenda_public():
+    try:
+        cod_empresa = request.args.get('cod_empresa')
+        cod_os_agenda = request.args.get('cod_os_agenda')
+        if cod_empresa is None or cod_os_agenda is None:
+            return jsonify({'status': 'error', 'message': 'Missing required parameters: cod_empresa and cod_os_agenda'}), 400
+        if not cod_empresa.isdigit() or not cod_os_agenda.isdigit():
+            return jsonify({'status': 'error', 'message': 'cod_empresa and cod_os_agenda must be numbers'}), 400
+        query = f"""
+            SELECT oa.COD_EMPRESA, oa.COD_OS_AGENDA, oa.NUMERO_OS, oa.COD_CLIENTE, TO_CHAR(oa.DATA_AGENDADA , 'YYYY-MM-DD')
+            FROM OS_AGENDA oa 
+            WHERE 1=1
+            
+                AND oa.COD_EMPRESA = {cod_empresa}
+                AND oa.COD_OS_AGENDA = {cod_os_agenda}
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        
+        if len(result) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'OS Agenda not found for the given company code and OS Agenda code'}), 404
+        data_emissao = str(result[0][4])
+        cod_os_agenda = result[0][1]
+        query = f"""
+            SELECT o.DATA_EMISSAO, o.NUMERO_OS, eu.NOME_COMPLETO
+            FROM OS o
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = o.nome
+            WHERE 1=1
+                and o.complemento <> 'S'
+                AND o.ORCAMENTO <> 'S'
+                AND numero_os > 0
+                AND o.COD_CLIENTE = '{str(result[0][3])}'
+                AND o.COD_EMPRESA = {cod_empresa}
+                AND o.DATA_EMISSAO >= TO_DATE('{data_emissao}', 'YYYY-MM-DD')
+        """
+        
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        retorno = {}
+        retorno['list_os'] = []
+        for row in result:
+            retorno['list_os'].append({
+                'data_emissao': row[0],
+                'numero_os': row[1],
+                'nome_completo': row[2]
+            })
+        retorno['cod_empresa'] = cod_empresa
+        retorno['cod_os_agenda'] = cod_os_agenda
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@agendamento_bp.route('/api/agenda/change_os', methods=['POST'])
+def change_os():
+    try:
+        data = request.get_json()
+        if 'cod_empresa' not in data or 'cod_os_agenda' not in data or 'numero_os' not in data:
+            return jsonify({'status': 'error', 'message': 'Missing required parameters: cod_empresa, cod_os_agenda, and numero_os'}), 400
+        # chava se tudo é int
+        if not isinstance(data['cod_empresa'], int) or not isinstance(data['cod_os_agenda'], int) or not isinstance(data['numero_os'], int):
+            return jsonify({'status': 'error', 'message': 'cod_empresa, cod_os_agenda, and numero_os must be numbers'}), 400
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+                UPDATE os SET cod_os_agenda = NULL
+                WHERE cod_empresa = {data['cod_empresa']}
+                AND cod_os_agenda = {data['cod_os_agenda']}
+        """
+        cur_oracle.execute(query)
+        
+        query = f"""
+            UPDATE os_agenda SET NUMERO_OS = NULL
+            WHERE 1=1
+                AND COD_EMPRESA = {data['cod_empresa']}
+                AND cod_os_agenda = {data['cod_os_agenda']}
+        """
+        cur_oracle.execute(query)
+        
+        query = f"""
+            UPDATE os SET cod_os_agenda = {data['cod_os_agenda']}
+            WHERE cod_empresa = {data['cod_empresa']}
+            AND numero_os = {data['numero_os']}
+        """
+        cur_oracle.execute(query)
+        
+        query = f"""
+            UPDATE os_agenda SET NUMERO_OS = {data['numero_os']}
+            WHERE 1=1
+                AND COD_EMPRESA = {data['cod_empresa']}
+                AND cod_os_agenda = {data['cod_os_agenda']}
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        
+        retorno = {}
+        retorno['message'] = 'OS Alterada com sucesso !'
+        retorno['numero_os'] = data['numero_os']
+        retorno['cod_os_agenda'] = data['cod_os_agenda']
+        retorno['cod_empresa'] = data['cod_empresa']
+        return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
