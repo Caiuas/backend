@@ -507,6 +507,7 @@ def get_os_agenda():
                 AND oa.COD_EMPRESA = {cod_empresa}
                 AND oa.COD_OS_AGENDA = {cod_os_agenda}
         """
+        
         conn_oracle, cur_oracle = oracle()
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
@@ -516,6 +517,11 @@ def get_os_agenda():
             return jsonify({'status': 'error', 'message': 'OS Agenda not found for the given company code and OS Agenda code'}), 404
         data_emissao = str(result[0][4])
         cod_os_agenda = result[0][1]
+        cod_cliente = str(result[0][3])
+        if not cod_cliente.isdigit():
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Cliente não cadastrado ! corrija!'}), 400
         query = f"""
             SELECT o.DATA_EMISSAO, o.NUMERO_OS, eu.NOME_COMPLETO
             FROM OS o
@@ -525,7 +531,7 @@ def get_os_agenda():
                 --and o.complemento <> 'S'
                 AND o.ORCAMENTO <> 'S'
                 AND numero_os > 0
-                AND o.COD_CLIENTE = '{str(result[0][3])}'
+                AND o.COD_CLIENTE = '{cod_cliente}'
                 AND o.COD_EMPRESA = {cod_empresa}
                 AND o.DATA_EMISSAO >= TO_DATE('{data_emissao}', 'YYYY-MM-DD')
         """
