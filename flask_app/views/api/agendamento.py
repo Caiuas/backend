@@ -106,10 +106,12 @@ def get_agendamento():
         LEFT JOIN os o ON 1=1
 	    	AND oa.COD_EMPRESA = o.COD_EMPRESA 
             AND oa.COD_OS_AGENDA = o.COD_OS_AGENDA
-            and o.complemento <> 'S'
+            --and o.complemento <> 'S'
             AND o.ORCAMENTO <> 'S'
         LEFT JOIN empresas_usuarios eu2 ON 1=1
         	AND eu2.NOME = oa.CONSULTOR
+        LEFT JOIN empresas_usuarios eu3 ON 1=1
+	        AND eu3.NOME = oa.quem_abriu
         where 
             pb.COD_EMPRESA_FILTRO = {cod_empresa}
             AND oa.PRISMA IS NOT null

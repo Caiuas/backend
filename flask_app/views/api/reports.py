@@ -90,8 +90,10 @@ def reports_fechamento_agendamento():
                 s.cod_os_agenda, 
                 c.NOME,
                 s.CRM_COD_EVENTO,
-                ce.RESPONSAVEL_PELO_EVENTO,
-                eu.NOME_COMPLETO,
+                --ce.RESPONSAVEL_PELO_EVENTO,
+                --eu.NOME_COMPLETO,
+                oa.QUEM_ABRIU,
+                eu3.NOME_COMPLETO,
                 pb.DESCRICAO,
                 oa.PLACA,
                 pm.DESCRICAO_MODELO,
@@ -103,7 +105,12 @@ def reports_fechamento_agendamento():
                 eu2.COD_FUNCAO,
                 eu2.nome_completo,
                 oa.SERVICO_EXPRESSO,
-                oa.status_agenda
+                oa.status_agenda,
+                (SELECT LISTAGG(srv.DESCRICAO_SERVICO, ', ') WITHIN GROUP (ORDER BY srv.DESCRICAO_SERVICO)
+			        FROM OS_SERVICOS oss
+			        LEFT JOIN servicos srv ON srv.cod_servico = oss.cod_servico
+			        WHERE oss.NUMERO_OS = o.NUMERO_OS
+			          AND oss.COD_EMPRESA = o.COD_EMPRESA) servicos
             from os_agenda_servicos s
             LEFT JOIN CRM_EVENTOS ce ON 1=1
                 AND ce.COD_EMPRESA = s.crm_cod_empresa 
@@ -125,10 +132,12 @@ def reports_fechamento_agendamento():
             LEFT JOIN os o ON 1=1
                 AND oa.COD_EMPRESA = o.COD_EMPRESA 
                 AND oa.COD_OS_AGENDA = o.COD_OS_AGENDA
-                and o.complemento <> 'S'
+                --and o.complemento <> 'S'
                 AND o.ORCAMENTO <> 'S'
             LEFT JOIN empresas_usuarios eu2 ON 1=1
                 AND eu2.NOME = oa.CONSULTOR
+            LEFT JOIN empresas_usuarios eu3 ON 1=1
+	            AND eu3.NOME = oa.quem_abriu
             where 
                 1=1
             --            pb.COD_EMPRESA_FILTRO = 11
@@ -137,6 +146,7 @@ def reports_fechamento_agendamento():
                 and   trunc(s.data_comeca) <=  trunc(TO_DATE('{final_date_str}', 'YYYY-MM-DD'))
             order by s.data_comeca
             """
+        # return query
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
         cur_oracle.close()
@@ -161,7 +171,8 @@ def reports_fechamento_agendamento():
             'cod_funcao',
             'nome_completo_consultor',
             'servico_express',
-            'status_agenda'
+            'status_agenda',
+            'servicos'
         ])
         agenda_por_responsavel = pd.pivot_table(
             df,
@@ -170,6 +181,13 @@ def reports_fechamento_agendamento():
             aggfunc=lambda x: x.count(),
             fill_value=0
         )
+        # agenda_por_responsavel_empresa = pd.pivot_table(
+        #     df,
+        #     index=['agente_sac'],
+        #     values=['numero_os'],
+        #     aggfunc=lambda x: x.count(),
+        #     fill_value=0
+        # )
         agenda_por_responsavel = agenda_por_responsavel[agenda_por_responsavel['numero_os'] > 0]
         df = df[['cod_empresa', 
                 'cod_os_agenda', 
@@ -182,6 +200,7 @@ def reports_fechamento_agendamento():
                 'data_comeca', 
                 'numero_os', 
                 'nome_completo_consultor', 
+                'servicos'
                 ]]
         df = df.fillna('')
         df['data_comeca'] = pd.to_datetime(df['data_comeca'], errors='coerce')
@@ -211,9 +230,32 @@ def reports_fechamento_agendamento():
         worksheet.print_area(f'A1:B{cont+2}')
         worksheet.set_column('A:A', 30.00)
         worksheet.set_column('B:B', 20.00)
+        
+        # worksheet = workbook.add_worksheet('Ag - Resp - Empresa')
+        # worksheet.merge_range('A1:B1', 'Agenda por Responsavel - Empresa', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'}))
+        # worksheet.write('A2', 'COD_EMPRESA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        # worksheet.write('B2', 'AGENTE_SAC', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        # worksheet.write('C2', 'QUANTIDADE_OS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        # cont = 0
+        # for i, row in agenda_por_responsavel_empresa.iterrows():
+        #     cont += 1
+        #     worksheet.write(f'A{cont+2}', row.iloc[0], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+        #     worksheet.write(f'B{cont+2}', row.name, workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+        #     worksheet.write(f'C{cont+2}', row.iloc[1], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+        # worksheet.add_table(f'A2:C{cont+2}', {'columns': [{'header': 'COD_EMPRESA'},
+        #                                                   {'header': 'AGENTE_SAC'},
+        #                                                   {'header': 'QUANTIDADE_OS'}],
+        #                                                 'name': 'Agenda_por_Responsavel_Empresa',
+        #                                                 'autofilter': True
+        #                                                 })
+        # worksheet.set_landscape()
+        # worksheet.set_column('A:A', 10.00)
+        # worksheet.set_column('B:B', 30.00)
+        # worksheet.set_column('C:C', 20.00)
+        
 
         worksheet = workbook.add_worksheet('Agenda')
-        worksheet.merge_range('A1:K1', 'Agenda', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
+        worksheet.merge_range('A1:L1', 'Agenda', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
         worksheet.write('A2', 'EMP', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('B2', 'COD_OS_AGENDA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('C2', 'NOME_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
@@ -225,6 +267,7 @@ def reports_fechamento_agendamento():
         worksheet.write('I2', 'DATA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('J2', 'NUMERO_OS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('K2', 'CONSULTOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('L2', 'SERVIÇOS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         cont = 0
         for i, row in df.iterrows():
             cont += 1
@@ -242,7 +285,8 @@ def reports_fechamento_agendamento():
                 worksheet.write(f'I{cont+2}', row.iloc[8], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'J{cont+2}', row.iloc[9], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'K{cont+2}', row.iloc[10], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-        worksheet.add_table(f'A2:K{cont+2}', {'columns': [{'header': 'COD_EMPRESA'},
+            worksheet.write(f'L{cont+2}', row.iloc[11], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+        worksheet.add_table(f'A2:L{cont+2}', {'columns': [{'header': 'COD_EMPRESA'},
                                                         {'header': 'COD_OS_AGENDA'},
                                                         {'header': 'NOME_CLIENTE'},
                                                         {'header': 'CRM_COD_EVENTO'},
@@ -252,7 +296,8 @@ def reports_fechamento_agendamento():
                                                         {'header': 'DESCRICAO_MODELO'},
                                                         {'header': 'DATA'},
                                                         {'header': 'NUMERO_OS'},
-                                                        {'header': 'CONSULTOR'}],
+                                                        {'header': 'CONSULTOR'},
+                                                        {'header': 'SERVIÇOS'}],
                                                         'name': 'Agenda',
                                                         'autofilter': True
                                                         })
@@ -269,13 +314,152 @@ def reports_fechamento_agendamento():
         worksheet.set_column('I:I', 15.00)
         worksheet.set_column('J:J', 14.00)
         worksheet.set_column('K:K', 32.00)
+        worksheet.set_column('L:L', 50.00)
         workbook.close()
         # retorna o arquivo
         file_memory.seek(0)
         response = Response(file_memory.read(), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        response.headers.set('Content-Disposition', 'attachment', filename='agenda_por_responsavel.xlsx')
+        response.headers.set('Content-Disposition', 'attachment', filename='fechamento_agendamento.xlsx')
         response.headers.set('Content-Length', str(file_memory.tell()))
         return response, 200
+        
+    except Exception as e:
+        return jsonify({'message': str(e)}), 400
+    
+@reports_bp.route('/api/reports/pesquisa_satisfacao', methods=['GET'])
+def reports_pesquisa_satisfacao():
+    try:
+        initial_date = request.args.get('initial_date')
+        final_date = request.args.get('final_date')
+        if not initial_date or not final_date:
+            return jsonify({'message': 'Initial and final dates are required.'}), 400
+        
+        try:
+            initial_date = datetime.strptime(initial_date, '%Y-%m-%d')
+            final_date = datetime.strptime(final_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+        
+        if (final_date - initial_date).days > 30:
+            return jsonify({'message': 'Não pode pesquisar mais de 30 dias'}), 400
+        
+        initial_date_str = initial_date.strftime('%Y-%m-%d')
+        final_date_str = final_date.strftime('%Y-%m-%d')
+        
+        query = f"""
+            SELECT ce.cod_evento, e.nome empresa, cet.desc_tipo_evento tipo_evento, c.nome cliente, o.numero_os, eu.NOME_COMPLETO nome_consultor, cp.PERGUNTA, co.OPCAO a
+            FROM CRM_EVENTOS ce 
+            LEFT JOIN EMPRESAS e ON 1=1
+                AND e.COD_EMPRESA = ce.COD_EMPRESA
+            LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+                AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+            LEFT JOIN clientes c ON 1=1
+                AND c.COD_CLIENTE = ce.COD_CLIENTE
+            LEFT JOIN os o ON 1=1
+                AND o.NUMERO_OS = ce.NUMERO_OS
+                AND o.COD_EMPRESA = ce.COD_EMPRESA
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = o.NOME
+            LEFT JOIN CRM_RESPOSTAS cr ON 1=1
+                AND cr.cod_empresa = ce.cod_empresa
+                AND cr.cod_evento = ce.cod_evento
+            LEFT JOIN CRM_PERGUNTAS cp ON 1=1
+                AND cp.COD_PERGUNTA = cr.COD_PERGUNTA 
+                AND cp.COD_QUESTIONARIO = cr.COD_QUESTIONARIO 
+            LEFT JOIN CRM_OPCOES co ON 1=1
+	            AND co.COD_OPCOES = cr.COD_OPCOES
+            WHERE 1=1
+                AND ce.COD_TIPO_EVENTO IN (22,180)
+                AND ce.COD_TIPO_FECHAMENTO = 1
+                --AND ce.cod_evento = 1728505
+                and   trunc(ce.DATA_ENCERRAMENTO) >= trunc(TO_DATE('{initial_date_str}', 'YYYY-MM-DD')) 
+                and   trunc(ce.DATA_ENCERRAMENTO) <=  trunc(TO_DATE('{final_date_str}', 'YYYY-MM-DD'))
+            ORDER BY cod_evento desc
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        cur_oracle.close()
+        conn_oracle.close()
+        if len(result) == 0:
+            return jsonify({'message': 'Não tem pesquisa de satisfação no período.'}), 404
+        df = pd.DataFrame(result, columns=[
+            'cod_evento',
+            'empresa',
+            'tipo_evento',
+            'cliente',
+            'numero_os',
+            'nome_consultor',
+            'pergunta',
+            'nota'
+        ])
+        df = df.fillna('')
+        df = df.sort_values(by='cod_evento', ascending=False)
+        
+        file_memory = io.BytesIO()
+        workbook = xlsxwriter.Workbook(file_memory, {'in_memory': True})
+        worksheet = workbook.add_worksheet('Pesquisa Satisfacao')
+        worksheet.merge_range('A1:H1', 'Pesquisa Satisfacao - Detalhe', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
+        worksheet.write('A2', 'COD_EVENTO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('B2', 'EMPRESA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('C2', 'TIPO_EVENTO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('D2', 'CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('E2', 'NUMERO_OS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('F2', 'NOME_CONSULTOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('G2', 'PERGUNTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('H2', 'NOTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        cont = 0
+        cod_evento = None
+        usar_amarelo = True
+        for i, row in df.iterrows():
+            cont += 1
+            n_cod_evento = row.iloc[0]
+            if cod_evento != n_cod_evento:
+                # Mudou o cod_evento, alterna a cor
+                cor_celula = '#DCE6F1' if usar_amarelo else '#F2DCDB'
+                usar_amarelo = not usar_amarelo  # Alterna para a próxima vez
+                cod_evento = n_cod_evento
+            worksheet.write(f'A{cont+2}', row.iloc[0], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'B{cont+2}', row.iloc[1], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'C{cont+2}', row.iloc[2], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'D{cont+2}', row.iloc[3], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'E{cont+2}', row.iloc[4], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'F{cont+2}', row.iloc[5], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'G{cont+2}', row.iloc[6], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'H{cont+2}', row.iloc[7], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
+        worksheet.add_table(f'A2:H{cont+2}', {'columns': [{'header': 'COD_EVENTO'},
+                                                        {'header': 'EMPRESA'},
+                                                        {'header': 'TIPO_EVENTO'},
+                                                        {'header': 'CLIENTE'},
+                                                        {'header': 'NUMERO_OS'},
+                                                        {'header': 'NOME_CONSULTOR'},
+                                                        {'header': 'PERGUNTA'},
+                                                        {'header': 'NOTA'}],
+                                                        'name': 'Pesquisa_Satisfacao',
+                                                        'autofilter': True
+                                                        })
+        worksheet.set_landscape()
+        worksheet.set_paper(9)  # A4
+        worksheet.set_column('A:A', 15.00)
+        worksheet.set_column('B:B', 20.00)
+        worksheet.set_column('C:C', 30.00)
+        worksheet.set_column('D:D', 30.00)
+        worksheet.set_column('E:E', 15.00)
+        worksheet.set_column('F:F', 24.00)
+        worksheet.set_column('G:G', 80.00)
+        worksheet.set_column('H:H', 8.00)
+        worksheet.print_area(f'A1:H{cont+2}')
+        # imprimir em apneas uma pagina na horizontal
+        worksheet.fit_to_pages(1, 0)  # Ajusta para uma página de largura e sem limite de altura
+        
+        workbook.close()
+        file_memory.seek(0)
+        response = Response(file_memory.read(), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response.headers.set('Content-Disposition', 'attachment', filename='pesquisa_satisfacao.xlsx')
+        response.headers.set('Content-Length', str(file_memory.tell()))
+        return response, 200
+        
+        
         
     except Exception as e:
         return jsonify({'message': str(e)}), 400
