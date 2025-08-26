@@ -110,7 +110,8 @@ def reports_fechamento_agendamento():
 			        FROM OS_SERVICOS oss
 			        LEFT JOIN servicos srv ON srv.cod_servico = oss.cod_servico
 			        WHERE oss.NUMERO_OS = o.NUMERO_OS
-			          AND oss.COD_EMPRESA = o.COD_EMPRESA) servicos
+			          AND oss.COD_EMPRESA = o.COD_EMPRESA) servicos,
+                oa.chassi
             from os_agenda_servicos s
             LEFT JOIN CRM_EVENTOS ce ON 1=1
                 AND ce.COD_EMPRESA = s.crm_cod_empresa 
@@ -172,7 +173,8 @@ def reports_fechamento_agendamento():
             'nome_completo_consultor',
             'servico_express',
             'status_agenda',
-            'servicos'
+            'servicos',
+            'chassi'
         ])
         agenda_por_responsavel = pd.pivot_table(
             df,
@@ -200,7 +202,8 @@ def reports_fechamento_agendamento():
                 'data_comeca', 
                 'numero_os', 
                 'nome_completo_consultor', 
-                'servicos'
+                'servicos',
+                'chassi'
                 ]]
         df = df.fillna('')
         df['data_comeca'] = pd.to_datetime(df['data_comeca'], errors='coerce')
@@ -461,5 +464,189 @@ def reports_pesquisa_satisfacao():
         
         
         
+    except Exception as e:
+        return jsonify({'message': str(e)}), 400
+    
+@reports_bp.route('/api/reports/estoque', methods=['GET'])
+def reports_estoque():
+    try:
+        query = f"""
+            SELECT 
+                v.COD_PROPOSTA, 
+                vp.EMISSAO data_proposta, 
+                vp.VENDEDOR cod_vendedor, 
+                eu.NOME_COMPLETO nome_vendedor, 
+                pm.DESCRICAO_MODELO modelo, 
+                ce.DESCRICAO cor, 
+                v.ANO_MODELO, 
+                v.CHASSI_COMPLETO, 
+                e.NOME empresa, 
+                v.DATA_NOTA emissao,
+                p.DESCRICAO patio,
+                c.COD_CLIENTE, 
+                c.NOME nome_cliente,
+                CASE 
+                    WHEN v.novo_usado = 'U' THEN 'Usado'
+                    ELSE
+                        'Novo'
+                END novo_usado
+            FROM veiculos v 
+            LEFT JOIN produtos pr ON 1=1
+                AND pr.COD_PRODUTO = v.COD_PRODUTO 
+            LEFT JOIN CORES_EXTERNAS ce ON 1=1
+                AND ce.COR_EXTERNA = v.COR_EXTERNA 
+            LEFT JOIN produtos_modelos pm ON 1=1
+                AND pm.COD_PRODUTO = v.COD_PRODUTO 
+                AND pm.COD_MODELO = v.COD_MODELO 
+            LEFT JOIN VEICULOS_PROPOSTAS vp ON 1=1
+                --AND vp.COD_PROPOSTA = v.COD_PROPOSTA OR vp.COD_PROPOSTA = v.COD_PROPOSTA_INTERNET 
+                AND vp.CHASSI_RESUMIDO = v.CHASSI_RESUMIDO 
+                AND vp.STATUS_PROPOSTA <> 'C'
+            LEFT JOIN clientes c ON c.COD_CLIENTE = vp.COD_CLIENTE 
+            LEFT JOIN patio p ON 1=1
+                AND p.COD_PATIO = v.COD_PATIO
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = vp.VENDEDOR 
+            LEFT JOIN empresas_usuarios eu2 ON 1=1
+                AND eu2.nome = vp.QUEM_APROVOU 
+            LEFT JOIN empresas e ON 1=1
+                AND e.cod_empresa = v.COD_EMPRESA 
+            WHERE v.status = 'E'
+            ORDER BY pm.DESCRICAO_MODELO
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        cur_oracle.close()
+        conn_oracle.close()
+        file_memory = io.BytesIO()
+        data_atual = datetime.now().strftime('%d/%m/%Y %H:%M')
+        workbook = xlsxwriter.Workbook(file_memory, {'in_memory': True})
+        worksheet = workbook.add_worksheet('Estoque de veiculos')
+        worksheet.merge_range(f'A1:N1', f'Estoque de veiculos - Gerado em {data_atual}', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('A2', 'COD_PROPOSTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('B2', 'DATA_PROPOSTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('C2', 'COD_VENDEDOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('D2', 'NOME_VENDEDOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('E2', 'MODELO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('F2', 'COR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('G2', 'ANO_MODELO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('H2', 'CHASSI_COMPLETO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('I2', 'EMPRESA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('J2', 'EMISSAO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('K2', 'PATIO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('L2', 'COD_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('M2', 'NOME_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('N2', 'NOVO_USADO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        
+        cont = 0
+        for row in result:
+            if row[0] and str(row[0]) != "0":
+                worksheet.write(cont + 2, 0, row[0], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            else:
+                worksheet.write(cont + 2, 0, '', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            # Corrigindo o tratamento da data_proposta
+            if row[1]:  # Verifica se não é None
+                try:
+                    # Se for string, converte para datetime
+                    if isinstance(row[1], str):
+                        date_obj = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S')
+                        worksheet.write_datetime(cont + 2, 1, date_obj, workbook.add_format({'align': 'center', 'valign': 'vcenter', 'num_format': 'dd/mm/yyyy hh:mm'}))
+                    # Se for datetime do Oracle, converte
+                    elif hasattr(row[1], 'year'):  # Verifica se é um objeto de data
+                        date_obj = datetime(row[1].year, row[1].month, row[1].day, 
+                                          getattr(row[1], 'hour', 0), 
+                                          getattr(row[1], 'minute', 0), 
+                                          getattr(row[1], 'second', 0))
+                        worksheet.write_datetime(cont + 2, 1, date_obj, workbook.add_format({'align': 'center', 'valign': 'vcenter', 'num_format': 'dd/mm/yyyy hh:mm'}))
+                    else:
+                        # Se não conseguir converter, escreve como string
+                        worksheet.write(cont + 2, 1, str(row[1]), workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+                except:
+                    # Em caso de erro na conversão, escreve como string
+                    worksheet.write(cont + 2, 1, str(row[1]), workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            else:
+                worksheet.write(cont + 2, 1, '', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 2, row[2], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 3, row[3], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 4, row[4], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 5, row[5], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 6, row[6], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 7, row[7], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 8, row[8], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            # Corrigindo o tratamento da data de emissão também
+            if row[9]:  # DATA_NOTA emissao
+                try:
+                    if isinstance(row[9], str):
+                        date_obj = datetime.strptime(row[9], '%Y-%m-%d %H:%M:%S')
+                        worksheet.write_datetime(cont + 2, 9, date_obj, workbook.add_format({'align': 'center', 'valign': 'vcenter', 'num_format': 'dd/mm/yyyy'}))
+                    elif hasattr(row[9], 'year'):
+                        date_obj = datetime(row[9].year, row[9].month, row[9].day, 
+                                          getattr(row[9], 'hour', 0), 
+                                          getattr(row[9], 'minute', 0), 
+                                          getattr(row[9], 'second', 0))
+                        worksheet.write_datetime(cont + 2, 9, date_obj, workbook.add_format({'align': 'center', 'valign': 'vcenter', 'num_format': 'dd/mm/yyyy'}))
+                    else:
+                        worksheet.write(cont + 2, 9, str(row[9]), workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+                except:
+                    worksheet.write(cont + 2, 9, str(row[9]), workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            else:
+                worksheet.write(cont + 2, 9, '', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 10, row[10], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            if row[11] and str(row[11]) != "0":
+                worksheet.write(cont + 2, 11, str(row[11]), workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            else:
+                worksheet.write(cont + 2, 11, '', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 12, row[12], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 13, row[13], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            cont += 1
+
+        worksheet.add_table(f'A2:N{cont+2}', {
+            'columns': [
+                {'header': 'COD_PROPOSTA'},
+                {'header': 'DATA_PROPOSTA'},
+                {'header': 'COD_VENDEDOR'},
+                {'header': 'NOME_VENDEDOR'},
+                {'header': 'MODELO'},
+                {'header': 'COR'},
+                {'header': 'ANO_MODELO'},
+                {'header': 'CHASSI_COMPLETO'},
+                {'header': 'EMPRESA'},
+                {'header': 'EMISSAO'},
+                {'header': 'PATIO'},
+                {'header': 'COD_CLIENTE'},
+                {'header': 'NOME_CLIENTE'},
+                {'header': 'NOVO_USADO'}
+            ],
+            'name': 'Estoque_Veiculos',
+            'autofilter': True
+        })
+        worksheet.set_landscape()
+        worksheet.set_paper(9)  # A4
+        worksheet.set_column('A:A', 17.40)
+        worksheet.set_column('B:B', 18.14)
+        worksheet.set_column('C:C', 17.43)
+        worksheet.set_column('D:D', 27.00)
+        worksheet.set_column('E:E', 53.00)
+        worksheet.set_column('F:F', 17.00)
+        worksheet.set_column('G:G', 15.70)
+        worksheet.set_column('H:H', 20.00)
+        worksheet.set_column('I:I', 21.43)
+        worksheet.set_column('J:J', 10.71)
+        worksheet.set_column('K:K', 30.00)
+        worksheet.set_column('L:L', 14.43)
+        worksheet.set_column('M:M', 37.00)
+        worksheet.set_column('N:N', 15.71)
+        worksheet.print_area(f'A1:N{cont+2}')
+        # imprimir em apneas uma pagina na horizontal
+        worksheet.fit_to_pages(1, 0)  # Ajusta para uma página de largura e sem limite de altura
+        
+        workbook.close()
+        file_memory.seek(0)
+        response = Response(file_memory.read(), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response.headers.set('Content-Disposition', 'attachment', filename='estoque_veiculos.xlsx')
+        response.headers.set('Content-Length', str(file_memory.tell()))
+        return response, 200
+
     except Exception as e:
         return jsonify({'message': str(e)}), 400
