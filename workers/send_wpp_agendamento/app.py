@@ -43,8 +43,9 @@ while True:
     conn_chatwoot, cur_chatwoot = chatwoot()
     cur.execute(query)
     rows = cur.fetchall()
+    
     print(rows)
-    if not rows:
+    if len(rows) == 0:
         print("Nenhum registro encontrado.")
         cur.close()
         conn.close()
@@ -85,7 +86,7 @@ while True:
                         and oa.COD_OS_AGENDA = {cod_os_agenda}
                     ORDER BY oa.DATA_AGENDADA desc
             """
-            conn, cur = oracle()
+            # conn, cur = oracle()
             cur.execute(query)
             result = cur.fetchall()
             if len(result) == 0:
@@ -124,6 +125,17 @@ while True:
                     if whatsapp and len(whatsapp) == 11:
                         if whatsapp[2] == '9':
                             telefones.append(whatsapp)
+                    if len(telefones) == 0:
+                        query = f"""
+                            update CAIUAS_LOG_WHATSAPP clw
+                            set clw.STATUS = 'Erro - Telefone não encontrado'
+                            where clw.id_log = {row[0]}
+                        """
+                        cur.execute(query)
+                        conn.commit()
+                        cur.close()
+                        conn.close()
+                        continue
                     telefones = list(set(telefones))
                     telefones = [f"55{telefone}" for telefone in telefones if telefone]
                     
@@ -226,7 +238,7 @@ while True:
                     and oa.COD_OS_AGENDA = {cod_os_agenda}
                 ORDER BY oa.DATA_AGENDADA desc
         """
-        conn, cur = oracle()
+        # conn, cur = oracle()
         conn_chatwoot, cur_chatwoot = chatwoot()
         cur.execute(query)
         result = cur.fetchall()
@@ -259,6 +271,17 @@ while True:
             if whatsapp and len(whatsapp) == 11:
                 if whatsapp[2] == '9':
                     telefones.append(whatsapp)
+            if len(telefones) == 0:
+                query = f"""
+                    update CAIUAS_LOG_WHATSAPP clw
+                    set clw.STATUS = 'Erro - Telefone não encontrado'
+                    where clw.id_log = {row[0]}
+                """
+                cur.execute(query)
+                conn.commit()
+                cur.close()
+                conn.close()
+                continue
             telefones = list(set(telefones))  # Remove duplicates
             telefones = [f"55{telefone}" for telefone in telefones if telefone]
             for telefone in telefones:
@@ -301,9 +324,9 @@ while True:
                 "contact_id": contact_id,
                 "source_id": f"{telefone}",
                 "message": {
-                    "content": f"Confirmamos o agendamento de seu veículo:\n\nModelo: {modelo}\nPlaca: {placa}\nDia: {dia}\nHorário: {hora}\n\nUnidade: Indaiatuba\n\n*Para melhor atende-lo solicitamos que chegue no horário agendado*\n\n•Trazer o manual de garantia;\n•Pedimos a gentileza de retirar todos os pertences pessoais do veículo;\n\nEndereço: Av. Pres. Vargas, 1168 - Centro, Indaiatuba.\n\nA Honda Caiuás agradece a preferência, tenha um excelente dia!",
+                    "content": f"Confirmamos o agendamento de seu veículo:\n\nModelo: {modelo}\nPlaca: {placa}\nDia: {dia}\nHorário: {hora}\n\n*Unidade: Indaiatuba*\n\nPara melhor atende-lo solicitamos que chegue no horário agendado\n\n•Trazer o manual de garantia;\n•Pedimos a gentileza de retirar todos os pertences pessoais do veículo;\n\nEndereço: *Av. Pres. Vargas, 1168 - Centro, Indaiatuba.*\n\n*Obs.:* \nInformamos que na unidade de Indaiatuba não temos serviço de carona, é importante que o senhor(a) se programe quanto ao transporte para voltar para casa/trabalho após deixar o veículo para serviço em nossa oficina e para a retirada do veículo.\n\nA Honda Caiuás agradece a preferência, tenha um excelente dia!",
                     "template_params": {
-                    "name": "confirma_agenda_indaiatuba",
+                    "name": "confirma_agenda_indaiatuba_2",
                     "category": "UTILITY",
                     "language": "pt_BR",
                     "processed_params": {
