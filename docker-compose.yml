@@ -89,4 +89,25 @@ services:
     volumes:
       - ./workers/update_questionario:/app
     command: "python3 app.py"
+
+  worker_pesquisa:
+    build: ./workers/pesquisa
+    container_name: worker_pesquisa
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/pesquisa:/app
+    # command: "python3 app.py"
     
+  worker_cria_pesquisa:
+    build: ./workers/cria_pesquisa
+    container_name: worker_cria_pesquisa
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/cria_pesquisa:/app
+    command: "python3 app.py"
