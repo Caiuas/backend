@@ -111,7 +111,12 @@ def reports_fechamento_agendamento():
 			        LEFT JOIN servicos srv ON srv.cod_servico = oss.cod_servico
 			        WHERE oss.NUMERO_OS = o.NUMERO_OS
 			          AND oss.COD_EMPRESA = o.COD_EMPRESA) servicos,
-                oa.chassi
+                oa.chassi,
+                (SELECT LISTAGG(oar.descricao, ', ') WITHIN GROUP (ORDER BY oar.descricao)
+                FROM OS_AGENDA_RECLAMACAO oar
+                	WHERE 1=1
+                		AND s.COD_OS_AGENDA  = oar.COD_OS_AGENDA 
+			          	AND s.COD_EMPRESA = oar.COD_EMPRESA) reclamacoes
             from os_agenda_servicos s
             LEFT JOIN CRM_EVENTOS ce ON 1=1
                 AND ce.COD_EMPRESA = s.crm_cod_empresa 
@@ -174,7 +179,8 @@ def reports_fechamento_agendamento():
             'servico_express',
             'status_agenda',
             'servicos',
-            'chassi'
+            'chassi',
+            'reclamacoes'
         ])
         agenda_por_responsavel = pd.pivot_table(
             df,
@@ -203,7 +209,8 @@ def reports_fechamento_agendamento():
                 'numero_os', 
                 'nome_completo_consultor', 
                 'servicos',
-                'chassi'
+                'chassi',
+                'reclamacoes'
                 ]]
         df = df.fillna('')
         df['data_comeca'] = pd.to_datetime(df['data_comeca'], errors='coerce')
@@ -258,7 +265,7 @@ def reports_fechamento_agendamento():
         
 
         worksheet = workbook.add_worksheet('Agenda')
-        worksheet.merge_range('A1:L1', 'Agenda', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
+        worksheet.merge_range('A1:M1', 'Agenda', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
         worksheet.write('A2', 'EMP', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('B2', 'COD_OS_AGENDA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('C2', 'NOME_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
@@ -271,6 +278,7 @@ def reports_fechamento_agendamento():
         worksheet.write('J2', 'NUMERO_OS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('K2', 'CONSULTOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('L2', 'SERVIÇOS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('M2', 'RECLAMACOES', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         cont = 0
         for i, row in df.iterrows():
             cont += 1
@@ -289,7 +297,8 @@ def reports_fechamento_agendamento():
             worksheet.write(f'J{cont+2}', row.iloc[9], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'K{cont+2}', row.iloc[10], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'L{cont+2}', row.iloc[11], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-        worksheet.add_table(f'A2:L{cont+2}', {'columns': [{'header': 'COD_EMPRESA'},
+            worksheet.write(f'M{cont+2}', row.iloc[13], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+        worksheet.add_table(f'A2:M{cont+2}', {'columns': [{'header': 'COD_EMPRESA'},
                                                         {'header': 'COD_OS_AGENDA'},
                                                         {'header': 'NOME_CLIENTE'},
                                                         {'header': 'CRM_COD_EVENTO'},
@@ -300,7 +309,9 @@ def reports_fechamento_agendamento():
                                                         {'header': 'DATA'},
                                                         {'header': 'NUMERO_OS'},
                                                         {'header': 'CONSULTOR'},
-                                                        {'header': 'SERVIÇOS'}],
+                                                        {'header': 'SERVIÇOS'},
+                                                        {'header': 'RECLAMAÇÕES'},
+                                                        ],
                                                         'name': 'Agenda',
                                                         'autofilter': True
                                                         })
@@ -318,6 +329,7 @@ def reports_fechamento_agendamento():
         worksheet.set_column('J:J', 14.00)
         worksheet.set_column('K:K', 32.00)
         worksheet.set_column('L:L', 50.00)
+        worksheet.set_column('M:M', 10.00)
         workbook.close()
         # retorna o arquivo
         file_memory.seek(0)
@@ -350,7 +362,7 @@ def reports_pesquisa_satisfacao():
         final_date_str = final_date.strftime('%Y-%m-%d')
         
         query = f"""
-            SELECT ce.cod_evento, e.nome empresa, cet.desc_tipo_evento tipo_evento, c.nome cliente, o.numero_os, eu.NOME_COMPLETO nome_consultor, cp.PERGUNTA, co.OPCAO a
+            SELECT ce.cod_evento, e.nome empresa, cet.desc_tipo_evento tipo_evento, c.nome cliente, o.numero_os, eu.NOME_COMPLETO nome_consultor, cp.PERGUNTA, co.OPCAO a, ce.cod_proposta
             FROM CRM_EVENTOS ce 
             LEFT JOIN EMPRESAS e ON 1=1
                 AND e.COD_EMPRESA = ce.COD_EMPRESA
@@ -372,7 +384,7 @@ def reports_pesquisa_satisfacao():
             LEFT JOIN CRM_OPCOES co ON 1=1
 	            AND co.COD_OPCOES = cr.COD_OPCOES
             WHERE 1=1
-                AND ce.COD_TIPO_EVENTO IN (22,180)
+                AND ce.COD_TIPO_EVENTO IN (22,180,30)
                 AND ce.COD_TIPO_FECHAMENTO = 1
                 --AND ce.cod_evento = 1728505
                 and   trunc(ce.DATA_ENCERRAMENTO) >= trunc(TO_DATE('{initial_date_str}', 'YYYY-MM-DD')) 
@@ -394,7 +406,8 @@ def reports_pesquisa_satisfacao():
             'numero_os',
             'nome_consultor',
             'pergunta',
-            'nota'
+            'nota',
+            'cod_proposta'
         ])
         df = df.fillna('')
         df = df.sort_values(by='cod_evento', ascending=False)
@@ -411,6 +424,7 @@ def reports_pesquisa_satisfacao():
         worksheet.write('F2', 'NOME_CONSULTOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('G2', 'PERGUNTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('H2', 'NOTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('I2', 'COD_PROPOSTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         cont = 0
         cod_evento = None
         usar_amarelo = True
@@ -422,22 +436,24 @@ def reports_pesquisa_satisfacao():
                 cor_celula = '#DCE6F1' if usar_amarelo else '#F2DCDB'
                 usar_amarelo = not usar_amarelo  # Alterna para a próxima vez
                 cod_evento = n_cod_evento
-            worksheet.write(f'A{cont+2}', row.iloc[0], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'B{cont+2}', row.iloc[1], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'C{cont+2}', row.iloc[2], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'D{cont+2}', row.iloc[3], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'E{cont+2}', row.iloc[4], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'F{cont+2}', row.iloc[5], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'G{cont+2}', row.iloc[6], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'H{cont+2}', row.iloc[7], workbook.add_format({'border': 1, 'bg_color': cor_celula, 'font_size': 10, 'valign': 'vcenter'}))
-        worksheet.add_table(f'A2:H{cont+2}', {'columns': [{'header': 'COD_EVENTO'},
+            worksheet.write(f'A{cont+2}', row.iloc[0], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'B{cont+2}', row.iloc[1], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'C{cont+2}', row.iloc[2], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'D{cont+2}', row.iloc[3], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'E{cont+2}', row.iloc[4], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'F{cont+2}', row.iloc[5], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'G{cont+2}', row.iloc[6], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'H{cont+2}', row.iloc[7], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'I{cont+2}', row.iloc[8], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+        worksheet.add_table(f'A2:I{cont+2}', {'columns': [{'header': 'COD_EVENTO'},
                                                         {'header': 'EMPRESA'},
                                                         {'header': 'TIPO_EVENTO'},
                                                         {'header': 'CLIENTE'},
                                                         {'header': 'NUMERO_OS'},
                                                         {'header': 'NOME_CONSULTOR'},
                                                         {'header': 'PERGUNTA'},
-                                                        {'header': 'NOTA'}],
+                                                        {'header': 'NOTA'},
+                                                        {'header': 'COD_PROPOSTA'}],
                                                         'name': 'Pesquisa_Satisfacao',
                                                         'autofilter': True
                                                         })
@@ -451,8 +467,9 @@ def reports_pesquisa_satisfacao():
         worksheet.set_column('F:F', 24.00)
         worksheet.set_column('G:G', 80.00)
         worksheet.set_column('H:H', 8.00)
-        worksheet.print_area(f'A1:H{cont+2}')
-        # imprimir em apneas uma pagina na horizontal
+        worksheet.set_column('I:I', 8.00)
+        worksheet.print_area(f'A1:I{cont+2}')
+        # imprimir em apenas uma pagina na horizontal
         worksheet.fit_to_pages(1, 0)  # Ajusta para uma página de largura e sem limite de altura
         
         workbook.close()
@@ -648,5 +665,144 @@ def reports_estoque():
         response.headers.set('Content-Length', str(file_memory.tell()))
         return response, 200
 
+    except Exception as e:
+        return jsonify({'message': str(e)}), 400
+
+@reports_bp.route('/api/reports/faturamento_veiculos', methods=['GET'])
+def reports_faturamento_veiculos():
+    try:
+        initial_date = request.args.get('initial_date')
+        final_date = request.args.get('final_date')
+        if not initial_date or not final_date:
+            return jsonify({'message': 'Initial and final dates are required.'}), 400
+        
+        try:
+            initial_date = datetime.strptime(initial_date, '%Y-%m-%d')
+            final_date = datetime.strptime(final_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+        
+        if (final_date - initial_date).days > 30:
+            return jsonify({'message': 'Não pode pesquisar mais de 30 dias'}), 400
+        
+        initial_date_str = initial_date.strftime('%Y-%m-%d')
+        final_date_str = final_date.strftime('%Y-%m-%d')
+        
+        query = f"""
+            SELECT 
+                e.NOME nome_empresa,
+                v.COD_PROPOSTA, 
+                v.COD_CLIENTE,
+                c.NOME,
+                v.CHASSI_COMPLETO, 
+                pm.DESCRICAO_MODELO modelo_veiculo,
+                v.DATA_VENDA, 
+                CASE
+                    mhv.status
+                    WHEN 'O' THEN 'Sucesso'
+                    WHEN 'P' THEN 'Pendente'
+                    WHEN 'E' THEN 'Erro'
+                    WHEN 'R' THEN 'Rejeitado'
+                END status_envio_myhonda,
+                MHV.data_atualizacao data_envio_myhonda
+            from veiculos v
+            left join clientes c on 1=1
+                AND c.cod_cliente=v.cod_cliente
+            LEFT JOIN my_honda_mov mhv ON 1=1
+                AND MHV.cod_proposta = v.COD_PROPOSTA
+                AND mhv.COD_EMPRESA = v.COD_EMPRESA
+            LEFT JOIN empresas e ON e.COD_EMPRESA = v.COD_EMPRESA
+            LEFT JOIN PRODUTOS_MODELOS pm ON 1=1	
+                AND pm.COD_PRODUTO = v.COD_PRODUTO 
+                AND pm.COD_MODELO = v.COD_MODELO 
+            WHERE 1=1
+                AND v.STATUS  = 'V'
+                and trunc(v.data_venda) >= TO_DATE('{initial_date_str}', 'YYYY-MM-DD')
+                and (V.data_venda) <= TO_DATE('{final_date_str}', 'YYYY-MM-DD')
+            ORDER BY v.data_venda
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        cur_oracle.close()
+        conn_oracle.close()
+        if len(result) == 0:
+            return jsonify({'message': 'Não tem pesquisa de satisfação no período.'}), 404
+        df = pd.DataFrame(result, columns=[
+            'nome_empresa',
+            'cod_proposta',
+            'cod_cliente',
+            'nome_cliente',
+            'chassi_completo',
+            'modelo_veiculo',
+            'data_venda',
+            'status_envio_myhonda',
+            'data_envio_myhonda'
+        ])
+        df = df.fillna('')
+        
+        
+        file_memory = io.BytesIO()
+        workbook = xlsxwriter.Workbook(file_memory, {'in_memory': True})
+        worksheet = workbook.add_worksheet('Veículos Faturados')
+        worksheet.merge_range('A1:H1', 'Veículos Faturados - Detalhe', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
+        worksheet.write('A2', 'NOME_EMPRESA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('B2', 'COD_PROPOSTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('C2', 'COD_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('D2', 'NOME_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('E2', 'CHASSI_COMPLETO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('F2', 'MODELO_VEICULO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('G2', 'DATA_VENDA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('H2', 'STATUS_ENVIO_MYHONDA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('I2', 'DATA_ENVIO_MYHONDA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        cont = 0
+        
+        for i, row in df.iterrows():
+            cont += 1
+            worksheet.write(f'A{cont+2}', row.iloc[0], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'B{cont+2}', row.iloc[1], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'C{cont+2}', str(row.iloc[2]), workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'D{cont+2}', row.iloc[3], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'E{cont+2}', row.iloc[4], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'F{cont+2}', row.iloc[5], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'G{cont+2}', row.iloc[6], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'H{cont+2}', row.iloc[7], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'I{cont+2}', row.iloc[8], workbook.add_format({'border': 1, 'font_size': 10, 'valign': 'vcenter'}))
+        worksheet.add_table(f'A2:I{cont+2}', {'columns': [{'header': 'NOME_EMPRESA'},
+                                                        {'header': 'COD_PROPOSTA'},
+                                                        {'header': 'COD_CLIENTE'},
+                                                        {'header': 'NOME_CLIENTE'},
+                                                        {'header': 'CHASSI_COMPLETO'},
+                                                        {'header': 'MODELO_VEICULO'},
+                                                        {'header': 'DATA_VENDA'},
+                                                        {'header': 'STATUS_ENVIO_MYHONDA'},
+                                                        {'header': 'DATA_ENVIO_MYHONDA'}],
+                                                        'name': 'veiculos_faturados',
+                                                        'autofilter': True
+                                                        })
+        worksheet.set_landscape()
+        worksheet.set_paper(9)  # A4
+        worksheet.set_column('A:A', 18.43)
+        worksheet.set_column('B:B', 17.14)
+        worksheet.set_column('C:C', 14.43)
+        worksheet.set_column('D:D', 46.71)
+        worksheet.set_column('E:E', 20.00)
+        worksheet.set_column('F:F', 34.00)
+        worksheet.set_column('G:G', 17.00)
+        worksheet.set_column('H:H', 27.29)
+        worksheet.set_column('I:I', 25.29)
+        worksheet.print_area(f'A1:I{cont+2}')
+        # imprimir em apenas uma pagina na horizontal
+        worksheet.fit_to_pages(1, 0)  # Ajusta para uma página de largura e sem limite de altura
+        
+        workbook.close()
+        file_memory.seek(0)
+        response = Response(file_memory.read(), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response.headers.set('Content-Disposition', 'attachment', filename='veiculos_faturados.xlsx')
+        response.headers.set('Content-Length', str(file_memory.tell()))
+        return response, 200
+        
+        
+        
     except Exception as e:
         return jsonify({'message': str(e)}), 400
