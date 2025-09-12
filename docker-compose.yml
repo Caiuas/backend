@@ -111,3 +111,14 @@ services:
     volumes:
       - ./workers/cria_pesquisa:/app
     command: "python3 app.py"
+
+  worker_update_fechamento_crm:
+    build: ./workers/update_fechamento_crm
+    container_name: worker_update_fechamento_crm
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/update_fechamento_crm:/app
+    command: "python3 app.py"
