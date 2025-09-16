@@ -1,43 +1,121 @@
 
 import streamlit as st
 import plotly.express as px
-from database import oracle
-from datetime import datetime
+from database import oracle, chatwoot
+from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 import unicodedata
 import io
 import xlsxwriter
+import extra_streamlit_components as stx
+import os
+import bcrypt
+import pytz
+import jwt
 
-# def login():
-#     st.title("Login")
-#     username = st.text_input("Usuário")
-#     password = st.text_input("Senha", type="password")
-#     if st.button("Entrar"):
-#         if username == "admin" and password == "1234":
-#             st.session_state["logged_in"] = True
-#         else:
-#             st.error("Usuário ou senha inválidos")
+BRAZIL_TZ = pytz.timezone('America/Sao_Paulo')  # UTC-3
 
-def login():
-    st.title("Login")
-    username = st.text_input("Usuário")
-    password = st.text_input("Senha", type="password")
-    if st.button("Entrar"):
-        if username == "admin" and password == "1234":
-            st.session_state["logged_in"] = True
-        else:
-            st.error("Usuário ou senha inválidos")
-
-# if "logged_in" not in st.session_state or not st.session_state["logged_in"]:
-#     login()
-#     st.stop()
-    
+def get_brazil_now():
+    """Retorna datetime atual no timezone do Brasil"""
+    return datetime.now(BRAZIL_TZ)    
 st.set_page_config(
     page_title="BI - Caiuás",
     page_icon="📊",
     layout="wide"
 )
+
+def check_password(plain_password, hashed_password):
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+
+# @st.cache(allow_output_mutation=True)
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookies = get_cookie_manager()
+
+if 'logged_in' not in st.session_state:
+    # Tenta recuperar o estado do login a partir do cookie
+    cookie_value = cookies.get('caiuas_bi_auth_token')
+    if cookie_value is not None:
+        # Em um app real, você validaria este token
+        if cookie_value == "logged_in_user_token_value":
+            st.session_state['logged_in'] = True
+        else:
+            st.session_state['logged_in'] = False
+    else:
+        st.session_state['logged_in'] = False
+
+def login(message):
+    """Exibe o formulário de login."""
+    st.title("Login")
+    if message != None:
+        st.error(message)
+    with st.form("login_form"):
+        username = st.text_input("Usuário")
+        password = st.text_input("Senha", type="password")
+        submitted = st.form_submit_button("Entrar")
+        if submitted:
+            query = f"""
+                select name,encrypted_password 
+                from users
+                where 1=1
+                    and lower(email) = '{str(username).lower()}'
+            """
+            conn_chatwoot, cur_chatwoot = chatwoot()
+            cur_chatwoot.execute(query)
+            user = cur_chatwoot.fetchone()
+            cur_chatwoot.close()
+            
+            # Verifica se o usuário foi encontrado
+            if user is None:
+                st.session_state['login_error'] = "Usuário ou senha inválidos"
+                st.rerun()
+                return
+                
+            if check_password(password, user[1]):
+                now_brazil = get_brazil_now()
+                exp_time = now_brazil + timedelta(days=1)
+                payload = {
+                        # "email": email,
+                        "name": username,
+                        'exp': int(exp_time.timestamp()),
+                        'iat': int(now_brazil.timestamp()),
+                        'nbf': int(now_brazil.timestamp()),
+                        'iss': os.environ.get('APP_URL'),
+                    }
+                token = jwt.encode(payload, os.environ.get('SECRET_KEY_BASE'), algorithm='HS256')
+                # <-- NOVO: Define o cookie
+                cookies.set('token', token, expires_at=datetime.now() + timedelta(days=1))                
+               
+                st.session_state['logged_in'] = True
+                # Limpa qualquer erro de login anterior
+                if 'login_error' in st.session_state:
+                    del st.session_state['login_error']
+                st.rerun()
+            else:
+                st.session_state['login_error'] = "Usuário ou senha inválidos"
+                st.rerun()
+
+def logout():
+    """Função para fazer logout."""
+    # <-- NOVO: Deleta o cookie
+    cookies.delete('token')
+    # Deleta o estado da sessão
+    if 'logged_in' in st.session_state:
+        del st.session_state['logged_in']
+    st.rerun()
+
+token = cookies.get('caiuas_bi_auth_token')
+
+if not st.session_state.get("logged_in", False):
+# if 
+    # remove cookies e redireciona para pagina de login
+    # cookies.delete('caiuas_bi_auth_token')
+    login(None)
+    st.stop()
+
+# st.sidebar.button("Sair", on_click=logout)
 
 menu = st.sidebar.radio(
     "Menu",
