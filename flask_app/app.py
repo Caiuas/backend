@@ -2,6 +2,8 @@ from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 import os
 import jaydebeapi
+from datetime import datetime, timedelta, timezone
+from functools import wraps
 from dotenv import load_dotenv
 from views.api.clients import clients_bp
 from views.api.reports import reports_bp
@@ -27,3 +29,41 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(crm_bp)
 app.register_blueprint(veiculos_estoque_bp)
 app.register_blueprint(users_bp)
+
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            token_parts = auth_header.split(' ')
+            
+            if len(token_parts) == 2 and token_parts[0] == 'Bearer':
+                token = token_parts[1]
+
+        if not token:
+            return jsonify({'message': 'Usuário não autenticado!'}), 401
+
+        try:
+            fuso_horario_offset = timedelta(hours=-3)
+            fuso_horario = timezone(fuso_horario_offset)
+            token = jwt.decode(token, os.getenv('SECRET_KEY'), algorithms=["HS256"])
+            # print(token)
+            data_expiracao = datetime.fromtimestamp(token['exp'])
+            agora = datetime.now(fuso_horario).timestamp()
+            agora = datetime.fromtimestamp(agora)
+            agora = agora.strftime('%Y-%m-%d %H:%M:%S %Z')
+            if float(token['exp']) < (datetime.now(fuso_horario).timestamp()):
+                return jsonify({'message': 'Token expirado!'}), 401
+        except Exception as e:
+            # print(e)
+            return jsonify({f"message": 'Token Inválido!'}), 401
+
+        setattr(request, 'token_data', token)  # Adiciona os dados decodificados ao objeto request
+
+        return f(*args, **kwargs)
+
+    return decorated
+
