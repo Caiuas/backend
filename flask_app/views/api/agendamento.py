@@ -2,6 +2,8 @@ from flask import Blueprint, jsonify, request
 from database import oracle, chatwoot
 from dotenv import load_dotenv
 from datetime import datetime
+import os
+import jwt
 load_dotenv()
 
 agendamento_bp = Blueprint('agendamento', __name__)
@@ -292,6 +294,84 @@ def muda_consultor():
         retorno['message'] = 'Consultant updated successfully'
         
         return jsonify(data), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@agendamento_bp.route('/api/agenda/muda_agendador', methods=['POST'])
+def muda_agendador():
+    try:
+        data = request.get_json()
+        cod_empresa = data.get('cod_empresa')
+        cod_os_agenda = data.get('cod_os_agenda')
+        responsavel_pelo_evento = data.get('responsavel_pelo_evento')
+        token = data.get('token')
+        
+        decoded = jwt.decode(token, os.environ.get('SECRET_KEY_BASE'), algorithms=['HS256'], options={"require": ["exp", "iat", "nbf" ]})
+        
+        if decoded['email'] not in ['pablo.ti@caiuas.com.br','angela.venancio@caiuas.com.br']:
+            return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+        
+        # with open('token.txt', 'w') as file:
+        #     file.write(token)
+        empresas = [11,33]
+        if not cod_empresa or not cod_os_agenda or not responsavel_pelo_evento:
+            return jsonify({'status': 'error', 'message': 'Missing required parameters: cod_empresa, cod_os_agenda, and responsavel_pelo_evento'}), 400
+        
+        if cod_empresa is None or cod_os_agenda is None or responsavel_pelo_evento is None:
+            return jsonify({'status': 'error', 'message': 'Missing required parameters: cod_empresa, cod_os_agenda, and responsavel_pelo_evento'}), 400
+        
+        # if not isinstance(cod_empresa, int) or not isinstance(cod_os_agenda, int):
+        #     return jsonify({'status': 'error', 'message': 'cod_empresa and cod_os_agenda must be numbers'}), 400
+        try:
+            cod_empresa = int(cod_empresa)
+            cod_os_agenda = int(cod_os_agenda)
+        except ValueError:
+            return jsonify({'status': 'error', 'message': 'cod_empresa and cod_os_agenda must be numbers'}), 400
+        if cod_empresa not in empresas:
+            return jsonify({'status': 'error', 'message': 'Invalid company code. Only 11 and 33 are allowed.'}), 400
+        query = f"""
+            select count(*) from EMPRESAS_USUARIOS eu
+            where 1=1
+                and eu.cod_empresa = {cod_empresa}
+                and eu.nome = '{responsavel_pelo_evento}'
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchone()
+        if len(result) == 0 or result[0] == 0:
+            return jsonify({'status': 'error', 'message': 'Responsável pelo evento não encontrado ou não atende essa empresa'}), 404
+        query = f"""
+            select CRM_COD_EVENTO from os_agenda oa
+            where 1=1
+                and oa.cod_empresa = {cod_empresa}
+                and oa.cod_os_agenda = {cod_os_agenda}
+        """
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        if len(result) == 0:
+            return jsonify({'status': 'error', 'message': 'Agendamento não encontrado'}), 404
+        CRM_COD_EVENTO = result[0][0]
+        if CRM_COD_EVENTO is None:
+            return jsonify({'status': 'error', 'message': 'Agendamento não possui evento CRM associado'}), 400
+        
+        query = f"""
+            UPDATE os_agenda 
+            set quem_abriu = '{responsavel_pelo_evento}', quem_confirmou = '{responsavel_pelo_evento}'
+            WHERE cod_empresa = {cod_empresa}
+            AND cod_os_agenda = {cod_os_agenda}
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            UPDATE CRM_EVENTOS
+                set RESPONSAVEL_PELO_EVENTO = '{responsavel_pelo_evento}'
+            WHERE COD_EMPRESA = {cod_empresa}
+            AND COD_EVENTO = {CRM_COD_EVENTO}
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify({'status': 'success', 'message': 'Agendador atualizado com sucesso'}), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
