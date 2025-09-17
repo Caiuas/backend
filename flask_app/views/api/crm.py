@@ -58,8 +58,6 @@ def processar_obs_memo(obs_memo):
     
     return observacoes
 
-
-
 @crm_bp.route('/api/eventos_atrasados', methods=['GET'])
 def get_eventos_atrasados():
     try:
@@ -127,24 +125,70 @@ def get_crm_andamentos():
 def list_crm_eventos_showroom():
     try:
         now = datetime.now().strftime("%Y-%m-%d")
-        list_status = ['P','E','D','V']
+        list_status = ['P','E','D','V','A','R']
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
-        status = request.args.get('status', 'P').upper()
-        initial_date = request.args.get('initial_date', now)
-        final_date = request.args.get('final_date', now)
+        status = request.args.get('status', None)
+        initial_date = request.args.get('initial_date', None)
+        final_date = request.args.get('final_date', None)
         current_page = int(request.args.get('current_page', 1))
+        search = request.args.get('search', None)
         limit = int(request.args.get('limit', 10))
         retorno = {}
-        status = status.split(',')
-        for s in status:
-            if s not in list_status:
-                return jsonify({'status': 'error', 'message': f'Status inválido: {s}'}), 400
-        status = "','".join(status)
-        status = f"('{status}')"
-        status = status.replace("''","'")
-        status = status.replace("'(","(")
-        status = status.replace(")'",")")
+        
+        
+        
+        filter_initial_date = ''
+        filter_final_date = ''
+        if initial_date:
+            try:
+                datetime.strptime(initial_date, '%Y-%m-%d')
+                filter_initial_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD') "
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data inicial inválida. Use o formato YYYY-MM-DD'}), 400
+        
+        if final_date:
+            try:
+                datetime.strptime(final_date, '%Y-%m-%d')
+                filter_final_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')"
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data final inválida. Use o formato YYYY-MM-DD'}), 400
+        
+        
+        filter_status = ''
+        if status:
+            status = status.split(',')
+            for s in status:
+                if s not in list_status:
+                    return jsonify({'status': 'error', 'message': f'Status inválido: {s}'}), 400
+            status = "','".join(status)
+            status = f"('{status}')"
+            status = status.replace("''","'")
+            status = status.replace("'(","(")
+            status = status.replace(")'",")")
+            filter_status = f" AND ce.status in {status}"
+        
+        if search:
+            search = search.replace("'", "''").lower()
+            filter_search = f"""
+                AND (
+                    LOWER(ce.RESPONSAVEL_PELO_EVENTO) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.NOME_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(c.NOME) LIKE '%{search.lower()}%'
+                    OR LOWER(c.EMAIL_NFE) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.EMAIL_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.FONE_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_CEL,c.TELEFONE_CEL)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_RES,c.TELEFONE_RES)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_COM,c.TELEFONE_COM)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_FAX,c.TELEFONE_FAX)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST)) LIKE '%{search.lower()}%'
+                    OR LOWER(pm.DESCRICAO_MODELO) LIKE '%{search.lower()}%'
+                    OR TO_CHAR(ce.COD_EVENTO) = '{search}'
+                )
+            """
+        
+        
         
         query = f"""
             SELECT saf.COD_ACESSO 
@@ -163,7 +207,7 @@ def list_crm_eventos_showroom():
         filter_responsavel = ''
         if len(rows) == 0:
             filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
-        filter_status = f" AND ce.status in {status}"
+        
         query = f"""
                 SELECT
                     count(*)
@@ -193,8 +237,11 @@ def list_crm_eventos_showroom():
                     AND ce.COD_TIPO_EVENTO IN (785)
                     {filter_responsavel}
                     {filter_status}
-                    AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
-                    AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
+                    {filter_search if search else ''}
+                    {filter_initial_date}
+                    {filter_final_date}
+                    --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
+                    --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
         """
         # return query
         cur_oracle.execute(query)
@@ -241,7 +288,11 @@ def list_crm_eventos_showroom():
                         cd.descricao_descarte,
                         ce.RESPONSAVEL_PELO_EVENTO,
                         eu.NOME_COMPLETO RESPONSAVEL_NOME_COMPLETO,
-                        pm.descricao_modelo
+                        pm.descricao_modelo,
+                        concat(c.PREFIXO_RES,c.TELEFONE_RES) tel_residencial,
+                        concat(c.PREFIXO_COM,c.TELEFONE_COM) tel_comercial,
+                        concat(c.PREFIXO_FAX,c.TELEFONE_FAX) tel_fax,
+                        concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
@@ -257,8 +308,11 @@ def list_crm_eventos_showroom():
                         AND ce.COD_TIPO_EVENTO IN (785)
                         {filter_responsavel}
                         {filter_status}
-                        AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
-                        AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
+                        {filter_search if search else ''}
+                        {filter_initial_date}
+                        {filter_final_date}
+                        --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
+                        --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
                     ORDER BY
                         3 DESC
                 ) t
@@ -309,7 +363,11 @@ def list_crm_eventos_showroom():
                 'descricao_descarte': row[16],
                 'responsavel_pelo_evento': row[17],
                 'responsavel_nome_completo': row[18],
-                'descricao_modelo': row[19]
+                'descricao_modelo': row[19],
+                'tel_residencial': row[20],
+                'tel_comercial': row[21],
+                'tel_fax': row[22],
+                'tel_whatsapp': row[23]
             })
         cur_oracle.close()
         conn_oracle.close()
