@@ -301,7 +301,9 @@ def list_crm_eventos_showroom():
                         concat(c.PREFIXO_RES,c.TELEFONE_RES) tel_residencial,
                         concat(c.PREFIXO_COM,c.TELEFONE_COM) tel_comercial,
                         concat(c.PREFIXO_FAX,c.TELEFONE_FAX) tel_fax,
-                        concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp
+                        concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp,
+                        ce.data_agendada,
+                        ce.data_visita
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
@@ -323,7 +325,7 @@ def list_crm_eventos_showroom():
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
                     ORDER BY
-                        4
+                        3
                 ) t
             )
             WHERE
@@ -350,6 +352,18 @@ def list_crm_eventos_showroom():
                     data_contato_iso = data_contato_obj.isoformat()
                 except:
                     data_contato_iso = row[2]  # fallback para string original
+            if row[24]:  # data_agendada
+                try:
+                    data_agendada_obj = datetime.strptime(row[24], '%Y-%m-%d %H:%M:%S')
+                    data_agendada_iso = data_agendada_obj.isoformat()
+                except:
+                    data_agendada_iso = row[24]  # fallback para string original
+            if row[25]:  # data_visita
+                try:
+                    data_visita_obj = datetime.strptime(row[25], '%Y-%m-%d %H:%M:%S')
+                    data_visita_iso = data_visita_obj.isoformat()
+                except:
+                    data_visita_iso = row[25]  # fallback para string original
             obs_memo_processado = processar_obs_memo(row[14])
 
             retorno['eventos'].append({  
@@ -376,7 +390,9 @@ def list_crm_eventos_showroom():
                 'tel_residencial': row[20],
                 'tel_comercial': row[21],
                 'tel_fax': row[22],
-                'tel_whatsapp': row[23]
+                'tel_whatsapp': row[23],
+                'data_agendada': data_agendada_iso if row[24] else None,
+                'data_visita': data_visita_iso if row[25] else None
             })
         cur_oracle.close()
         conn_oracle.close()
@@ -455,7 +471,11 @@ def show_crm_eventos_showroom(id_evento):
                         concat(c.PREFIXO_RES,c.TELEFONE_RES) tel_residencial,
                         concat(c.PREFIXO_COM,c.TELEFONE_COM) tel_comercial,
                         concat(c.PREFIXO_FAX,c.TELEFONE_FAX) tel_fax,
-                        concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp
+                        concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp,
+                        ce.COD_MIDIA,
+                        m.DESCRICAO,
+                        ce.data_agendada,
+                        ce.data_visita
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
@@ -474,7 +494,7 @@ def show_crm_eventos_showroom(id_evento):
         query += f" AND ce.COD_EMPRESA = {cod_empresa} AND ce.COD_EVENTO = {cod_evento} "
         cur_oracle.execute(query)
         row = cur_oracle.fetchall()
-        retorno
+        
         if len(row) == 0:
             return jsonify({'status': 'error', 'message': 'Evento não encontrado ou você não tem permissão para acessá-lo'}), 404
         row = row[0]
@@ -491,6 +511,18 @@ def show_crm_eventos_showroom(id_evento):
                 data_contato_iso = data_contato_obj.isoformat()
             except:
                 data_contato_iso = row[2]  # fallback para string original
+        if row[26]:  # data_agendada
+            try:
+                data_agendada_obj = datetime.strptime(row[26], '%Y-%m-%d %H:%M:%S')
+                data_agendada_iso = data_agendada_obj.isoformat()
+            except:
+                data_agendada_iso = row[26]  # fallback para string original
+        if row[27]:  # data_visita
+            try:
+                data_visita_obj = datetime.strptime(row[27], '%Y-%m-%d %H:%M:%S')
+                data_visita_iso = data_visita_obj.isoformat()
+            except:
+                data_visita_iso = row[27]  # fallback para string original
         obs_memo_processado = processar_obs_memo(row[14])
 
         retorno = {  
@@ -508,7 +540,7 @@ def show_crm_eventos_showroom(id_evento):
             'email_cliente_avulso': row[11],
             'email_nfe': row[12],
             'termometro': row[13],
-            'obs_memo': obs_memo_processado,
+            'obs_memo': row[14],
             'motivo_perda': row[15],
             'descricao_descarte': row[16],
             'responsavel_pelo_evento': row[17],
@@ -517,9 +549,209 @@ def show_crm_eventos_showroom(id_evento):
             'tel_residencial': row[20],
             'tel_comercial': row[21],
             'tel_fax': row[22],
-            'tel_whatsapp': row[23]
+            'tel_whatsapp': row[23],
+            'cod_midia': row[24],
+            'desc_midia': row[25],
+            'data_agendada': data_agendada_iso if row[26] else None,
+            'data_visita': data_visita_iso if row[27] else None,
         }
+        query = f"""
+            SELECT
+                ca.COD_ACAO,
+                ca.RESPONSAVEL,
+                ca.quem_criou,
+                ca."DATA",
+                cat.desc_tipo_acao,
+                ca.OBSERVACAO,
+                ca.STATUS
+            FROM
+                CRM_ACOES ca
+            LEFT JOIN crm_acoes_tipo cat ON
+                1 = 1
+                AND cat.tipo_acao = ca.TIPO_ACAO
+            WHERE 1=1
+                AND ca.COD_EMPRESA = {cod_empresa}
+                AND ca.COD_EVENTO = {cod_evento}
+            ORDER BY
+                DATA desc
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        retorno['acoes'] = []
+        for row in rows:
+            if row[3]:  # data
+                try:
+                    data_obj = datetime.strptime(row[3], '%Y-%m-%d %H:%M:%S')
+                    data_iso = data_obj.isoformat()
+                except:
+                    data_iso = row[3]  # fallback para string original
+            retorno['acoes'].append({
+                'cod_acao': row[0],
+                'responsavel': row[1],
+                'quem_criou': row[2],
+                'data': data_iso,
+                'desc_tipo_acao': row[4],
+                'observacao': row[5],
+                'status': row[6]
+            })
+        cur_oracle.close()
+        conn_oracle.close()
         return jsonify(retorno), 200
     except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+@crm_bp.route('/api/crm/eventos_showroom/<int:id_evento>', methods=['DELETE'])
+@token_required
+def delete_crm_eventos_showroom(id_evento):
+    try:
+        retorno = {}
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+        
+        if email != 'pablo.ti@caiuas.com.br':
+            return jsonify({'status': 'error', 'message': 'Apenas o usuário pablo.ti@caiuas.com.br pode deletar eventos'}), 403
+        
+        conn_oracle, cur_oracle = oracle()
+        
+        query = f"""
+            select count(*)
+            from crm_eventos ce
+            where 1=1
+                and ce.cod_empresa = {cod_empresa}
+                and ce.cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        query = f"""
+            update OS_AGENDA_SERVICOS_CANC 
+            set CRM_COD_EVENTO = null,
+            CRM_COD_EMPRESA = null
+            where CRM_COD_EMPRESA = {cod_empresa}
+            and CRM_COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            update OS_AGENDA_SERVICOS_CANC 
+            set CRM_COD_EVENTO = null,
+            CRM_COD_EMPRESA = null
+            where COD_EMPRESA = {cod_empresa}
+            and CRM_COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            update OS_AGENDA_CANC 
+            set CRM_COD_EVENTO = null,
+            CRM_COD_EMPRESA = null
+            where CRM_COD_EMPRESA = {cod_empresa}
+            and CRM_COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            update OS_AGENDA_CANC 
+            set CRM_COD_EVENTO = null,
+            CRM_COD_EMPRESA = null
+            where COD_EMPRESA = {cod_empresa}
+            and CRM_COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            update OS_AGENDA_SERVICOS 
+            set CRM_COD_EVENTO = null,
+            CRM_COD_EMPRESA = null
+            where CRM_COD_EMPRESA = {cod_empresa}
+            and CRM_COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            update OS_AGENDA_SERVICOS 
+            set CRM_COD_EVENTO = null,
+            CRM_COD_EMPRESA = null
+            where COD_EMPRESA = {cod_empresa}
+            and CRM_COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            update OS_AGENDA 
+            set CRM_COD_EVENTO = null,
+            CRM_COD_EMPRESA = null
+            where CRM_COD_EMPRESA = {cod_empresa}
+            and CRM_COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            update OS_AGENDA 
+            set CRM_COD_EVENTO = null,
+            CRM_COD_EMPRESA = null
+            where COD_EMPRESA = {cod_empresa}
+            and CRM_COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            update ORC_MAPA 
+            set COD_EVENTO = null
+            where COD_EMPRESA = {cod_empresa}
+            and COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            delete from CRM_EVENTO_LOG
+            where COD_EMPRESA = {cod_empresa}
+            and COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            delete from CRM_RESPOSTAS
+            where COD_EMPRESA = {cod_empresa}
+            and COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            delete from CRM_ACOES
+            where COD_EMPRESA = {cod_empresa}
+            and COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            delete from CRM_EVENTOS
+            where COD_EMPRESA = {cod_empresa}
+            and COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        
+        retorno['status'] = 'success'
+        retorno['message'] = f'Evento {cod_empresa}{cod_evento} deletado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            conn_oracle.rollback()
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
