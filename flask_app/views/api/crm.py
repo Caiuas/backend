@@ -755,3 +755,108 @@ def delete_crm_eventos_showroom(id_evento):
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
+@crm_bp.route('/api/crm/eventos_showroom/param_create', methods=['GET'])
+@token_required
+def get_param_create_crm_eventos_showroom():
+    try:
+        retorno = {}
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        conn_oracle, cur_oracle = oracle()
+
+        # checar acesso
+        query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80307'
+            GROUP BY saf.COD_ACESSO
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Você não tem permissão para criar eventos showroom - 80307'}), 403
+        
+         # pegar andamentos
+
+        query = f"""
+            SELECT COD_ANDAMENTO, ANDAMENTO
+            FROM CRM_ANDAMENTO ca WHERE ativo = 'S'
+        """
+        cur_oracle.execute(query)
+        andamentos = cur_oracle.fetchall()
+        if len(andamentos) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não tem andamentos cadastrados'}), 400
+        retorno['andamentos'] = []
+        for row in andamentos:
+            retorno['andamentos'].append({
+                'cod_andamento': row[0],
+                'andamento': row[1]
+            })
+        
+        query = f"""
+            SELECT e.nome, eu.nome, eu.NOME_COMPLETO, eu.EMAIL 
+            FROM EMPRESAS_USUARIOS eu
+            LEFT JOIN empresas e ON 1=1
+                AND e.COD_EMPRESA = eu.COD_EMPRESA 
+            WHERE DEMITIDO <> 'S'
+            AND COD_FUNCAO <> 2
+            AND eu.email IS NOT NULL
+        """
+        cur_oracle.execute(query)
+        usuarios = cur_oracle.fetchall()
+        if len(usuarios) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não tem usuários cadastrados'}), 400
+        retorno['usuarios'] = []
+        for row in usuarios:
+            retorno['usuarios'].append({
+                'empresa': row[0],
+                'nome_usuario': row[1],
+                'nome_completo': row[2],
+                'email': row[3]
+            })
+        
+        query = f"""
+                SELECT * FROM CRM_EVENTOS_TIPO cet 
+                WHERE cod_area IN (124, 146)
+                AND ativo = 'S'
+                AND COD_QUESTIONARIO IS null
+        """
+        cur_oracle.execute(query)
+        tipos_evento = cur_oracle.fetchall()
+        if len(tipos_evento) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não tem tipos de evento cadastrados'}), 400
+        retorno['tipos_evento'] = []
+        for row in tipos_evento:
+            retorno['tipos_evento'].append({
+                'cod_tipo_evento': row[0],
+                'desc_tipo_evento': row[1],
+                'cod_grupo': row[2],
+                'cod_area': row[3],
+                'requer_produto': row[4],
+                'requer_modelo': row[5],
+                'ativo': row[6]
+            })
+        cur_oracle.close()
+        conn_oracle.close()
+        
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 500
