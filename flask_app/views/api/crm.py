@@ -1214,3 +1214,139 @@ def crm_eventos_showroom_remarca_contato(id_evento):
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
+@crm_bp.route('/api/crm/eventos_showroom/update_observacao/<int:id_evento>', methods=['POST'])
+@token_required
+def crm_eventos_showroom_update_observacao(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        data = request.get_json()
+        # nova_data_hora = data.get('nova_data_hora', None)
+        observacao = data.get('observacao', None)
+        if not observacao or observacao.strip() == '':
+            obs_value = 'NULL'
+        else:
+            # Escapar aspas simples duplicando-as
+            observacao_escaped = observacao.replace("'", "''")
+            obs_value = f"'{observacao_escaped}'"
+        # if not nova_data_hora:
+        #     return jsonify({'status': 'error', 'message': 'Nova data/hora é obrigatória'}), 400
+        # try:
+        #     nova_data_hora_obj = datetime.fromisoformat(nova_data_hora)
+        #     nova_data_hora_str = nova_data_hora_obj.strftime('%Y-%m-%d %H:%M:%S')
+        # except:
+        #     return jsonify({'status': 'error', 'message': 'Formato da nova data/hora inválido. Use ISO 8601'}), 400
+
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+
+        conn_oracle, cur_oracle = oracle()
+        
+        query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        
+        query = f"""
+            select data_criacao
+            from crm_eventos ce
+            where 1=1
+                and ce.cod_empresa = {cod_empresa}
+                and ce.cod_evento = {cod_evento}
+                {filter_responsavel}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+
+        if len(row) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        # if isinstance(row[0], datetime):
+        #     data_criacao_str = row[0].strftime('%Y-%m-%d %H:%M:%S')
+        # else:
+        #     data_criacao_str = str(row[0])
+
+        # if nova_data_hora_str < data_criacao_str:
+        #     cur_oracle.close()
+        #     conn_oracle.close()
+        #     return jsonify({'status': 'error', 'message': 'A nova data/hora do contato não pode ser anterior à data/hora de criação do evento'}), 400
+        
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_remarcou = rows[0][1]
+        
+        query = f"""
+            update crm_eventos
+            set OBS_memo = {obs_value}
+            where cod_empresa = {cod_empresa}
+            and cod_evento = {cod_evento}
+        """
+        # query = query.replace("''", "'")
+        # return query
+        cur_oracle.execute(query)
+        
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_remarcou}',
+                4,
+                SYSDATE,
+                'Observação atualizada por: {quem_remarcou}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_remarcou}'
+            )
+        """
+        cur_oracle.execute(query)
+
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+
+        retorno = {}
+        retorno['status'] = 'success'
+        retorno['message'] = f'Observação do evento {cod_empresa}{cod_evento} atualizada com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            conn_oracle.rollback()
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    
