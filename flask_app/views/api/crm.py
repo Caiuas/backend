@@ -303,7 +303,25 @@ def list_crm_eventos_showroom():
                         concat(c.PREFIXO_FAX,c.TELEFONE_FAX) tel_fax,
                         concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp,
                         ce.data_agendada,
-                        ce.data_visita
+                        ce.data_visita,
+                        CASE
+			                -- Se a data/hora do contato for anterior a data/hora atual, está ATRASADO
+			                WHEN (
+			                    CASE
+			                        WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+			                        ELSE ce.data_novo_contato
+			                    END
+			                ) < SYSDATE THEN 'ATRASADO'
+			                -- Se a data do contato (ignorando a hora) for maior que a data de hoje, é Futuro
+			                WHEN TRUNC(
+			                    CASE
+			                        WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+			                        ELSE ce.data_novo_contato
+			                    END
+			                ) > TRUNC(SYSDATE) THEN 'FUTURO'
+			                -- Caso contrário, é para hoje (de agora até o fim do dia)
+			                ELSE 'TRABALHANDO'
+			            END AS status_atendimento
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
@@ -392,7 +410,8 @@ def list_crm_eventos_showroom():
                 'tel_fax': row[22],
                 'tel_whatsapp': row[23],
                 'data_agendada': data_agendada_iso if row[24] else None,
-                'data_visita': data_visita_iso if row[25] else None
+                'data_visita': data_visita_iso if row[25] else None,
+                'status_atendimento': row[26]
             })
         cur_oracle.close()
         conn_oracle.close()
@@ -475,7 +494,25 @@ def show_crm_eventos_showroom(id_evento):
                         ce.COD_MIDIA,
                         m.DESCRICAO,
                         ce.data_agendada,
-                        ce.data_visita
+                        ce.data_visita,
+                        CASE
+			                -- Se a data/hora do contato for anterior a data/hora atual, está ATRASADO
+			                WHEN (
+			                    CASE
+			                        WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+			                        ELSE ce.data_novo_contato
+			                    END
+			                ) < SYSDATE THEN 'ATRASADO'
+			                -- Se a data do contato (ignorando a hora) for maior que a data de hoje, é Futuro
+			                WHEN TRUNC(
+			                    CASE
+			                        WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+			                        ELSE ce.data_novo_contato
+			                    END
+			                ) > TRUNC(SYSDATE) THEN 'FUTURO'
+			                -- Caso contrário, é para hoje (de agora até o fim do dia)
+			                ELSE 'TRABALHANDO'
+			            END AS status_atendimento
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
@@ -554,6 +591,7 @@ def show_crm_eventos_showroom(id_evento):
             'desc_midia': row[25],
             'data_agendada': data_agendada_iso if row[26] else None,
             'data_visita': data_visita_iso if row[27] else None,
+            'status_atendimento': row[28]
         }
         query = f"""
             SELECT
@@ -849,6 +887,44 @@ def get_param_create_crm_eventos_showroom():
                 'requer_modelo': row[5],
                 'ativo': row[6]
             })
+        query = f"""
+            SELECT pm.DESCRICAO_MODELO, pm.COD_PRODUTO, pm.COD_MODELO 
+            FROM PRODUTOS_MODELOS pm
+            WHERE 1=1
+                AND pm.ATIVO = 'S'
+        """
+        cur_oracle.execute(query)
+        produtos_modelos = cur_oracle.fetchall()
+        if len(produtos_modelos) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não tem produtos/modelos cadastrados'}), 400
+        retorno['produtos_modelos'] = []
+        for row in produtos_modelos:
+            retorno['produtos_modelos'].append({
+                'descricao_modelo': row[0],
+                'cod_produto': row[1],
+                'cod_modelo': row[2]
+            })
+        
+        query = f"""
+            SELECT COD_MIDIA, DESCRICAO 
+            FROM MIDIA m 
+            WHERE ativo = 'S'
+        """
+        cur_oracle.execute(query)
+        midias = cur_oracle.fetchall()
+        if len(midias) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não tem mídias cadastradas'}), 400
+        retorno['midias'] = []
+        for row in midias:
+            retorno['midias'].append({
+                'cod_midia': row[0],
+                'descricao': row[1]
+            })
+
         cur_oracle.close()
         conn_oracle.close()
         
@@ -859,4 +935,150 @@ def get_param_create_crm_eventos_showroom():
             conn_oracle.close()
         except:
             pass
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos_showroom', methods=['POST'])
+@token_required
+def create_crm_eventos_showroom():
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        data = request.get_json()
+        cod_tipo_evento = data.get('cod_tipo_evento', None)
+        cod_andamento = data.get('cod_andamento', None)
+        responsavel_pelo_evento = data.get('responsavel', None)
+        cod_cliente = data.get('cod_cliente', None)
+        nome_cliente_avulso = data.get('nome_cliente', None)
+        fone_cliente_avulso = data.get('telefone', None)
+        email_cliente_avulso = data.get('email', None)
+        cod_produto = data.get('cod_produto', None)
+        cod_modelo = data.get('cod_modelo', None)
+        cod_midia = data.get('cod_midia', None)
+        obsercacao = data.get('observacao', None)
+        cod_modelo = int(cod_modelo) if cod_modelo and str(cod_modelo).isdigit() else None
+
+        conn_oracle, cur_oracle = oracle()
+        if not cod_tipo_evento:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Tipo do evento é obrigatório'}), 400
+        if not cod_andamento:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Andamento é obrigatório'}), 400
+        if not responsavel_pelo_evento:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Responsável pelo evento é obrigatório'}), 400
+        if not cod_cliente and not nome_cliente_avulso:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Cliente ou nome do cliente avulso é obrigatório'}), 400
+        if not cod_midia:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Mídia é obrigatória'}), 400
+        if not obsercacao:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Observação é obrigatória'}), 400
+
+        # checar acesso
+        query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80307'
+            GROUP BY saf.COD_ACESSO
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Você não tem permissão para criar eventos showroom - 80307'}), 403
+        
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        criou_o_evento = rows[0][1]
+        if cod_modelo:
+            query = f"""
+                SELECT COD_PRODUTO FROM PRODUTOS_MODELOS pm WHERE COD_MODELO = {cod_modelo}
+            """
+            cur_oracle.execute(query)
+            rows = cur_oracle.fetchall()
+            if len(rows) == 0:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Modelo não encontrado'}), 400
+            cod_produto = rows[0][0]
+
+        query = f"""
+            insert into crm_eventos(COD_EMPRESA,
+                                    COD_EVENTO,
+                                    COD_TIPO_EVENTO,
+                                    COD_PRIORIDADE,
+                                    NOME_CLIENTE_AVULSO ,
+                                    FONE_CLIENTE_AVULSO,
+                                    cod_midia,
+                                    data_criacao ,
+                                    cod_cliente_honda ,
+                                    DESC_EVENTO,
+                                    CRIOU_O_EVENTO,
+                                    DATA_EVENTO,
+                                    OBS_memo,
+                                    COD_ANDAMENTO,
+                                    COD_CLIENTE,
+                                    STATUS,
+                                    RESPONSAVEL_PELO_EVENTO,
+                                    TIPO_ATENDIMENTO,
+                                    COD_PRODUTO,
+                                    COD_MODELO,
+                                    EMAIL_CLIENTE_AVULSO)
+                            VALUES(11,
+                            seq_crm_COD_EVENTO.nextval,
+                            {cod_tipo_evento},
+                            2,
+                            '{nome_cliente_avulso}' ,
+                            '{fone_cliente_avulso}',
+                            {cod_midia},
+                            SYSDATE,
+                            seq_cod_cliente_honda.nextval,
+                            {'\'Evento criado via API\'' if not obsercacao else f"'{obsercacao[:200]}'"},
+                            '{criou_o_evento}',
+                            SYSDATE,
+                            '{obsercacao}',
+                            {cod_andamento},
+                            {cod_cliente if cod_cliente else 1},
+                            'P',
+                            '{responsavel_pelo_evento}',
+                            null,
+                            {cod_produto if cod_produto else 'null'},
+                            {cod_modelo if cod_modelo else 'null'},
+                            '{email_cliente_avulso}')
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Evento criado com sucesso'
+        return jsonify(retorno), 201
+
+    except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
