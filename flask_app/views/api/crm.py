@@ -130,6 +130,7 @@ def list_crm_eventos_showroom():
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
         status = request.args.get('status', None)
+        tipo_evento = request.args.get('tipo_evento', None)
         initial_date = request.args.get('initial_date', None)
         final_date = request.args.get('final_date', None)
         current_page = int(request.args.get('current_page', 1))
@@ -137,7 +138,14 @@ def list_crm_eventos_showroom():
         limit = int(request.args.get('limit', 10))
         retorno = {}
         
-        
+        filter_tipo_evento = ''
+        if tipo_evento:
+            tipo_evento = tipo_evento.split(',')
+            for te in tipo_evento:
+                if not te.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Tipo de evento inválido: {te}'}), 400
+            tipo_evento = ",".join(tipo_evento)
+            filter_tipo_evento = f" AND ce.COD_TIPO_EVENTO IN ({tipo_evento}) "
         
         filter_initial_date = ''
         filter_final_date = ''
@@ -240,12 +248,13 @@ def list_crm_eventos_showroom():
                 LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO 
                 WHERE
                     1 = 1
-                    AND ce.COD_TIPO_EVENTO IN (785)
+                    --AND ce.COD_TIPO_EVENTO IN (785)
                     {filter_responsavel}
                     {filter_status}
                     {filter_search if search else ''}
                     {filter_initial_date}
                     {filter_final_date}
+                    {filter_tipo_evento}
                     --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
                     --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
         """
@@ -334,7 +343,8 @@ def list_crm_eventos_showroom():
                     LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO 
                     WHERE
                         1 = 1
-                        AND ce.COD_TIPO_EVENTO IN (785)
+                        --AND ce.COD_TIPO_EVENTO IN (785)
+                        {filter_tipo_evento}
                         {filter_responsavel}
                         {filter_status}
                         {filter_search if search else ''}
