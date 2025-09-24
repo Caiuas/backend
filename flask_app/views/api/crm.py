@@ -891,7 +891,9 @@ def get_param_create_crm_eventos_showroom():
             SELECT pm.DESCRICAO_MODELO, pm.COD_PRODUTO, pm.COD_MODELO 
             FROM PRODUTOS_MODELOS pm
             WHERE 1=1
-                AND pm.ATIVO = 'S'
+                --AND pm.ATIVO = 'S'
+                and pm.internet = 'S'
+            order by pm.descricao_modelo
         """
         cur_oracle.execute(query)
         produtos_modelos = cur_oracle.fetchall()
@@ -1341,6 +1343,309 @@ def crm_eventos_showroom_update_observacao(id_evento):
         retorno['status'] = 'success'
         retorno['message'] = f'Observação do evento {cod_empresa}{cod_evento} atualizada com sucesso'
         return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            conn_oracle.rollback()
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+@crm_bp.route('/api/crm/eventos_showroom/agenda_visita/<int:id_evento>', methods=['POST'])
+@token_required
+def crm_eventos_showroom_agenda_visita(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        data = request.get_json()
+        data_agendada = data.get('data_agendada', None)
+        data_visita = data.get('data_visita', None)
+        
+        # Validar ID do evento
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+
+        conn_oracle, cur_oracle = oracle()
+        
+        # Verificar permissões
+        query = f"""
+            SELECT saf.COD_ACESSO FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE eu.DEMITIDO <> 'S' AND lower(eu.EMAIl) = '{email}' AND saf.COD_ACESSO = '80320'
+        """
+        cur_oracle.execute(query)
+        has_access = len(cur_oracle.fetchall()) > 0
+        filter_responsavel = '' if has_access else f" AND lower(eu.EMAIl) = '{email}' "
+        
+        # Buscar evento
+        query = f"""
+            SELECT data_criacao, data_agendada, data_visita FROM crm_eventos ce
+            WHERE ce.cod_empresa = {cod_empresa} AND ce.cod_evento = {cod_evento} {filter_responsavel}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if not row:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        data_criacao, data_agendada_atual, data_visita_atual = row
+        
+        # Buscar usuário
+        query = f"""
+            SELECT nome FROM (
+                SELECT eu.nome FROM empresas_usuarios eu
+                WHERE eu.DEMITIDO <> 'S' AND lower(eu.EMAIl) = '{email}'
+                ORDER BY eu.cod_empresa
+            ) WHERE ROWNUM = 1
+        """
+        cur_oracle.execute(query)
+        quem_alterou = cur_oracle.fetchone()[0]
+        
+        observacoes = []
+        updates = [f"quem_remarcou = '{quem_alterou}'"]
+        
+        # Aplicar regras - corrigido para evitar duplicação
+        if 'data_agendada' in data and data_agendada is None:
+            # data_agendada = null -> remove ambas
+            updates.extend(["data_agendada = NULL", "data_visita = NULL"])
+            observacoes.append("Removido agendamento de visita")
+            
+        elif data_agendada:
+            # Validar formato da data_agendada
+            try:
+                data_agendada_obj = datetime.fromisoformat(data_agendada)
+                data_agendada_str = data_agendada_obj.strftime('%Y-%m-%d %H:%M:%S')
+            except:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Formato da data_agendada inválido'}), 400
+            
+            # Verificar se não é anterior à criação
+            data_criacao_str = data_criacao.strftime('%Y-%m-%d %H:%M:%S') if isinstance(data_criacao, datetime) else str(data_criacao)
+            if data_agendada_str < data_criacao_str:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Data agendada não pode ser anterior à criação do evento'}), 400
+            
+            updates.append(f"data_agendada = TO_DATE('{data_agendada_str}', 'YYYY-MM-DD HH24:MI:SS')")
+            observacoes.append(f"Agendamento marcado para dia {data_agendada_str}")
+            
+            # Processar data_visita apenas se data_agendada não foi removida
+            if 'data_visita' in data:
+                if data_visita is None:
+                    updates.append("data_visita = NULL")
+                    # Só adiciona observação se já existia data de visita
+                    if data_visita_atual:
+                        observacoes.append("Removido data de visita")
+                else:
+                    # Validar formato da data_visita
+                    try:
+                        data_visita_obj = datetime.fromisoformat(data_visita)
+                        data_visita_str = data_visita_obj.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        cur_oracle.close()
+                        conn_oracle.close()
+                        return jsonify({'status': 'error', 'message': 'Formato da data_visita inválido'}), 400
+                    
+                    # Verificar se data_visita não é menor que data_agendada
+                    if data_visita_str < data_agendada_str:
+                        cur_oracle.close()
+                        conn_oracle.close()
+                        return jsonify({'status': 'error', 'message': 'A data_visita não pode ser anterior à data_agendada'}), 400
+                    
+                    updates.append(f"data_visita = TO_DATE('{data_visita_str}', 'YYYY-MM-DD HH24:MI:SS')")
+                    observacoes.append(f"Data de visita alterada para {data_visita_str}")
+        
+        # Processar data_visita apenas se data_agendada não foi processada
+        elif 'data_visita' in data:
+            if data_visita is None:
+                updates.append("data_visita = NULL")
+                # Só adiciona observação se já existia data de visita
+                if data_visita_atual:
+                    observacoes.append("Removido data de visita")
+            else:
+                # Verificar se tem data_agendada atual
+                if not data_agendada_atual:
+                    cur_oracle.close()
+                    conn_oracle.close()
+                    return jsonify({'status': 'error', 'message': 'Não é possível definir data_visita sem uma data_agendada'}), 400
+                
+                # Validar formato da data_visita
+                try:
+                    data_visita_obj = datetime.fromisoformat(data_visita)
+                    data_visita_str = data_visita_obj.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    cur_oracle.close()
+                    conn_oracle.close()
+                    return jsonify({'status': 'error', 'message': 'Formato da data_visita inválido'}), 400
+                
+                # Verificar se data_visita não é menor que data_agendada
+                data_agendada_comparar = data_agendada_atual.strftime('%Y-%m-%d %H:%M:%S') if isinstance(data_agendada_atual, datetime) else str(data_agendada_atual)
+                if data_visita_str < data_agendada_comparar:
+                    cur_oracle.close()
+                    conn_oracle.close()
+                    return jsonify({'status': 'error', 'message': 'A data_visita não pode ser anterior à data_agendada'}), 400
+                
+                updates.append(f"data_visita = TO_DATE('{data_visita_str}', 'YYYY-MM-DD HH24:MI:SS')")
+                observacoes.append(f"Data de visita alterada para {data_visita_str}")
+        
+        if not observacoes:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Nenhuma alteração solicitada'}), 400
+        
+        # Atualizar evento
+        query = f"""
+            UPDATE crm_eventos SET {', '.join(updates)}
+            WHERE cod_empresa = {cod_empresa} AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        
+        # Inserir ação
+        observacao_final = ' - '.join(observacoes)
+        query = f"""
+            INSERT INTO crm_acoes (cod_empresa, cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            VALUES ({cod_empresa}, {cod_evento}, '{quem_alterou}', 12, SYSDATE, '{observacao_final}', 'V', seq_crm_COD_ACAO.nextval, '{quem_alterou}')
+        """
+        cur_oracle.execute(query)
+        
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        
+        return jsonify({'status': 'success', 'message': observacao_final}), 200
+        
+    except Exception as e:
+        try:
+            conn_oracle.rollback()
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+  
+@crm_bp.route('/api/crm/eventos_showroom/create_acao/<int:id_evento>', methods=['POST'])
+@token_required
+def crm_eventos_showroom_create_acao(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        data = request.get_json()
+        tipo_acao = data.get('tipo_acao', None)
+        observacao = data.get('observacao', None)
+        if not tipo_acao or not str(tipo_acao).isdigit():
+            return jsonify({'status': 'error', 'message': 'Tipo de ação é obrigatório'}), 400
+        tipo_acao = int(tipo_acao)
+        if not observacao or observacao.strip() == '':
+            return jsonify({'status': 'error', 'message': 'Observação é obrigatória'}), 400
+        # Escapar aspas simples duplicando-as
+        observacao_escaped = observacao.replace("'", "''")
+        
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+
+        conn_oracle, cur_oracle = oracle()
+        
+        query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        
+        query = f"""
+            select data_criacao
+            from crm_eventos ce
+            where 1=1
+                and ce.cod_empresa = {cod_empresa}
+                and ce.cod_evento = {cod_evento}
+                {filter_responsavel}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        query = f"""
+            select count(*) FROM CRM_ACOES_TIPO cat
+            where 1=1
+                and cat.tipo_acao = {tipo_acao}
+        """
+        # return query
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Tipo de ação inválido'}), 400
+        
+         # Buscar usuário
+         # Buscar usuário
+        
+        
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_criou = rows[0][1]
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_criou}',
+                {tipo_acao},
+                SYSDATE,
+                '{observacao_escaped}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_criou}'
+            )
+        """
+        # return query
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['status'] = 'success'
+        retorno['message'] = 'Ação criada com sucesso'
+        return jsonify(retorno), 201
     except Exception as e:
         try:
             conn_oracle.rollback()
