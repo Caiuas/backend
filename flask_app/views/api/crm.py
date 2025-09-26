@@ -1665,3 +1665,93 @@ def crm_eventos_showroom_create_acao(id_evento):
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
+@crm_bp.route('/api/crm/eventos_showroom/muda_cliente/<int:id_evento>', methods=['POST'])
+@token_required
+def crm_eventos_showroom_muda_cliente(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        data = request.get_json()
+        cod_cliente = data.get('cod_cliente', None)
+        conn_oracle, cur_oracle = oracle()
+        
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+        
+        if not cod_cliente or not str(cod_cliente).isdigit():
+            return jsonify({'status': 'error', 'message': 'Código do cliente é obrigatório'}), 400
+        
+        query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        
+        query = f"""
+            select data_criacao
+            from crm_eventos ce
+            where 1=1
+                and ce.cod_empresa = {cod_empresa}
+                and ce.cod_evento = {cod_evento}
+                {filter_responsavel}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        query = f"""
+            select count(*) from clientes c
+            where 1=1
+                and c.cod_cliente = {cod_cliente}
+        """
+        
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não tem clientes cadastrados'}), 400
+        
+        query = f"""
+            update crm_eventos
+            set cod_cliente = {cod_cliente}
+            where cod_empresa = {cod_empresa}
+            and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['status'] = 'success'
+        retorno['message'] = 'Cliente do evento atualizado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            conn_oracle.rollback()
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+        
