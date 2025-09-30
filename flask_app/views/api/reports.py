@@ -506,7 +506,12 @@ def reports_estoque():
                     WHEN v.novo_usado = 'U' THEN 'Usado'
                     ELSE
                         'Novo'
-                END novo_usado
+                END novo_usado,
+                CASE
+                    WHEN c.COD_CID_COM <> NULL THEN cid_com.DESCRICAO
+                    WHEN c.COD_CID_RES <> NULL THEN cid_res.DESCRICAO 
+                    ELSE cid_cob.DESCRICAO 
+                END cidade
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
                 AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -528,6 +533,15 @@ def reports_estoque():
                 AND eu2.nome = vp.QUEM_APROVOU 
             LEFT JOIN empresas e ON 1=1
                 AND e.cod_empresa = v.COD_EMPRESA 
+            LEFT JOIN cidades cid_res ON 1=1
+                AND cid_res.cod_cidades = c.COD_CID_RES 
+                AND cid_res.uf = c.UF_RES 
+            LEFT JOIN cidades cid_com ON 1=1
+                AND cid_com.cod_cidades = c.COD_CID_COM 
+                AND cid_com.uf = c.UF_COM 
+            LEFT JOIN cidades cid_cob ON 1=1
+                AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
+                AND cid_cob.uf = c.UF_COBRANCA 
             WHERE v.status = 'E'
             ORDER BY pm.DESCRICAO_MODELO
         """
@@ -540,7 +554,7 @@ def reports_estoque():
         data_atual = datetime.now().strftime('%d/%m/%Y %H:%M')
         workbook = xlsxwriter.Workbook(file_memory, {'in_memory': True})
         worksheet = workbook.add_worksheet('Estoque de veiculos')
-        worksheet.merge_range(f'A1:N1', f'Estoque de veiculos - Gerado em {data_atual}', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.merge_range(f'A1:O1', f'Estoque de veiculos - Gerado em {data_atual}', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('A2', 'COD_PROPOSTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('B2', 'DATA_PROPOSTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('C2', 'COD_VENDEDOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
@@ -555,6 +569,7 @@ def reports_estoque():
         worksheet.write('L2', 'COD_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('M2', 'NOME_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('N2', 'NOVO_USADO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('O2', 'CIDADE_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         
         cont = 0
         for row in result:
@@ -616,9 +631,10 @@ def reports_estoque():
                 worksheet.write(cont + 2, 11, '', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
             worksheet.write(cont + 2, 12, row[12], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
             worksheet.write(cont + 2, 13, row[13], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 14, row[14], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
             cont += 1
 
-        worksheet.add_table(f'A2:N{cont+2}', {
+        worksheet.add_table(f'A2:O{cont+2}', {
             'columns': [
                 {'header': 'COD_PROPOSTA'},
                 {'header': 'DATA_PROPOSTA'},
@@ -633,7 +649,8 @@ def reports_estoque():
                 {'header': 'PATIO'},
                 {'header': 'COD_CLIENTE'},
                 {'header': 'NOME_CLIENTE'},
-                {'header': 'NOVO_USADO'}
+                {'header': 'NOVO_USADO'},
+                {'header': 'CIDADE_CLIENTE'},
             ],
             'name': 'Estoque_Veiculos',
             'autofilter': True
@@ -654,7 +671,8 @@ def reports_estoque():
         worksheet.set_column('L:L', 14.43)
         worksheet.set_column('M:M', 37.00)
         worksheet.set_column('N:N', 15.71)
-        worksheet.print_area(f'A1:N{cont+2}')
+        worksheet.set_column('O:O', 15.71)
+        worksheet.print_area(f'A1:O{cont+2}')
         # imprimir em apneas uma pagina na horizontal
         worksheet.fit_to_pages(1, 0)  # Ajusta para uma página de largura e sem limite de altura
         
