@@ -1990,3 +1990,148 @@ def crm_eventos_showroom_muda_temperatura(id_evento):
         except:
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos_showroom/muda_modelo_veiculo/<int:id_evento>', methods=['POST'])
+@token_required
+def crm_eventos_showroom_muda_modelo_veiculo(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        
+        data = request.get_json()
+        cod_produto = data.get('cod_produto', None)
+        cod_modelo = data.get('cod_modelo', None)
+        
+        if not cod_produto or not str(cod_produto).isdigit():
+            return jsonify({'status': 'error', 'message': 'Código do produto é obrigatório'}), 400
+        if not cod_modelo or not str(cod_modelo).isdigit():
+            return jsonify({'status': 'error', 'message': 'Código do modelo é obrigatório'}), 400
+        
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_remarcou = rows[0][1]
+        
+        
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+        
+        query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        
+        query = f"""
+            select ce.COD_PRODUTO, ce.COD_MODELO, pm.DESCRICAO_MODELO 
+            from crm_eventos ce
+            LEFT JOIN produtos_modelos pm ON 1=1
+                AND pm.COD_PRODUTO = ce.COD_PRODUTO 
+                AND pm .COD_MODELO = ce.COD_MODELO
+            where 1=1
+                and ce.cod_empresa = {cod_empresa}
+                and ce.cod_evento = {cod_evento}
+                {filter_responsavel}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        modelo_atual = f"{rows[0][2]}"
+        if not modelo_atual or modelo_atual.strip() == '':
+            modelo_atual = 'Não informado'
+        
+        query = f"""
+            SELECT pm.DESCRICAO_MODELO, pm.COD_PRODUTO, pm.COD_MODELO 
+                    FROM PRODUTOS_MODELOS pm
+                    WHERE 1=1
+                        and pm.internet = 'S'
+                        and pm.COD_PRODUTO = {cod_produto}
+                        and pm.COD_MODELO = {cod_modelo}
+                    order by pm.descricao_modelo
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Modelo de veículo não encontrado'}), 404
+        
+        novo_modelo = f"{rows[0][0]}"
+        
+        query = f"""
+            update crm_eventos
+            set cod_produto = {cod_produto},
+                cod_modelo = {cod_modelo}
+            where cod_empresa = {cod_empresa}
+            and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_remarcou}',
+                5,
+                SYSDATE,
+                'Modelo de veículo alterado de: {modelo_atual} para {novo_modelo}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_remarcou}'
+            )
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['status'] = 'success'
+        retorno['message'] = 'Temperatura do evento atualizada com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            conn_oracle.rollback()
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 500
