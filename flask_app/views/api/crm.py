@@ -114,13 +114,116 @@ def get_eventos_atrasados():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@crm_bp.route('/api/crm_andamentos', methods=['GET'])
+@crm_bp.route('/api/crm/crm_andamentos', methods=['GET'])
+@token_required
 def get_crm_andamentos():
     try:
-        return 'oi'
+        query = f"""
+            SELECT ca.COD_ANDAMENTO, ca.ANDAMENTO  
+            FROM crm_andamento ca
+            WHERE 1=1
+                AND ca.ATIVO = 'S'
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            return jsonify({'status': 'error', 'message': 'Não tem andamentos cadastrados'}), 404
+        retorno = {'andamentos': []}
+        for row in rows:
+            retorno['andamentos'].append({
+                'cod_andamento': row[0],
+                'andamento': row[1]
+            })
+        return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
         
+@crm_bp.route('/api/crm/eventos_showroom/muda_andamento/<int:id_evento>', methods=['POST'])
+@token_required
+def muda_andamento_evento_showroom(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        cod_andamento = request.json.get('cod_andamento', None)
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_remarcou = rows[0][1]
+        query = f"""
+            select andamento from crm_andamento
+            where 1=1
+                and cod_andamento = {cod_andamento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchall()
+        if len(row) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Andamento inválido'}), 400
+        nome_evento = row[0][0]
+        query = f"""
+            select count(*) from crm_eventos
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        query = f"""
+            update crm_eventos set cod_andamento = {cod_andamento}
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_remarcou}',
+                1,
+                SYSDATE,
+                'Mudança de andamento para: {nome_evento}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_remarcou}')
+        """
+        # return query
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Andamento atualizado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @crm_bp.route('/api/crm/eventos_showroom', methods=['GET'])
 @token_required
 def list_crm_eventos_showroom():
@@ -535,7 +638,7 @@ def show_crm_eventos_showroom(id_evento):
                     LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO 
                     WHERE
                         1 = 1
-                        AND ce.COD_TIPO_EVENTO IN (785)
+                        --AND ce.COD_TIPO_EVENTO IN (785)
                         {filter_responsavel}
         """
         query += f" AND ce.COD_EMPRESA = {cod_empresa} AND ce.COD_EVENTO = {cod_evento} "
@@ -1755,3 +1858,135 @@ def crm_eventos_showroom_muda_cliente(id_evento):
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
         
+@crm_bp.route('/api/crm/eventos_showroom/muda_temperatura/<int:id_evento>', methods=['POST'])
+@token_required
+def crm_eventos_showroom_muda_temperatura(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        cod_temperatura = request.json.get('cod_temperatura', None)
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_remarcou = rows[0][1]
+        # se cod_temperatura tiver fora de 0 a 4  cod_temperatura = 0
+        if not isinstance(cod_temperatura, int):
+            try:
+                cod_temperatura = int(cod_temperatura)
+            except:
+                cod_temperatura = 0
+        if cod_temperatura < 0 or cod_temperatura > 4:
+            cod_temperatura = 0
+        
+        # 0 = Sem classificação, 1 = Frio, 2 = Morno, 3 = Quente, 4 = Cliente
+        nome_temperatura = {
+            0: 'Sem classificação',
+            1: 'Frio',
+            2: 'Morno',
+            3: 'Quente',
+            4: 'Cliente'
+            }
+        
+        # Validar ID do evento
+        
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+        
+        # if not cod_temperatura or not str(cod_temperatura).isdigit():
+        #     return jsonify({'status': 'error', 'message': 'Código da temperatura é obrigatório'}), 400
+        cod_temperatura = int(cod_temperatura)
+        
+        query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        
+        query = f"""
+            select data_criacao
+            from crm_eventos ce
+            where 1=1
+                and ce.cod_empresa = {cod_empresa}
+                and ce.cod_evento = {cod_evento}
+                {filter_responsavel}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        query = f"""
+            update crm_eventos
+            set termometro = {cod_temperatura}
+            where cod_empresa = {cod_empresa}
+            and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_remarcou}',
+                5,
+                SYSDATE,
+                'Temperatura alterada para: {nome_temperatura[cod_temperatura]}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_remarcou}'
+            )
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['status'] = 'success'
+        retorno['message'] = 'Temperatura do evento atualizada com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            conn_oracle.rollback()
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 500
