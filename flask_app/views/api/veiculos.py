@@ -478,3 +478,38 @@ def veiculos_faturados():
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
+@veiculos_bp.route('/api/veiculos/modelos', methods=['GET'])
+@token_required
+def veiculos_modelos():
+    try:
+        query = f"""
+            SELECT pm.DESCRICAO_MODELO, pm.COD_PRODUTO, pm.COD_MODELO 
+                    FROM PRODUTOS_MODELOS pm
+                    WHERE 1=1
+                        --AND pm.ATIVO = 'S'
+                        and pm.internet = 'S'
+                    order by pm.descricao_modelo
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        retorno = {}
+        retorno['modelos'] = []
+        for row in result:
+            modelo = {
+                'descricao_modelo': row[0],
+                'cod_produto': row[1],
+                'cod_modelo': row[2]
+            }
+            retorno['modelos'].append(modelo)
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
