@@ -122,3 +122,26 @@ services:
     volumes:
       - ./workers/update_fechamento_crm:/app
     command: "python3 app.py"
+
+  worker_myhonda:
+    build: ./workers/myhonda
+    # mem_limit: 2g
+    container_name: worker_myhonda
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/myhonda:/app
+    command: "python3 app.py"
+
+  # selenium:
+  #   image: selenium/standalone-chrome:latest
+  #   container_name: selenium_hub
+  #   restart: always
+  #   ports:
+  #     - "4444:4444"
+  #     - "7900:7900"  # Para acessar o VNC se necessário
+  #   environment:
+  #     - SE_NODE_MAX_SESSIONS=5
+  #     - SE_NODE_OVERRIDE_MAX_SESSIONS=true
