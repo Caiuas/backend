@@ -487,6 +487,11 @@ def reports_pesquisa_satisfacao():
 @reports_bp.route('/api/reports/estoque', methods=['GET'])
 def reports_estoque():
     try:
+        aguarda_faturamento = request.args.get('aguarda_faturamento', False)
+        filtro_aguarda_faturamento = ''
+        if aguarda_faturamento and aguarda_faturamento.lower() == 'true':
+            filtro_aguarda_faturamento = f"""AND v.cod_proposta <> 0
+                                        AND v.cod_proposta IS NOT null"""
         query = f"""
             SELECT 
                 v.COD_PROPOSTA, 
@@ -543,18 +548,18 @@ def reports_estoque():
                 AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
                 AND cid_cob.uf = c.UF_COBRANCA 
             WHERE v.status = 'E'
+                {filtro_aguarda_faturamento}
             ORDER BY pm.DESCRICAO_MODELO
         """
         conn_oracle, cur_oracle = oracle()
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
-        cur_oracle.close()
-        conn_oracle.close()
+        
         file_memory = io.BytesIO()
         data_atual = datetime.now().strftime('%d/%m/%Y %H:%M')
         workbook = xlsxwriter.Workbook(file_memory, {'in_memory': True})
         worksheet = workbook.add_worksheet('Estoque de veiculos')
-        worksheet.merge_range(f'A1:O1', f'Estoque de veiculos - Gerado em {data_atual}', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.merge_range(f'A1:P1', f'Estoque de veiculos - Gerado em {data_atual}', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('A2', 'COD_PROPOSTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('B2', 'DATA_PROPOSTA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('C2', 'COD_VENDEDOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
@@ -570,6 +575,8 @@ def reports_estoque():
         worksheet.write('M2', 'NOME_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('N2', 'NOVO_USADO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('O2', 'CIDADE_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('P2', 'ANDAMENTO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('Q2', 'TEM_USADO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         
         cont = 0
         for row in result:
@@ -632,9 +639,41 @@ def reports_estoque():
             worksheet.write(cont + 2, 12, row[12], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
             worksheet.write(cont + 2, 13, row[13], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
             worksheet.write(cont + 2, 14, row[14], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            
+            query = f"""
+            SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
+                WHERE chassi_completo = '{row[7]}'
+                AND created_at = (SELECT max(created_at) FROM CAIUAS_ANDAMENTO_VEICULO cav
+                WHERE chassi_completo = '{row[7]}')
+                ORDER BY created_at DESC
+            """
+            cur_oracle.execute(query)
+            result_andamento = cur_oracle.fetchone()
+            if result_andamento and result_andamento[0]:
+                worksheet.write(cont + 2, 15, result_andamento[0], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            else:
+                worksheet.write(cont + 2, 15, '', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            
+            query = f"""
+                SELECT count(*) FROM VEIC_FORMAS_PAGAMENTO vfp
+                LEFT JOIN FORMA_PGTO fp ON 1=1
+                    AND fp.cod_empresa = vfp.COD_EMPRESA 
+                    AND fp.COD_FORMA_PGTO = vfp.COD_FORMA_PGTO 
+                WHERE 1=1
+                    AND vfp.cod_proposta = '{row[0]}'
+                    AND lower(descricao) LIKE ('%usado%')
+            """
+            cur_oracle.execute(query)
+            usado_result = cur_oracle.fetchone()
+            if usado_result and usado_result[0] and usado_result[0] > 0:
+                worksheet.write(cont + 2, 16, 'Sim', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            else:
+                worksheet.write(cont + 2, 16, '', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+
+
             cont += 1
 
-        worksheet.add_table(f'A2:O{cont+2}', {
+        worksheet.add_table(f'A2:Q{cont+2}', {
             'columns': [
                 {'header': 'COD_PROPOSTA'},
                 {'header': 'DATA_PROPOSTA'},
@@ -651,6 +690,8 @@ def reports_estoque():
                 {'header': 'NOME_CLIENTE'},
                 {'header': 'NOVO_USADO'},
                 {'header': 'CIDADE_CLIENTE'},
+                {'header': 'ULTIMO_ANDAMENTO'},
+                {'header': 'TEM_USADO'},
             ],
             'name': 'Estoque_Veiculos',
             'autofilter': True
@@ -672,6 +713,8 @@ def reports_estoque():
         worksheet.set_column('M:M', 37.00)
         worksheet.set_column('N:N', 15.71)
         worksheet.set_column('O:O', 15.71)
+        worksheet.set_column('P:P', 30.00)
+        worksheet.set_column('Q:Q', 10.00)
         worksheet.print_area(f'A1:O{cont+2}')
         # imprimir em apneas uma pagina na horizontal
         worksheet.fit_to_pages(1, 0)  # Ajusta para uma página de largura e sem limite de altura
@@ -681,9 +724,16 @@ def reports_estoque():
         response = Response(file_memory.read(), mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response.headers.set('Content-Disposition', 'attachment', filename='estoque_veiculos.xlsx')
         response.headers.set('Content-Length', str(file_memory.tell()))
+        cur_oracle.close()
+        conn_oracle.close()
         return response, 200
 
     except Exception as e:
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
         return jsonify({'message': str(e)}), 400
 
 @reports_bp.route('/api/reports/faturamento_veiculos', methods=['GET'])
