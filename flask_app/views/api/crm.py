@@ -224,9 +224,9 @@ def muda_andamento_evento_showroom(id_evento):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@crm_bp.route('/api/crm/eventos_showroom', methods=['GET'])
+@crm_bp.route('/api/crm/eventos', methods=['GET'])
 @token_required
-def list_crm_eventos_showroom():
+def list_crm_eventos():
     try:
         now = datetime.now().strftime("%Y-%m-%d")
         list_status = ['P','E','D','V','A','R','CP']
@@ -2134,4 +2134,311 @@ def crm_eventos_showroom_muda_modelo_veiculo(id_evento):
             conn_oracle.close()
         except:
             pass
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+    try:
+        now = datetime.now().strftime("%Y-%m-%d")
+        list_status = ['P','E','D','V','A','R','CP']
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        status = request.args.get('status', None)
+        tipo_evento = request.args.get('tipo_evento', None)
+        initial_date = request.args.get('initial_date', None)
+        final_date = request.args.get('final_date', None)
+        current_page = int(request.args.get('current_page', 1))
+        search = request.args.get('search', None)
+        limit = int(request.args.get('limit', 10))
+        retorno = {}
+        
+        filter_tipo_evento = ''
+        if tipo_evento:
+            tipo_evento = tipo_evento.split(',')
+            for te in tipo_evento:
+                if not te.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Tipo de evento inválido: {te}'}), 400
+            tipo_evento = ",".join(tipo_evento)
+            filter_tipo_evento = f" AND ce.COD_TIPO_EVENTO IN ({tipo_evento}) "
+        
+        filter_initial_date = ''
+        filter_final_date = ''
+        if initial_date:
+            try:
+                datetime.strptime(initial_date, '%Y-%m-%d')
+                filter_initial_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD') "
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data inicial inválida. Use o formato YYYY-MM-DD'}), 400
+        
+        if final_date:
+            try:
+                datetime.strptime(final_date, '%Y-%m-%d')
+                filter_final_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')"
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data final inválida. Use o formato YYYY-MM-DD'}), 400
+        
+        
+        filter_status = ''
+        if status:
+            status = status.split(',')
+            for s in status:
+                if s not in list_status:
+                    return jsonify({'status': 'error', 'message': f'Status inválido: {s}'}), 400
+            status = "','".join(status)
+            status = f"('{status}')"
+            status = status.replace("''","'")
+            status = status.replace("'(","(")
+            status = status.replace(")'",")")
+            filter_status = f""" AND (
+                                CASE
+                                    WHEN ce.cod_motivo_perda IS NOT NULL AND ce.status = 'E' THEN 'CP'
+                                    ELSE ce.status
+                                END
+                            ) IN {status}"""
+        
+        if search:
+            search = search.replace("'", "''").lower()
+            filter_search = f"""
+                AND (
+                    LOWER(ce.RESPONSAVEL_PELO_EVENTO) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.NOME_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(c.NOME) LIKE '%{search.lower()}%'
+                    OR LOWER(c.EMAIL_NFE) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.EMAIL_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.FONE_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_CEL,c.TELEFONE_CEL)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_RES,c.TELEFONE_RES)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_COM,c.TELEFONE_COM)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_FAX,c.TELEFONE_FAX)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST)) LIKE '%{search.lower()}%'
+                    OR LOWER(pm.DESCRICAO_MODELO) LIKE '%{search.lower()}%'
+                    OR TO_CHAR(ce.COD_EVENTO) = '{search}'
+                )
+            """
+        
+        
+        
+        query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        
+        query = f"""
+                SELECT
+                    count(*)
+                FROM
+                    CRM_EVENTOS ce
+                LEFT JOIN EMPRESAS_USUARIOS eu ON
+                    1 = 1
+                    AND eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+                LEFT JOIN CRM_ANDAMENTO ca ON
+                    1 = 1
+                    AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+                LEFT JOIN MIDIA m ON
+                    1=1
+                    AND m.COD_MIDIA = ce.COD_MIDIA 
+                LEFT JOIN clientes c ON
+                    1 = 1
+                    AND ce.COD_CLIENTE = c.COD_CLIENTE
+                LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+                    AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+                LEFT JOIN CRM_DESCARTES cd on 1=1
+                    and cd.COD_DESCARTE = ce.COD_DESCARTE
+                LEFT JOIN CRM_MOTIVO_PERDAS cmp ON 1=1
+                    AND cmp.cod_motivo_perda = ce.cod_motivo_perda
+                LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO 
+                WHERE
+                    1 = 1
+                    --AND ce.COD_TIPO_EVENTO IN (785)
+                    {filter_responsavel}
+                    {filter_status}
+                    {filter_search if search else ''}
+                    {filter_initial_date}
+                    {filter_final_date}
+                    {filter_tipo_evento}
+                    --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
+                    --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
+        """
+        # return query
+        cur_oracle.execute(query)
+        total = cur_oracle.fetchone()[0]
+        if total == 0:
+            return jsonify({'status': 'error', 'message': 'Não tem eventos showroom no período'}), 404
+        offset = (current_page - 1) * limit
+        total_pages = (total + limit - 1) // limit
+        start_row = (current_page - 1) * limit + 1
+        end_row = current_page * limit
+        if current_page > total_pages:
+            return jsonify({'status': 'error', 'message': 'Página inválida'}), 400
+        query =f"""
+            SELECT *
+            FROM (
+                SELECT t.*, ROWNUM AS rn
+                FROM (
+                    -- Sua query original com ORDER BY aqui dentro
+                    SELECT
+                        CASE
+                            WHEN ce.cod_motivo_perda IS NOT null AND ce.status = 'E' THEN 'CP'
+                            ELSE ce.status
+                        END status,
+                        TO_CHAR(ce.DATA_CRIACAO, 'YYYY-MM-DD HH24:MI:SS') AS DATA_CRIACAO,
+                        TO_CHAR(
+                            CASE
+                                WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+                                ELSE ce.data_novo_contato
+                            END, 'YYYY-MM-DD HH24:MI:SS'
+                        ) AS data_contato,
+                        ce.COD_EVENTO,
+                        ce.COD_EMPRESA,
+                        cet.DESC_TIPO_EVENTO,
+                        ca.ANDAMENTO,
+                        ce.COD_CLIENTE,
+                        CASE
+                            WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO 
+                            ELSE c.NOME 
+                        END nome_cliente,
+                        concat(c.PREFIXO_CEL,c.TELEFONE_CEL) tel_cel,
+                        ce.fone_cliente_avulso,
+                        ce.email_cliente_avulso,
+                        c.EMAIL_NFE,
+                        ce.TERMOMETRO,
+                        ce.OBS_MEMO,
+                        cmp.desc_motivo motivo_perda,
+                        cd.descricao_descarte,
+                        ce.RESPONSAVEL_PELO_EVENTO,
+                        eu.NOME_COMPLETO RESPONSAVEL_NOME_COMPLETO,
+                        pm.descricao_modelo,
+                        concat(c.PREFIXO_RES,c.TELEFONE_RES) tel_residencial,
+                        concat(c.PREFIXO_COM,c.TELEFONE_COM) tel_comercial,
+                        concat(c.PREFIXO_FAX,c.TELEFONE_FAX) tel_fax,
+                        concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp,
+                        ce.data_agendada,
+                        ce.data_visita,
+                        CASE
+			                -- Se a data/hora do contato for anterior a data/hora atual, está ATRASADO
+			                WHEN (
+			                    CASE
+			                        WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+			                        ELSE ce.data_novo_contato
+			                    END
+			                ) < SYSDATE THEN 'ATRASADO'
+			                -- Se a data do contato (ignorando a hora) for maior que a data de hoje, é Futuro
+			                WHEN TRUNC(
+			                    CASE
+			                        WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+			                        ELSE ce.data_novo_contato
+			                    END
+			                ) > TRUNC(SYSDATE) THEN 'FUTURO'
+			                -- Caso contrário, é para hoje (de agora até o fim do dia)
+			                ELSE 'TRABALHANDO'
+			            END AS status_atendimento
+                    FROM
+                        CRM_EVENTOS ce
+                    LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+                    LEFT JOIN CRM_ANDAMENTO ca ON ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+                    LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
+                    LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
+                    LEFT JOIN CRM_EVENTOS_TIPO cet ON cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+                    LEFT JOIN CRM_DESCARTES cd on cd.COD_DESCARTE = ce.COD_DESCARTE
+                    LEFT JOIN CRM_MOTIVO_PERDAS cmp ON cmp.cod_motivo_perda = ce.cod_motivo_perda
+                    LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO 
+                    WHERE
+                        1 = 1
+                        --AND ce.COD_TIPO_EVENTO IN (785)
+                        {filter_tipo_evento}
+                        {filter_responsavel}
+                        {filter_status}
+                        {filter_search if search else ''}
+                        {filter_initial_date}
+                        {filter_final_date}
+                        --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
+                        --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
+                    ORDER BY
+                        3
+                ) t
+            )
+            WHERE
+                rn BETWEEN {start_row} AND {end_row}
+        """
+        # return query
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        retorno['total_eventos'] = total
+        retorno['total_pages'] = total_pages
+        retorno['current_page'] = current_page
+        retorno['eventos'] = []
+        for row in rows:
+            if row[1]:  # data_criacao
+                try:
+                    data_criacao_obj = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S')
+                    data_criacao_iso = data_criacao_obj.isoformat()
+                except:
+                    data_criacao_iso = row[1]  # fallback para string original
+            
+            if row[2]:  # data_contato
+                try:
+                    data_contato_obj = datetime.strptime(row[2], '%Y-%m-%d %H:%M:%S')
+                    data_contato_iso = data_contato_obj.isoformat()
+                except:
+                    data_contato_iso = row[2]  # fallback para string original
+            if row[24]:  # data_agendada
+                try:
+                    data_agendada_obj = datetime.strptime(row[24], '%Y-%m-%d %H:%M:%S')
+                    data_agendada_iso = data_agendada_obj.isoformat()
+                except:
+                    data_agendada_iso = row[24]  # fallback para string original
+            if row[25]:  # data_visita
+                try:
+                    data_visita_obj = datetime.strptime(row[25], '%Y-%m-%d %H:%M:%S')
+                    data_visita_iso = data_visita_obj.isoformat()
+                except:
+                    data_visita_iso = row[25]  # fallback para string original
+            obs_memo_processado = processar_obs_memo(row[14])
+
+            retorno['eventos'].append({  
+                'status': row[0],
+                'data_criacao': data_criacao_iso,
+                'data_contato': data_contato_iso,
+                'cod_evento': row[3],
+                'cod_empresa': row[4],
+                'desc_tipo_evento': row[5],
+                'andamento': row[6],
+                'cod_cliente': row[7],
+                'nome_cliente': row[8],
+                'tel_cel': row[9],
+                'fone_cliente_avulso': row[10],
+                'email_cliente_avulso': row[11],
+                'email_nfe': row[12],
+                'termometro': row[13],
+                'obs_memo': obs_memo_processado,
+                'motivo_perda': row[15],
+                'descricao_descarte': row[16],
+                'responsavel_pelo_evento': row[17],
+                'responsavel_nome_completo': row[18],
+                'descricao_modelo': row[19],
+                'tel_residencial': row[20],
+                'tel_comercial': row[21],
+                'tel_fax': row[22],
+                'tel_whatsapp': row[23],
+                'data_agendada': data_agendada_iso if row[24] else None,
+                'data_visita': data_visita_iso if row[25] else None,
+                'status_atendimento': row[26]
+            })
+        cur_oracle.close()
+        conn_oracle.close()
+
+        return jsonify(retorno), 200
+    except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
