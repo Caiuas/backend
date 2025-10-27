@@ -177,3 +177,5 @@ cython_debug/
 *.pem
 traefik/letsencrypt/acme.json
 workers/cria_pesquisa/processando.txt
+workers/myhonda/retornos/selenium_after_login.html
+workers/myhonda/retornos/selenium_login_page.html
