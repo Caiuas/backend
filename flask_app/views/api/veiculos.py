@@ -513,3 +513,427 @@ def veiculos_modelos():
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
+@veiculos_bp.route('/api/veiculos/produtos', methods=['GET'])
+@token_required
+def get_veiculos_produtos():
+    try:
+        search = request.args.get('search', None)
+        # data = request.get_json()
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        current_page = int(request.args.get('current_page', 1))
+        limit = int(request.args.get('limit', 10))
+        
+        query_search = ""
+        if search:
+            query_search = f" AND lower(pm.DESCRICAO_MODELO) LIKE ('%{search.lower()}%') "
+            
+        query = f"""
+            SELECT 
+                count(*)
+            FROM produtos_modelos pm
+            LEFT JOIN produtos p ON 1=1
+                AND p.COD_PRODUTO = pm.COD_PRODUTO 
+            WHERE 1=1
+                {query_search}
+                and p.descricao_produto IS NOT NULL
+        """
+        # return query
+        conn_oracle, cur_oracle = oracle()
+        
+        cur_oracle.execute(query)
+        total = cur_oracle.fetchone()[0]
+        if total == 0:
+            try:
+                cur_oracle.close()
+                conn_oracle.close()
+            except:
+                pass
+            return jsonify({'status': 'error', 'message': 'Não há veículos com o filtro'}), 404
+        offset = (current_page - 1) * limit
+        total_pages = (total + limit - 1) // limit
+        start_row = (current_page - 1) * limit + 1
+        end_row = current_page * limit
+        if current_page > total_pages:
+            try:
+                cur_oracle.close()
+                conn_oracle.close()
+            except:
+                pass
+            return jsonify({'status': 'error', 'message': 'Página inválida'}), 400
+        
+        query = f"""
+                SELECT *
+                    FROM (
+                        SELECT t.*, ROWNUM AS rn
+                        FROM (
+                            -- Sua query original com ORDER BY aqui dentro
+                    SELECT
+                    p.COD_PRODUTO,
+                    trim(p.DESCRICAO_PRODUTO) AS DESCRICAO_PRODUTO,
+                    pm.COD_MODELO ,
+                    trim(pm.DESCRICAO_MODELO) AS DESCRICAO_MODELO,
+                    (SELECT count(*) FROM reclamacoes_padroes_veic cz 
+                        LEFT JOIN RECLAMACOES_PADROES rp ON 1=1
+                            AND rp.COD_RECLAMACAO = cz.COD_RECLAMACAO 
+                        WHERE cz.cod_produto = pm.cod_produto AND cz.cod_modelo =
+                        pm.cod_modelo AND rp.ATIVO = 'S') qtd_kits
+                    FROM produtos_modelos pm
+                    LEFT JOIN produtos p ON 1=1
+                    AND p.COD_PRODUTO = pm.COD_PRODUTO
+                    WHERE 1=1
+                        {query_search}
+                        and p.descricao_produto IS NOT NULL
+                    order by p.DESCRICAO_PRODUTO
+                    ) t
+                )
+                WHERE
+                    rn BETWEEN {start_row} AND {end_row}
+            """
+        # return query
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        retorno = {}
+        retorno['veiculos'] = []
+        for row in result:
+            veiculo = {
+                'cod_produto': row[0],
+                'descricao_produto': row[1],
+                'cod_modelo': row[2],
+                'descricao_modelo': row[3],
+                'qtd_kits': row[4]
+            }
+            retorno['veiculos'].append(veiculo)
+        retorno['total'] = total
+        retorno['current_page'] = current_page
+        retorno['total_pages'] = total_pages
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+@veiculos_bp.route('/api/veiculos/produtos/<int:cod_produto>', methods=['GET'])
+@token_required
+def show_veiculos_produtos(cod_produto):
+    try:
+        
+        token_data = request.token_data
+        
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+                    SELECT
+                    p.COD_PRODUTO,
+                    trim(p.DESCRICAO_PRODUTO) AS DESCRICAO_PRODUTO,
+                    pm.COD_MODELO ,
+                    trim(pm.DESCRICAO_MODELO) AS DESCRICAO_MODELO,
+                    (SELECT count(*) FROM reclamacoes_padroes_veic cz 
+                        LEFT JOIN RECLAMACOES_PADROES rp ON 1=1
+                            AND rp.COD_RECLAMACAO = cz.COD_RECLAMACAO 
+                        WHERE cz.cod_produto = pm.cod_produto AND cz.cod_modelo =
+                        pm.cod_modelo AND rp.ATIVO = 'S') qtd_kits
+                    FROM produtos_modelos pm
+                    LEFT JOIN produtos p ON 1=1
+                    AND p.COD_PRODUTO = pm.COD_PRODUTO
+                    WHERE 1=1
+                        AND pm.cod_modelo = {cod_produto}
+                        and p.descricao_produto IS NOT NULL
+                """
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        if len(result) == 0:
+            try:
+                cur_oracle.close()
+                conn_oracle.close()
+            except:
+                pass
+            return jsonify({'status': 'error', 'message': 'Não há veículos com o filtro'}), 404
+        retorno = {}
+        retorno['cod_produto'] = result[0][0]
+        retorno['descricao_produto'] = result[0][1]
+        retorno['cod_modelo'] = result[0][2]
+        retorno['descricao_modelo'] = result[0][3]
+        retorno['qtd_kits'] = result[0][4]
+        retorno['kits'] = []
+        query = f"""
+            SELECT rp.COD_RECLAMACAO, trim(rp.RECLAMACAO) reclamacao, rp.OBSERVACAO
+            FROM reclamacoes_padroes_veic cz
+            LEFT JOIN RECLAMACOES_PADROES rp ON 1=1
+                AND rp.COD_RECLAMACAO = cz.COD_RECLAMACAO 
+            WHERE 1=1
+                AND rp.ativo = 'S'
+                AND cz.COD_MODELO = {result[0][2]}
+                order by rp.RECLAMACAO
+        """
+        cur_oracle.execute(query)
+        kits_result = cur_oracle.fetchall()
+        for kit in kits_result:
+            kit_info = {
+                'cod_reclamacao': kit[0],
+                'reclamacao': kit[1],
+                'observacao': kit[2]
+            }
+            retorno['kits'].append(kit_info)
+        
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+@veiculos_bp.route('/api/veiculos/produtos/remove_kit', methods=['POST'])
+@token_required
+def remove_kit_produto():
+    try:
+        data = request.get_json()
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_acesso = 40203
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+            SELECT saf2.COD_ACESSO 
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf2 ON 1=1
+                    AND saf2.COD_FUNCAO = eu.COD_FUNCAO 
+                WHERE 1=1
+                    AND eu.DEMITIDO <> 'S'
+                    AND saf2.COD_ACESSO = '{cod_acesso}'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY saf2.COD_ACESSO
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': f'Usuário não autorizado - {cod_acesso}'}), 403
+        cod_produto = data.get('cod_produto', None)
+        cod_modelo = data.get('cod_modelo', None)
+        cod_reclamacao = data.get('cod_reclamacao', None)
+        if not cod_produto or not cod_modelo or not cod_reclamacao:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'cod_produto, cod_modelo e cod_reclamacao são obrigatórios'}), 400
+        query = f"""
+            SELECT count(*) FROM reclamacoes_padroes_veic cz
+                WHERE cz.COD_PRODUTO = {cod_produto}
+                AND cz.COD_MODELO = {cod_modelo}
+                AND cz.COD_RECLAMACAO = {cod_reclamacao}
+        """
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchone()
+        if result[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Kit não encontrado para o produto/modelo'}), 404
+        if result[0] > 1:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Mais de um kit encontrado para o produto/modelo. Contate o suporte'}), 400
+        query = f"""
+            DELETE FROM reclamacoes_padroes_veic
+                WHERE COD_PRODUTO = {cod_produto}
+                AND COD_MODELO = {cod_modelo}
+                AND COD_RECLAMACAO = {cod_reclamacao}
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Kit removido com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/veiculos/produtos/adiciona_kit', methods=['POST'])
+@token_required
+def adiciona_kit_produto():
+    try:
+        data = request.get_json()
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_acesso = 40203
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+            SELECT saf2.COD_ACESSO 
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf2 ON 1=1
+                    AND saf2.COD_FUNCAO = eu.COD_FUNCAO 
+                WHERE 1=1
+                    AND eu.DEMITIDO <> 'S'
+                    AND saf2.COD_ACESSO = '{cod_acesso}'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY saf2.COD_ACESSO
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': f'Usuário não autorizado - {cod_acesso}'}), 403
+        cod_produto = data.get('cod_produto', None)
+        cod_modelo = data.get('cod_modelo', None)
+        cod_reclamacao = data.get('cod_reclamacao', None)
+        if not cod_produto or not cod_modelo or not cod_reclamacao:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'cod_produto, cod_modelo e cod_reclamacao são obrigatórios'}), 400
+        query = f"""
+            SELECT count(*) FROM reclamacoes_padroes_veic cz
+                WHERE cz.COD_PRODUTO = {cod_produto}
+                AND cz.COD_MODELO = {cod_modelo}
+                AND cz.COD_RECLAMACAO = {cod_reclamacao}
+        """
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchone()
+        if result[0] > 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Kit já cadastrado para o produto/modelo'}), 400
+        query = f"""
+            SELECT count(*) FROM RECLAMACOES_PADROES rp 
+                WHERE 1=1
+                AND rp.ATIVO = 'S'	
+                AND rp.eh_kit = 'S'
+                AND rp.COD_RECLAMACAO = {cod_reclamacao}
+        """
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchone()
+        if result[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Reclamação padrão não encontrada ou não é um kit'}), 404
+        
+        query = f"""
+            insert into reclamacoes_padroes_veic (COD_PRODUTO, COD_MODELO, COD_RECLAMACAO)
+                values ({cod_produto}, {cod_modelo}, {cod_reclamacao})
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Kit adicionado com sucesso'
+        return jsonify(retorno), 200
+        
+        
+    except Exception as e:
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+@veiculos_bp.route('/api/veiculos/reclamacoes_padroes', methods=['GET'])
+@token_required
+def list_reclamacoes_padroes():
+    try:
+        search = request.args.get('search', None)
+        current_page = int(request.args.get('current_page', 1))
+        search = request.args.get('search', None)
+        limit = int(request.args.get('limit', 10))
+        
+        query_search = ""
+        if search:
+            query_search = f" AND lower(rp.RECLAMACAO) LIKE ('%{search.lower()}%') "
+        query = f"""
+            select count(*)
+            from RECLAMACOES_PADROES rp
+            LEFT JOIN reclamacoes_padroes_empresa rpe ON 1=1
+                AND rpe.COD_RECLAMACAO = rp.COD_RECLAMACAO 
+                AND rpe.cod_empresa = 11
+            where 1=1
+                {query_search}
+                AND rp.eh_kit = 'S'
+                AND rpe.ATIVO = 'S'
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        total = cur_oracle.fetchone()[0]
+        if total == 0:
+            try:
+                cur_oracle.close()
+                conn_oracle.close()
+            except:
+                pass
+            return jsonify({'status': 'error', 'message': 'Não há reclamações com o filtro'}), 404
+        
+        offset = (current_page - 1) * limit
+        total_pages = (total + limit - 1) // limit
+        start_row = (current_page - 1) * limit + 1
+        end_row = current_page * limit
+        
+        if current_page > total_pages:
+            try:
+                cur_oracle.close()
+                conn_oracle.close()
+            except:
+                pass
+            return jsonify({'status': 'error', 'message': 'Página não encontrada'}), 404
+        
+        query = f"""
+        SELECT *
+            FROM (
+                SELECT t.*, ROWNUM AS rn
+                FROM (
+                    -- Sua query original com ORDER BY aqui dentro
+                    SELECT rp.COD_RECLAMACAO, trim(rp.reclamacao)
+                    FROM reclamacoes_padroes rp
+                    LEFT JOIN reclamacoes_padroes_empresa rpe ON 1=1
+                        AND rpe.COD_RECLAMACAO = rp.COD_RECLAMACAO 
+                        AND rpe.cod_empresa = 11
+                    WHERE 1=1
+                        {query_search}
+                    AND rpe.ATIVO = 'S'	
+                    AND rp.eh_kit = 'S'
+                    ORDER BY rp.RECLAMACAO 
+                    ) t
+            )
+            WHERE
+                rn BETWEEN {start_row} AND {end_row}
+        """
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        retorno = {}
+        retorno['reclamacoes_padroes'] = []
+        retorno['total'] = total
+        retorno['current_page'] = current_page
+        retorno['total_pages'] = total_pages
+        for row in result:
+            reclamacao = {
+                'cod_reclamacao': row[0],
+                'reclamacao': row[1]
+            }
+            retorno['reclamacoes_padroes'].append(reclamacao)
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify(retorno), 200
+    except Exception as e:
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
