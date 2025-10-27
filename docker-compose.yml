@@ -66,7 +66,7 @@ services:
       - .env 
     volumes:
       - ./workers/estoque_veiculos_des:/app
-    command: "python3 app.py"
+    command: "python3 app.py && python3 agendamentos.py"
   
   worker_send_wpp_agendamento:
     build: ./workers/send_wpp_agendamento
@@ -135,13 +135,14 @@ services:
       - ./workers/myhonda:/app
     command: "python3 app.py"
 
-  # selenium:
-  #   image: selenium/standalone-chrome:latest
-  #   container_name: selenium_hub
-  #   restart: always
-  #   ports:
-  #     - "4444:4444"
-  #     - "7900:7900"  # Para acessar o VNC se necessário
-  #   environment:
-  #     - SE_NODE_MAX_SESSIONS=5
-  #     - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+  worker_envia_pesquisa_whatsapp:
+    build: ./workers/envia_pesquisa_whatsapp
+    # mem_limit: 2g
+    container_name: worker_envia_pesquisa_whatsapp
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/envia_pesquisa_whatsapp:/app
+    command: "python3 app.py"
