@@ -13,6 +13,8 @@ from views.api.dashboard import dashboard_bp
 from views.api.crm import crm_bp
 from views.api.veiculos import veiculos_bp
 from views.api.users import users_bp
+from views.api.financeiro import financeiro_bp
+from views.api.oficina import oficina_bp
 load_dotenv()
 
 app = Flask(__name__)
@@ -29,6 +31,8 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(crm_bp)
 app.register_blueprint(veiculos_bp)
 app.register_blueprint(users_bp)
+app.register_blueprint(financeiro_bp)
+app.register_blueprint(oficina_bp)
 
 
 def token_required(f):
