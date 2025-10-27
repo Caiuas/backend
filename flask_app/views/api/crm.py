@@ -238,7 +238,7 @@ def list_crm_eventos():
         final_date = request.args.get('final_date', None)
         current_page = int(request.args.get('current_page', 1))
         search = request.args.get('search', None)
-        limit = int(request.args.get('limit', 10))
+        limit = int(request.args.get('limit', 100))
         retorno = {}
         
         filter_tipo_evento = ''
@@ -456,7 +456,7 @@ def list_crm_eventos():
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
                     ORDER BY
-                        3
+                        3 asc
                 ) t
             )
             WHERE
