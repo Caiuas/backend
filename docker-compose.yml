@@ -58,15 +58,16 @@ services:
       - "traefik.http.services.streamlit-app.loadbalancer.server.port=8501" # Porta padrão do Streamlit
     command: "streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
 
-  worker_estoque_veiculos_des:
+  worker_integracao_des:
     build: ./workers/estoque_veiculos_des
-    container_name: worker_estoque_veiculos_des
+    container_name: worker_integracao_des
     restart: always
+    tty: True
     env_file:
       - .env 
     volumes:
       - ./workers/estoque_veiculos_des:/app
-    command: "python3 app.py && python3 agendamentos.py"
+    command: "bash -c 'python3 estoque_veiculos.py & python3 agendamentos.py & wait'"
   
   worker_send_wpp_agendamento:
     build: ./workers/send_wpp_agendamento
