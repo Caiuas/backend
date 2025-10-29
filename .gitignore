@@ -179,3 +179,6 @@ traefik/letsencrypt/acme.json
 workers/cria_pesquisa/processando.txt
 workers/myhonda/retornos/selenium_after_login.html
 workers/myhonda/retornos/selenium_login_page.html
+workers/estoque_veiculos_des/veiculos.json
+.gitignore
+workers/estoque_veiculos_des/veiculos2.json
