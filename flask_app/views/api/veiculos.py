@@ -12,7 +12,7 @@ def get_veiculos_estoque():
     try:
         query = f"""
             SELECT 
-                v.COD_PROPOSTA, 
+                vp.COD_PROPOSTA, 
                 vp.EMISSAO data_proposta, 
                 vp.VENDEDOR cod_vendedor, 
                 eu.NOME_COMPLETO nome_vendedor, 
@@ -342,6 +342,7 @@ def veiculos_faturados():
                 c.NOME nome_cliente,
                 CASE 
                     WHEN v.novo_usado = 'U' THEN 'Usado'
+                    WHEN v.COD_PROPOSTA_INTERNET IS NOT NULL THEN 'Direta'
                     ELSE
                         'Novo'
                 END novo_usado,
@@ -386,6 +387,7 @@ def veiculos_faturados():
                 AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
                 AND cid_cob.uf = c.UF_COBRANCA 
             WHERE v.status = 'V'
+                and v.cod_cliente <> '22534303000127'
                 AND TRUNC(vp.DATA_VENDA) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
             ORDER BY pm.DESCRICAO_MODELO
         """
