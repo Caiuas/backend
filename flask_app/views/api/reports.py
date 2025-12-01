@@ -116,7 +116,13 @@ def reports_fechamento_agendamento():
                 FROM OS_AGENDA_RECLAMACAO oar
                 	WHERE 1=1
                 		AND s.COD_OS_AGENDA  = oar.COD_OS_AGENDA 
-			          	AND s.COD_EMPRESA = oar.COD_EMPRESA) reclamacoes
+			          	AND s.COD_EMPRESA = oar.COD_EMPRESA) reclamacoes,
+                CASE
+			    	WHEN oa.tipo_atendimento = 'R' THEN 'Receptivo' 
+			    	WHEN oa.tipo_atendimento = 'P' THEN 'Passivo'
+			    	WHEN oa.tipo_atendimento = 'A' THEN 'Ativo'
+			    	ELSE 'Não classificado'
+			    END tipo_atendimento
             from os_agenda_servicos s
             LEFT JOIN CRM_EVENTOS ce ON 1=1
                 AND ce.COD_EMPRESA = s.crm_cod_empresa 
@@ -180,7 +186,8 @@ def reports_fechamento_agendamento():
             'status_agenda',
             'servicos',
             'chassi',
-            'reclamacoes'
+            'reclamacoes',
+            'tipo_atendimento'
         ])
         agenda_por_responsavel = pd.pivot_table(
             df,
@@ -199,6 +206,7 @@ def reports_fechamento_agendamento():
         agenda_por_responsavel = agenda_por_responsavel[agenda_por_responsavel['numero_os'] > 0]
         df = df[['cod_empresa', 
                 'cod_os_agenda', 
+                'tipo_atendimento',
                 'nome_cliente', 
                 'crm_cod_evento',
                 'agente_sac', 
@@ -265,23 +273,125 @@ def reports_fechamento_agendamento():
         
 
         worksheet = workbook.add_worksheet('Agenda')
-        worksheet.merge_range('A1:M1', 'Agenda', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
+        worksheet.merge_range('A1:O1', 'Agenda', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
         worksheet.write('A2', 'EMP', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('B2', 'COD_OS_AGENDA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('C2', 'NOME_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('D2', 'CRM_COD_EVENTO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('E2', 'AGENTE_SAC', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('F2', 'DESCRICAO_PRISMA_BOX', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))  
-        worksheet.write('G2', 'PLACA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('H2', 'DESCRICAO_MODELO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('I2', 'DATA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('J2', 'NUMERO_OS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('K2', 'CONSULTOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('L2', 'SERVIÇOS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('M2', 'RECLAMACOES', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('C2', 'TIPO_ATENDIMENTO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('D2', 'NOME_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('E2', 'CRM_COD_EVENTO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('F2', 'AGENTE_SAC', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('G2', 'DESCRICAO_PRISMA_BOX', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))  
+        worksheet.write('H2', 'PLACA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('I2', 'DESCRICAO_MODELO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('J2', 'DATA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('K2', 'NUMERO_OS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('L2', 'CONSULTOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('M2', 'SERVIÇOS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('N2', 'RECLAMACOES', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('O2', 'REVISAO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         cont = 0
         for i, row in df.iterrows():
             cont += 1
+            servico = str(row.iloc[12]).lower()
+            servico = str(servico).replace('ã','a')
+            servico = str(servico).replace('kms','')
+            servico = str(servico).replace('km','')
+            servico = str(servico).replace(' mil ','.000')
+            # remove espaços duplos
+            servico = ' '.join(servico.split())
+            revisao = 'Não'
+            if 'revisao' in servico or 'revisão' in servico:
+                revisao = 'Sim'
+                if 'revisao 10.000' in servico:
+                    revisao = '10.000'
+                if 'revisao 20.000' in servico:
+                    revisao = '20.000'
+                if 'revisao 30.000' in servico:
+                    revisao = '30.000'
+                if 'revisao 40.000' in servico:
+                    revisao = '40.000'
+                if 'revisao 50.000' in servico:
+                    revisao = '50.000'
+                if 'revisao 60.000' in servico:
+                    revisao = '60.000'
+                if 'revisao 70.000' in servico:
+                    revisao = '70.000'
+                if 'revisao 80.000' in servico:
+                    revisao = '80.000'
+                if 'revisao 90.000' in servico:
+                    revisao = '90.000'
+                if 'revisao 100.000' in servico:
+                    revisao = '100.000'
+                if 'revisao 110.000' in servico:
+                    revisao = '110.000'
+                if 'revisao 120.000' in servico:
+                    revisao = '120.000'
+                if 'revisao 130.000' in servico:
+                    revisao = '130.000'
+                if 'revisao 140.000' in servico:
+                    revisao = '140.000'
+                if 'revisao 150.000' in servico:
+                    revisao = '150.000'
+                if 'revisao 160.000' in servico:
+                    revisao = '160.000'
+                if 'revisao 170.000' in servico:
+                    revisao = '170.000'
+                if 'revisao 180.000' in servico:
+                    revisao = '180.000'
+                    
+                    
+                if 'revisao de 10.000' in servico:
+                    revisao = '10.000'
+                if 'revisao de 20.000' in servico:
+                    revisao = '20.000'
+                if 'revisao de 30.000' in servico:
+                    revisao = '30.000'
+                if 'revisao de 40.000' in servico:
+                    revisao = '40.000'
+                if 'revisao de 50.000' in servico:
+                    revisao = '50.000'
+                if 'revisao de 60.000' in servico:
+                    revisao = '60.000'
+                if 'revisao de 70.000' in servico:
+                    revisao = '70.000'
+                if 'revisao de 80.000' in servico:
+                    revisao = '80.000'
+                if 'revisao de 90.000' in servico:
+                    revisao = '90.000'
+                if 'revisao de 100.000' in servico:
+                    revisao = '100.000'
+                if 'revisao de 110.000' in servico:
+                    revisao = '110.000'
+                if 'revisao de 120.000' in servico:
+                    revisao = '120.000'
+                if 'revisao de 130.000' in servico:
+                    revisao = '130.000'
+                if 'revisao de 140.000' in servico:
+                    revisao = '140.000'
+                if 'revisao de 150.000' in servico:
+                    revisao = '150.000'
+                if 'revisao de 160.000' in servico:
+                    revisao = '160.000'
+                if 'revisao de 170.000' in servico:
+                    revisao = '170.000'
+                if 'revisao de 10 mil' in servico:
+                    revisao = '10 mil'
+                if 'revisao de 20 mil' in servico:
+                    revisao = '20 mil'
+                if 'revisao de 30 mil' in servico:
+                    revisao = '30 mil'
+                if 'revisao de 40 mil' in servico:
+                    revisao = '40 mil'
+                if 'revisao de 50 mil' in servico:
+                    revisao = '50 mil'
+                if 'revisao de 60 mil' in servico:
+                    revisao = '60 mil'
+                if 'revisao de 70 mil' in servico:
+                    revisao = '70 mil'
+                if 'revisao de 80 mil' in servico:
+                    revisao = '80 mil'
+                if 'revisao de 90 mil' in servico:
+                    revisao = '90 mil'
             worksheet.write(f'A{cont+2}', row.iloc[0], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'B{cont+2}', row.iloc[1], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'C{cont+2}', row.iloc[2], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
@@ -290,16 +400,20 @@ def reports_fechamento_agendamento():
             worksheet.write(f'F{cont+2}', row.iloc[5], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'G{cont+2}', row.iloc[6], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'H{cont+2}', row.iloc[7], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-            if isinstance(row.iloc[8], datetime):
-                worksheet.write_datetime(f'I{cont+2}', row.iloc[8], date_format)
-            else:
-                worksheet.write(f'I{cont+2}', row.iloc[8], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'I{cont+2}', row.iloc[8], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'J{cont+2}', row.iloc[9], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+            if isinstance(row.iloc[9], datetime):
+                worksheet.write_datetime(f'J{cont+2}', row.iloc[9], date_format)
+            else:
+                worksheet.write(f'J{cont+2}', row.iloc[9], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'K{cont+2}', row.iloc[10], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'L{cont+2}', row.iloc[11], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'M{cont+2}', row.iloc[13], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-        worksheet.add_table(f'A2:M{cont+2}', {'columns': [{'header': 'COD_EMPRESA'},
+            worksheet.write(f'M{cont+2}', servico, workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'N{cont+2}', row.iloc[14], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'O{cont+2}', revisao, workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+        worksheet.add_table(f'A2:O{cont+2}', {'columns': [{'header': 'COD_EMPRESA'},
                                                         {'header': 'COD_OS_AGENDA'},
+                                                        {'header': 'TIPO_ATENDIMENTO'},
                                                         {'header': 'NOME_CLIENTE'},
                                                         {'header': 'CRM_COD_EVENTO'},
                                                         {'header': 'AGENTE_SAC'},
@@ -311,25 +425,28 @@ def reports_fechamento_agendamento():
                                                         {'header': 'CONSULTOR'},
                                                         {'header': 'SERVIÇOS'},
                                                         {'header': 'RECLAMAÇÕES'},
+                                                        {'header': 'REVISÃO'}
                                                         ],
                                                         'name': 'Agenda',
                                                         'autofilter': True
                                                         })
         worksheet.set_landscape()
         worksheet.print_area(f'A1:Q{cont+2}')
-        worksheet.set_column('A:A', 6.57)
-        worksheet.set_column('B:B', 18.14)
-        worksheet.set_column('C:C', 34.00)
-        worksheet.set_column('D:D', 8.30)
-        worksheet.set_column('E:E', 15.00)
-        worksheet.set_column('F:F', 17.00)
-        worksheet.set_column('G:G', 8.00)
-        worksheet.set_column('H:H', 32.00)
-        worksheet.set_column('I:I', 15.00)
-        worksheet.set_column('J:J', 14.00)
-        worksheet.set_column('K:K', 32.00)
-        worksheet.set_column('L:L', 50.00)
-        worksheet.set_column('M:M', 10.00)
+        worksheet.set_column('A:A', 3.30)
+        worksheet.set_column('B:B', 7.43)
+        worksheet.set_column('C:C', 13.30)
+        worksheet.set_column('D:D', 20.60)
+        worksheet.set_column('E:E', 7.80)
+        worksheet.set_column('F:F', 12.80)
+        worksheet.set_column('G:G', 25.80)
+        worksheet.set_column('H:H', 8.80)
+        worksheet.set_column('I:I', 22.80)
+        worksheet.set_column('J:J', 15.00)
+        worksheet.set_column('K:K', 8.00)
+        worksheet.set_column('L:L', 32.00)
+        worksheet.set_column('M:M', 19.00)
+        worksheet.set_column('N:N', 19.00)
+        worksheet.set_column('O:O', 10.00)
         workbook.close()
         # retorna o arquivo
         file_memory.seek(0)
@@ -494,7 +611,7 @@ def reports_estoque():
                                         AND v.cod_proposta IS NOT null"""
         query = f"""
             SELECT 
-                v.COD_PROPOSTA, 
+                vp.COD_PROPOSTA, 
                 vp.EMISSAO data_proposta, 
                 vp.VENDEDOR cod_vendedor, 
                 eu.NOME_COMPLETO nome_vendedor, 
@@ -516,7 +633,8 @@ def reports_estoque():
                     WHEN c.COD_CID_COM <> NULL THEN cid_com.DESCRICAO
                     WHEN c.COD_CID_RES <> NULL THEN cid_res.DESCRICAO 
                     ELSE cid_cob.DESCRICAO 
-                END cidade
+                END cidade,
+                v.PLACA_USADO
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
                 AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -551,10 +669,11 @@ def reports_estoque():
                 {filtro_aguarda_faturamento}
             ORDER BY pm.DESCRICAO_MODELO
         """
+        # return (query)
         conn_oracle, cur_oracle = oracle()
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
-        
+        # return str(result)
         file_memory = io.BytesIO()
         data_atual = datetime.now().strftime('%d/%m/%Y %H:%M')
         workbook = xlsxwriter.Workbook(file_memory, {'in_memory': True})
@@ -577,7 +696,8 @@ def reports_estoque():
         worksheet.write('O2', 'CIDADE_CLIENTE', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('P2', 'ANDAMENTO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('Q2', 'TEM_USADO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        
+        worksheet.write('R2', 'PLACA_USADO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+
         cont = 0
         for row in result:
             if row[0] and str(row[0]) != "0":
@@ -639,6 +759,8 @@ def reports_estoque():
             worksheet.write(cont + 2, 12, row[12], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
             worksheet.write(cont + 2, 13, row[13], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
             worksheet.write(cont + 2, 14, row[14], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            worksheet.write(cont + 2, 17, row[15], workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            
             
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
@@ -647,6 +769,7 @@ def reports_estoque():
                 WHERE chassi_completo = '{row[7]}')
                 ORDER BY created_at DESC
             """
+            # return(query)
             cur_oracle.execute(query)
             result_andamento = cur_oracle.fetchone()
             if result_andamento and result_andamento[0]:
@@ -663,17 +786,21 @@ def reports_estoque():
                     AND vfp.cod_proposta = '{row[0]}'
                     AND lower(descricao) LIKE ('%usado%')
             """
+            query = query.replace("'None'", "'0'")
+            # return(query)
             cur_oracle.execute(query)
             usado_result = cur_oracle.fetchone()
             if usado_result and usado_result[0] and usado_result[0] > 0:
                 worksheet.write(cont + 2, 16, 'Sim', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
             else:
                 worksheet.write(cont + 2, 16, '', workbook.add_format({'align': 'center', 'valign': 'vcenter'}))
+            
+            
 
 
             cont += 1
-
-        worksheet.add_table(f'A2:Q{cont+2}', {
+        # return('oi')
+        worksheet.add_table(f'A2:R{cont+2}', {
             'columns': [
                 {'header': 'COD_PROPOSTA'},
                 {'header': 'DATA_PROPOSTA'},
@@ -692,6 +819,7 @@ def reports_estoque():
                 {'header': 'CIDADE_CLIENTE'},
                 {'header': 'ULTIMO_ANDAMENTO'},
                 {'header': 'TEM_USADO'},
+                {'header': 'PLACA_USADO'},
             ],
             'name': 'Estoque_Veiculos',
             'autofilter': True
@@ -715,6 +843,7 @@ def reports_estoque():
         worksheet.set_column('O:O', 15.71)
         worksheet.set_column('P:P', 30.00)
         worksheet.set_column('Q:Q', 10.00)
+        worksheet.set_column('R:R', 11.00)
         worksheet.print_area(f'A1:O{cont+2}')
         # imprimir em apneas uma pagina na horizontal
         worksheet.fit_to_pages(1, 0)  # Ajusta para uma página de largura e sem limite de altura
