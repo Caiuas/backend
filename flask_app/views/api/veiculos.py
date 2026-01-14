@@ -7,6 +7,53 @@ load_dotenv()
 
 veiculos_bp = Blueprint('veiculos', __name__)
 
+def format_oracle_date(date_value):
+    """Converte datas do Oracle para formato ISO"""
+    if date_value is None:
+        return None
+    if isinstance(date_value, str):
+        return date_value
+    
+    # Trata especificamente oracle.sql.TIMESTAMPTZ
+    if hasattr(date_value, '__class__') and 'oracle.sql' in str(type(date_value)):
+        try:
+            # Converte para datetime do Python usando os atributos do objeto Oracle
+            if hasattr(date_value, 'year'):
+                date_obj = datetime(
+                    date_value.year, 
+                    date_value.month, 
+                    date_value.day,
+                    getattr(date_value, 'hour', 0),
+                    getattr(date_value, 'minute', 0),
+                    getattr(date_value, 'second', 0),
+                    getattr(date_value, 'microsecond', 0)
+                )
+                return date_obj.isoformat()
+        except Exception as e:
+            return str(date_value)
+    
+    # Se é um objeto com atributos year, month, day
+    if hasattr(date_value, 'year'):
+        try:
+            date_obj = datetime(
+                date_value.year, 
+                date_value.month, 
+                date_value.day,
+                getattr(date_value, 'hour', 0),
+                getattr(date_value, 'minute', 0),
+                getattr(date_value, 'second', 0),
+                getattr(date_value, 'microsecond', 0)
+            )
+            return date_obj.isoformat()
+        except Exception:
+            return str(date_value)
+    
+    # Se já tem isoformat
+    if hasattr(date_value, 'isoformat'):
+        return date_value.isoformat()
+    
+    return str(date_value)
+
 @veiculos_bp.route('/api/veiculos/estoque', methods=['GET'])
 def get_veiculos_estoque():
     try:
@@ -939,3 +986,291 @@ def list_reclamacoes_padroes():
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
+@veiculos_bp.route('/api/veiculos/processos', methods=['GET'])
+@token_required
+def list_processos():
+    try:
+        search = request.args.get('search', None)
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        current_page = int(request.args.get('current_page', 1))
+        search = request.args.get('search', None)
+        limit = int(request.args.get('limit', 10))
+        retorno = {}
+        cod_acesso = '50190'
+        
+        if search:
+            search = f""" 
+                AND (lower(c.NOME) LIKE ('%{search.lower()}%') 
+                OR lower(cvp.responsible) LIKE ('%{search.lower()}%')) 
+                or cvp.cod_proposta = '{search}'
+                or lower(eu.nome_completo) LIKE ('%{search.lower()}%')
+                """
+        
+        query = f"""
+            SELECT saf2.COD_ACESSO 
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf2 ON 1=1
+                    AND saf2.COD_FUNCAO = eu.COD_FUNCAO 
+                WHERE 1=1
+                    AND eu.DEMITIDO <> 'S'
+                    AND saf2.COD_ACESSO = '{cod_acesso}'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY saf2.COD_ACESSO
+        """
+        conn, cur = oracle()
+        cur.execute(query)
+        rows = cur.fetchall()
+        filter_user = ''
+        if len(rows) == 0:
+            filter_user = f"""
+                AND c.cod_cliente IN (
+                SELECT nome FROM empresas_usuarios eu
+                WHERE 1=1
+                    AND lower(eu.EMAIl) = '{email}'
+                )
+            """
+        
+        query = f"""
+            SELECT 
+                count(*)
+            FROM caiuas_veic_proc cvp
+                LEFT JOIN clientes c ON 1=1
+                    AND c.cod_cliente = cvp.cod_cliente
+            where 1=1
+                    {filter_user}
+        """
+        cur.execute(query)
+        total = cur.fetchone()[0]
+        if total == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Não há processos com o filtro'}), 204
+        offset = (current_page - 1) * limit
+        total_pages = (total + limit - 1) // limit
+        start_row = (current_page - 1) * limit + 1
+        end_row = current_page * limit
+        
+        query = f"""
+            SELECT cvp.id_processo,
+                cvp.responsible,
+                TO_CHAR(cvp.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at,
+                TO_CHAR(cvp.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at,
+                cvp.tipo,
+                cvp.status,
+                c.cod_cliente, 
+                c.NOME, 
+                concat(c.PREFIXO_RES,c.TELEFONE_RES) tel_residencial,
+                concat(c.PREFIXO_COM,c.TELEFONE_COM) tel_comercial,
+                concat(c.PREFIXO_FAX,c.TELEFONE_FAX) tel_fax,
+                concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp,
+                c.ENDERECO_ELETRONICO ,
+                c.EMAIL2 ,
+                c.EMAIL_NFE,
+                eu.nome_completo nome_responsavel,
+                cvp.cod_proposta
+            FROM caiuas_veic_proc cvp
+                LEFT JOIN clientes c ON 1=1
+                    AND c.cod_cliente = cvp.cod_cliente
+                LEFT JOIN empresas_usuarios eu ON 1=1
+		AND eu.nome = cvp.responsible
+            where 1=1
+                {filter_user}
+            order by cvp.updated_at desc
+        """
+        cur.execute(query)
+        
+        result = cur.fetchall()
+        retorno['current_page'] = current_page
+        retorno['total_pages'] = total_pages
+        retorno['total'] = total
+        retorno['processos'] = []
+        for row in result:
+            processo = {
+                'id_processo': row[0],
+                'created_at': row[2],
+                'updated_at': row[3],
+                'tipo': row[4],
+                'status': row[5],
+                'cod_proposta': row[16],
+                'cliente': {
+                    'cod_cliente': row[6],
+                    'nome': row[7],
+                    'tel_residencial': row[8],
+                    'tel_comercial': row[9],
+                    'tel_fax': row[10],
+                    'tel_whatsapp': row[11],
+                    'endereco_eletronico': row[12],
+                    'email2': row[13],
+                    'email_nfe': row[14]
+                } if row[6] else {},
+                'responsible': {
+                    'nome_responsavel': row[15],
+                    'cod_responsavel': row[1]
+                } if row[15] else {}
+            }
+            
+            if processo['tipo'] == 1:
+                processo['tipo_descricao'] = 'Veículo novo'
+            elif processo['tipo'] == 2:
+                processo['tipo_descricao'] = 'Veículo usado'
+            elif processo['tipo'] == 3:
+                processo['tipo_descricao'] = 'PCD'
+            else:
+                processo['tipo_descricao'] = 'Desconhecido'
+                   
+            retorno['processos'].append(processo)
+        cur.close()
+        conn.close()
+        
+        
+        
+        return retorno, 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+@veiculos_bp.route('/api/veiculos/processos', methods=['POST'])
+@token_required
+def create_processos():
+    try:
+        cod_cliente = request.json.get('cod_cliente', None)
+        tipo = request.json.get('tipo', None)
+        token_data = request.token_data
+        if not cod_cliente or not tipo:
+            return jsonify({'status': 'error', 'message': 'cod_cliente e tipo são obrigatórios'}), 400
+        if tipo not in [1, 2, 3]:
+            return jsonify({'status': 'error', 'message': 'tipo inválido. Valores permitidos: 1, 2, 3'}), 400
+        email = token_data.get('email').strip().lower()
+        conn, cur = oracle()
+        query = f"""
+            select count(*) from clientes c
+            where 1=1
+                and c.cod_cliente = '{cod_cliente}'
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+        if result[0] == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Cliente não encontrado'}), 400
+        
+        query = f"""
+            select count(*) from empresas_usuarios eu
+            where 1=1
+                and lower(eu.email) = '{email}'
+                and eu.cod_empresa in (11,33,111)
+                AND eu.DEMITIDO = 'N'
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+        if result[0] == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+        
+        
+        
+        query = f"""
+            INSERT INTO caiuas_veic_proc (id_processo, cod_cliente, tipo, status, responsible, created_at, updated_at, ativo)
+            SELECT 
+                (SELECT NVL(MAX(id_processo), 0) + 1 FROM caiuas_veic_proc), -- Gera o ID
+                '{cod_cliente}',
+                {tipo},
+                'Pendente',
+                x.nome,
+                SYSDATE,
+                SYSDATE,
+                1
+            FROM (
+                -- Subquery para buscar o usuário e ordenar
+                SELECT eu.nome
+                FROM empresas_usuarios eu
+                WHERE lower(eu.email) = '{email}'
+                and eu.cod_empresa in (11,33,111)
+                AND eu.DEMITIDO = 'N'
+                ORDER BY eu.cod_empresa ASC
+            ) x
+            WHERE ROWNUM = 1
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+        retorno = {}
+        retorno['message'] = 'Processo criado com sucesso'
+        
+        return jsonify(retorno), 201
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+@veiculos_bp.route('/api/veiculos/processos/desativa', methods=['POST'])
+@token_required
+def desativa_processo():
+    try:
+        id_processo = request.json.get('id_processo', None)
+        token_data = request.token_data
+        cod_acesso = '50190'
+        if not id_processo:
+            return jsonify({'status': 'error', 'message': 'id_processo é obrigatório'}), 400
+        email = token_data.get('email').strip().lower()
+        
+        query = f"""
+            SELECT saf2.COD_ACESSO 
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf2 ON 1=1
+                    AND saf2.COD_FUNCAO = eu.COD_FUNCAO 
+                WHERE 1=1
+                    AND eu.DEMITIDO <> 'S'
+                    AND saf2.COD_ACESSO = '{cod_acesso}'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY saf2.COD_ACESSO
+        """
+        conn, cur = oracle()
+        cur.execute(query)
+        rows = cur.fetchall()
+        filter_user = ''
+        if len(rows) == 0:
+            filter_user = f"""
+                AND c.cod_cliente IN (
+                SELECT nome FROM empresas_usuarios eu
+                WHERE 1=1
+                    AND lower(eu.EMAIl) = '{email}'
+                )
+            """
+        
+        query = f"""
+            select count(*) from caiuas_veic_proc cvp
+            where 1=1
+                and cvp.id_processo = {id_processo}
+                and cvp.ativo = 1
+                {filter_user}
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+        if result[0] == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 400
+        
+        query = f"""
+            UPDATE caiuas_veic_proc
+            SET ativo = 0,
+                status = 'Excluido',
+                updated_at = SYSDATE
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+        retorno = {}
+        retorno['message'] = 'Processo desativado com sucesso'
+        
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
