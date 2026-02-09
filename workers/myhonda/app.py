@@ -53,17 +53,19 @@ def process_leads():
         return
 
     for row in rows:
+        # replace "'"" with "" in all string fields
+        row = [str(field).replace("'", "") if isinstance(field, str) else field for field in row]
         observacao = f"""
-Lead ID: {row[1]}
-nome_completo: {row[2]}
-tipo: {row[3]}
-modelo_interesse: {row[4]}
-cpf: {row[5]}
-cnpj: {row[6]}
-origem: {row[7]}
-celular: {row[8]}
-email: {row[9]}
-concessionaria: {str(row[10]).strip()}
+            Lead ID: {row[1]}
+            nome_completo: {row[2]}
+            tipo: {row[3]}
+            modelo_interesse: {row[4]}
+            cpf: {row[5]}
+            cnpj: {row[6]}
+            origem: {row[7]}
+            celular: {row[8]}
+            email: {row[9]}
+            concessionaria: {str(row[10]).strip()}
         """
         cod_tipo_evento = 799
         if row[3] == 'HAB - Automóveis Novos':
@@ -121,9 +123,10 @@ concessionaria: {str(row[10]).strip()}
                                 'null',
                                 '{row[9]}')
             """
+        
         query_oracle = query_oracle.replace("'None'", 'null')
         query_oracle = query_oracle.replace("'null'", 'null')
-
+        print(query_oracle)
         try:
             conn_oracle, cur_oracle = oracle()
             cur_oracle.execute(query_oracle)
@@ -131,10 +134,12 @@ concessionaria: {str(row[10]).strip()}
             cur_oracle.close()
             conn_oracle.close()
             print(f"[{datetime.now()}] Lead ID {row[1]} inserido com sucesso.")
+            
             query_update = f"""
                 update leads_myhonda set status = 'Integrado'
                 where id_evento = {row[0]}
             """
+            print(query_update)
             cur.execute(query_update)
             conn.commit()
         except Exception as e:
