@@ -1274,3 +1274,113 @@ def desativa_processo():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
+    
+@veiculos_bp.route('/api/veiculos/processos/<int:id_processo>', methods=['GET'])
+@token_required
+def show_processo(id_processo):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_acesso = '50190'
+        
+        query = f"""
+            SELECT saf2.COD_ACESSO 
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf2 ON 1=1
+                    AND saf2.COD_FUNCAO = eu.COD_FUNCAO 
+                WHERE 1=1
+                    AND eu.DEMITIDO <> 'S'
+                    AND saf2.COD_ACESSO = '{cod_acesso}'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY saf2.COD_ACESSO
+        """
+        conn, cur = oracle()
+        cur.execute(query)
+        rows = cur.fetchall()
+        
+        filter_user = ''
+        if len(rows) == 0:
+            filter_user = f"""
+                AND c.cod_cliente IN (
+                SELECT nome FROM empresas_usuarios eu
+                WHERE 1=1
+                    AND lower(eu.EMAIl) = '{email}'
+                )
+            """
+            
+        query = f"""
+            SELECT cvp.id_processo,
+                cvp.responsible,
+                TO_CHAR(cvp.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at,
+                TO_CHAR(cvp.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at,
+                cvp.tipo,
+                cvp.status,
+                c.cod_cliente, 
+                c.NOME, 
+                concat(c.PREFIXO_RES,c.TELEFONE_RES) tel_residencial,
+                concat(c.PREFIXO_COM,c.TELEFONE_COM) tel_comercial,
+                concat(c.PREFIXO_FAX,c.TELEFONE_FAX) tel_fax,
+                concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp,
+                c.ENDERECO_ELETRONICO ,
+                c.EMAIL2 ,
+                c.EMAIL_NFE,
+                eu.nome_completo nome_responsavel,
+                cvp.cod_proposta
+            FROM caiuas_veic_proc cvp
+                LEFT JOIN clientes c ON 1=1
+                    AND c.cod_cliente = cvp.cod_cliente
+                LEFT JOIN empresas_usuarios eu ON 1=1
+		AND eu.nome = cvp.responsible
+            where 1=1
+                and cvp.id_processo = {id_processo}
+                {filter_user}
+            order by cvp.updated_at desc
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 404
+        retorno = {}
+        for row in rows:
+            processo = {
+                'id_processo': row[0],
+                'created_at': row[2],
+                'updated_at': row[3],
+                'tipo': row[4],
+                'status': row[5],
+                'cod_proposta': row[16],
+                'cliente': {
+                    'cod_cliente': row[6],
+                    'nome': row[7],
+                    'tel_residencial': row[8],
+                    'tel_comercial': row[9],
+                    'tel_fax': row[10],
+                    'tel_whatsapp': row[11],
+                    'endereco_eletronico': row[12],
+                    'email2': row[13],
+                    'email_nfe': row[14]
+                } if row[6] else {},
+                'responsible': {
+                    'nome_responsavel': row[15],
+                    'cod_responsavel': row[1]
+                } if row[15] else {}
+            }
+            
+            if processo['tipo'] == 1:
+                processo['tipo_descricao'] = 'Veículo novo'
+            elif processo['tipo'] == 2:
+                processo['tipo_descricao'] = 'Veículo usado'
+            elif processo['tipo'] == 3:
+                processo['tipo_descricao'] = 'PCD'
+            else:
+                processo['tipo_descricao'] = 'Desconhecido'
+                   
+            retorno = processo
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
