@@ -126,7 +126,7 @@ def process_leads():
         
         query_oracle = query_oracle.replace("'None'", 'null')
         query_oracle = query_oracle.replace("'null'", 'null')
-        print(query_oracle)
+        # print(query_oracle)
         try:
             conn_oracle, cur_oracle = oracle()
             cur_oracle.execute(query_oracle)
