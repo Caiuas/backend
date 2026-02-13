@@ -238,6 +238,7 @@ def list_crm_eventos():
         final_date = request.args.get('final_date', None)
         current_page = int(request.args.get('current_page', 1))
         search = request.args.get('search', None)
+        responsible = request.args.get('responsible', None)
         limit = int(request.args.get('limit', 100))
         retorno = {}
         
@@ -324,6 +325,10 @@ def list_crm_eventos():
         filter_responsavel = ''
         if len(rows) == 0:
             filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        if filter_responsavel == '' and responsible:
+            responsible_list = responsible.split(',')
+            responsible_emails = "','".join([r.strip().lower() for r in responsible_list])
+            filter_responsavel = f" AND lower(eu.EMAIl) IN ('{responsible_emails}') "
         
         query = f"""
                 SELECT
@@ -2442,3 +2447,30 @@ def crm_eventos_showroom_muda_modelo_veiculo(id_evento):
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+@crm_bp.route('/api/crm/eventos_tipo', methods=['GET'])
+@token_required
+def list_eventos_tipo():
+    try:
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+            select cet.cod_tipo_evento, cet.desc_tipo_evento 
+            from crm_eventos_tipo cet
+            where 1=1
+                and cet.ativo = 'S'
+            order by cet.cod_area desc, cet.desc_tipo_evento
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        eventos_tipo = []
+        for row in rows:
+            eventos_tipo.append({
+                'cod_tipo_evento': row[0],
+                'desc_tipo_evento': row[1]
+            })
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify({'status': 'success', 'eventos_tipo': eventos_tipo}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    
