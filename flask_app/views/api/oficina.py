@@ -112,6 +112,7 @@ def get_oficina_list_os():
                 WHERE 
                     rn BETWEEN {start_row} AND {end_row}
         """
+        
         cur_oracle.execute(query)
         rows = cur_oracle.fetchall()
         retorno['current_page'] = current_page
