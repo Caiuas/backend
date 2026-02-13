@@ -538,9 +538,9 @@ def list_crm_eventos():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@crm_bp.route('/api/crm/eventos_showroom/<int:id_evento>', methods=['GET'])
+@crm_bp.route('/api/crm/eventos/<int:id_evento>', methods=['GET'])
 @token_required
-def show_crm_eventos_showroom(id_evento):
+def show_crm_eventos(id_evento):
     try:
         retorno = {}
         token_data = request.token_data
