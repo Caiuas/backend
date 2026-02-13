@@ -302,42 +302,44 @@ def reports_fechamento_agendamento():
             revisao = 'Não'
             if 'revisao' in servico or 'revisão' in servico:
                 revisao = 'Sim'
-                if 'revisao 10.000' in servico:
+                if '10.000' in servico:
                     revisao = '10.000'
-                if 'revisao 20.000' in servico:
+                if '20.000' in servico:
                     revisao = '20.000'
-                if 'revisao 30.000' in servico:
+                if '30.000' in servico:
                     revisao = '30.000'
-                if 'revisao 40.000' in servico:
+                if '40.000' in servico:
                     revisao = '40.000'
-                if 'revisao 50.000' in servico:
+                if '50.000' in servico:
                     revisao = '50.000'
-                if 'revisao 60.000' in servico:
+                if '60.000' in servico:
                     revisao = '60.000'
-                if 'revisao 70.000' in servico:
+                if '70.000' in servico:
                     revisao = '70.000'
-                if 'revisao 80.000' in servico:
+                if '80.000' in servico:
                     revisao = '80.000'
-                if 'revisao 90.000' in servico:
+                if '90.000' in servico:
                     revisao = '90.000'
-                if 'revisao 100.000' in servico:
+                if '100.000' in servico:
                     revisao = '100.000'
-                if 'revisao 110.000' in servico:
+                if '110.000' in servico:
                     revisao = '110.000'
-                if 'revisao 120.000' in servico:
+                if '120.000' in servico:
                     revisao = '120.000'
-                if 'revisao 130.000' in servico:
+                if '130.000' in servico:
                     revisao = '130.000'
-                if 'revisao 140.000' in servico:
+                if '140.000' in servico:
                     revisao = '140.000'
-                if 'revisao 150.000' in servico:
+                if '150.000' in servico:
                     revisao = '150.000'
-                if 'revisao 160.000' in servico:
+                if '160.000' in servico:
                     revisao = '160.000'
-                if 'revisao 170.000' in servico:
+                if '170.000' in servico:
                     revisao = '170.000'
-                if 'revisao 180.000' in servico:
+                if '180.000' in servico:
                     revisao = '180.000'
+                if 'recall' in str(servico).lower():
+                    revisao = 'RECALL'
                     
                     
                 if 'revisao de 10.000' in servico:
