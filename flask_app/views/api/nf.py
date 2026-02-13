@@ -7,7 +7,7 @@ load_dotenv()
 
 nf_bp = Blueprint('nf', __name__)
 
-@nf_bp.route('/nf/list', methods=['GET'])
+@nf_bp.route('/api/nf/list', methods=['GET'])
 @token_required
 def list_nfs():
     try:
@@ -18,7 +18,31 @@ def list_nfs():
         final_date = request.args.get('final_date', default=None, type=str)
         cod_empresa = request.args.get('cod_empresa', default=None, type=int)
         search = request.args.get('search', default=None, type=str)
+        numero_os = request.args.get('numero_os', default=None, type=str)
         conn_oracle, cur_oracle = oracle()
+        
+        
+        query_numero_os = "" 
+        if numero_os:
+            numero_os = numero_os.strip()
+            query_numero_os = f"""
+                AND v.numero_os = '{numero_os}'
+            """   
+        
+        query_initial_date = ""
+        if initial_date:
+            try:
+                dt_initial = datetime.strptime(initial_date, '%Y-%m-%d')
+                query_initial_date = f" AND v.emissao >= TO_DATE('{dt_initial.strftime('%Y-%m-%d')} 00:00:00', 'YYYY-MM-DD HH24:MI:SS') "
+            except:
+                return jsonify({'status': 'error', 'message': 'Data inicial inválida! Use o formato YYYY-MM-DD.'}), 400
+        query_final_date = ""
+        if final_date:
+            try:
+                dt_final = datetime.strptime(final_date, '%Y-%m-%d')
+                query_final_date = f" AND v.emissao <= TO_DATE('{dt_final.strftime('%Y-%m-%d')} 23:59:59', 'YYYY-MM-DD HH24:MI:SS') "
+            except:
+                return jsonify({'status': 'error', 'message': 'Data final inválida! Use o formato YYYY-MM-DD.'}), 400
         
         query_search = ""
         if search:
@@ -33,6 +57,10 @@ def list_nfs():
             query_empresa = f"""
                 AND v.cod_empresa = {cod_empresa}
             """
+            if token_data['email'] == 'flamiela@caiuas.com.br':
+                query_empresa = """
+                    AND v.cod_empresa = 11
+                """
         
         query = f"""
             select count(*)
@@ -41,9 +69,13 @@ def list_nfs():
                 AND c.cod_cliente = v.cod_cliente
             WHERE 1=1
                 {query_empresa}
+                {query_initial_date}
+                {query_final_date}
+                {query_numero_os}
                 AND v.serie IN ('5','3','NF')
                 {query_search}
         """
+        # return query
         cur_oracle.execute(query)
         total = cur_oracle.fetchone()[0]
         total_pages = (total + limit - 1) // limit
@@ -77,9 +109,12 @@ def list_nfs():
                 AND c.cod_cliente = v.cod_cliente
             WHERE 1=1
                 {query_empresa}
+                {query_initial_date}
+                {query_final_date}
+                {query_numero_os}
                 AND v.serie IN ('5','3','NF')
                 {query_search}
-            ORDER BY v.controle DESC
+            ORDER BY c.cod_cliente, v.controle DESC
             ) t 
                 )
                 WHERE 
@@ -119,4 +154,86 @@ def list_nfs():
             conn_oracle.close()
         except:
             pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@nf_bp.route('/api/nf/download/xml/<controle>', methods=['GET'])
+@token_required
+def download_nf_xml(controle):
+    try:
+        controle = str(controle).strip().upper()
+        controle, serie, empresa = controle.split('-')
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+            SELECT count(*) FROM vendas v 
+            WHERE 1=1
+                AND v.CONTROLE = '{controle}'
+                AND v.SERIE = '{serie}'
+                AND v.cod_empresa = '{empresa}'
+        """
+        cur_oracle.execute(query)
+        total = cur_oracle.fetchone()[0]
+        if total == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Nota fiscal não encontrada!'}), 400
+        if serie == 'NF':
+            query = f"""
+                SELECT xml_envio FROM NFSE_MOVIMENTO nm 
+                WHERE nm.ID_EMPRESA = {empresa}
+                AND nm.numero_rps = {controle}
+                AND nm.serie_rps = '{serie}'
+            """
+            cur_oracle.execute(query)
+            r = cur_oracle.fetchall()
+            if len(r) == 0:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'XML da Nota Fiscal não encontrado!'}), 400
+            clob = r[0][0]
+            if clob:
+                try:
+                    # No JayDeBeApi/JDBC, o CLOB é um objeto Java.
+                    # Usamos o método getSubString(posicao_inicial, tamanho)
+                    # O índice no Java começa em 1.
+                    xml_data = clob.getSubString(1, int(clob.length()))
+                except Exception as e:
+                    # Fallback caso não seja um objeto Java CLOB padrão
+                    xml_data = str(clob)
+            
+            # retorna o arquivo para download
+            cur_oracle.close()
+            conn_oracle.close()
+            return (xml_data, 200, {
+                'Content-Type': 'application/xml',
+                'Content-Disposition': f'attachment; filename=NFSE_{controle}_{serie}_{empresa}.xml'
+            })
+        else:
+            query = f"""
+                SELECT nm.xml_nota FROM nfe_movimento nm
+                WHERE 1=1
+                    AND nm.numr_controle = '{controle}'
+                    AND nm.serie_nfe = '{serie}'
+                    AND nm.id_empresa = '{empresa}'
+            """
+            cur_oracle.execute(query)
+            r = cur_oracle.fetchall()
+            if len(r) == 0:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'XML da Nota Fiscal não encontrado!'}), 400
+            clob = r[0][0]
+            if clob:
+                try:
+                    # No JayDeBeApi/JDBC, o CLOB é um objeto Java.
+                    # Usamos o método getSubString(posicao_inicial, tamanho)
+                    # O índice no Java começa em 1.
+                    xml_data = clob.getSubString(1, int(clob.length()))
+                except Exception as e:
+                    # Fallback caso não seja um objeto Java CLOB padrão
+                    xml_data = str(clob)
+            return (xml_data, 200, {
+                'Content-Type': 'application/xml',
+                'Content-Disposition': f'attachment; filename=NFE_{controle}_{serie}_{empresa}.xml'
+            })
+    except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
