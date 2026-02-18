@@ -2658,7 +2658,6 @@ def crm_eventos_muda_tipo_evento(id_evento):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-
 @crm_bp.route('/api/crm/eventos_tipo', methods=['GET'])
 @token_required
 def list_eventos_tipo():
