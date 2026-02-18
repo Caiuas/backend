@@ -1528,6 +1528,13 @@ def create_crm_eventos():
             cod_produto = rows[0][0]
 
         query = f"""
+            SELECT seq_crm_COD_EVENTO.nextval FROM dual
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        id_evento_retorno = row[0]
+        
+        query = f"""
             insert into crm_eventos(COD_EMPRESA,
                                     COD_EVENTO,
                                     COD_TIPO_EVENTO,
@@ -1550,7 +1557,7 @@ def create_crm_eventos():
                                     COD_MODELO,
                                     EMAIL_CLIENTE_AVULSO)
                             VALUES(11,
-                            seq_crm_COD_EVENTO.nextval,
+                            {id_evento_retorno},
                             {cod_tipo_evento},
                             2,
                             '{nome_cliente_avulso}' ,
@@ -1573,10 +1580,12 @@ def create_crm_eventos():
         """
         cur_oracle.execute(query)
         conn_oracle.commit()
+        
         cur_oracle.close()
         conn_oracle.close()
         retorno = {}
         retorno['message'] = 'Evento criado com sucesso'
+        retorno['cod_evento'] = str(11) + str(id_evento_retorno)
         return jsonify(retorno), 201
 
     except Exception as e:
