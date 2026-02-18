@@ -573,6 +573,8 @@ def descartar_evento(id_evento):
         if cod_empresa not in ['11', '33']:
             return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
         cod_evento = str(id_evento)[2:]
+        observacao = request.json.get('observacao', '')
+        cod_descarte = request.json.get('cod_descarte', None)
         if not cod_evento.isdigit():
             return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
         conn_oracle, cur_oracle = oracle()
@@ -610,7 +612,7 @@ def descartar_evento(id_evento):
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
-                and cod_descarte is not null
+                and cod_descarte is null
         """
         cur_oracle.execute(query)
         row = cur_oracle.fetchone()
@@ -620,7 +622,24 @@ def descartar_evento(id_evento):
             return jsonify({'status': 'error', 'message': 'Evento já descartado'}), 400
         
         query = f"""
-            update crm_eventos set status = 'D', cod_andamento = null, responsavel_pelo_evento = '{quem_descartou}'
+            SELECT COD_DESCARTE, DESCRICAO_DESCARTE
+            FROM CRM_DESCARTES
+            WHERE 1=1
+                AND ATIVO = 'S'
+                AND COD_DESCARTE = {cod_descarte}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row is None:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Motivo de descarte inválido'}), 400
+        
+        descricao_descarte = row[1]
+        
+        
+        query = f"""
+            update crm_eventos set status = 'D', cod_andamento = null, responsavel_pelo_evento = '{quem_descartou}', cod_descarte = {cod_descarte}
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
@@ -636,7 +655,7 @@ def descartar_evento(id_evento):
                 '{quem_descartou}',
                 1,
                 SYSDATE,
-                'Evento descartado',
+                'Evento descartado, motivo: {descricao_descarte} - {observacao}',
                 'P',
                 seq_crm_COD_ACAO.nextval,
                 '{quem_descartou}')
@@ -698,7 +717,7 @@ def remover_descarte_evento(id_evento):
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
-                and cod_descarte is null
+                and cod_descarte is not null
         """
         cur_oracle.execute(query)
         row = cur_oracle.fetchone()
