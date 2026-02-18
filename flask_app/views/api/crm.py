@@ -757,6 +757,161 @@ def remover_descarte_evento(id_evento):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@crm_bp.route('/api/crm/eventos/encerrar_evento/<int:id_evento>', methods=['PUT'])
+@token_required
+def encerrar_evento(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        observacao = request.json.get('observacao', '')
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_encerrou = rows[0][1]
+        
+        query = f"""
+            select count(*) from crm_eventos
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        
+        query = f"""
+            update crm_eventos set status = 'E', 
+                quem_encerrou = '{quem_encerrou}', 
+                cod_tipo_fechamento = 1,
+                DATA_ENCERRAMENTO = SYSDATE,
+                DATA_ULTIMA_ATUALIZACAO = SYSDATE
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_encerrou}',
+                1,
+                SYSDATE,
+                'Evento encerrado: {observacao}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_encerrou}')
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Evento encerrado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos/reativar_evento/<int:id_evento>', methods=['PUT'])
+@token_required
+def reativar_evento(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_reativou = rows[0][1]
+        
+        query = f"""
+            select count(*) from crm_eventos
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        
+        query = f"""
+            update crm_eventos set status = 'P', cod_andamento = 2, quem_encerrou = null, cod_tipo_fechamento = null, DATA_ENCERRAMENTO = null, DATA_ULTIMA_ATUALIZACAO = SYSDATE
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_reativou}',
+                1,
+                SYSDATE,
+                'Evento reativado',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_reativou}')
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Evento reativado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @crm_bp.route('/api/crm/eventos/<int:id_evento>', methods=['GET'])
 @token_required
 def show_crm_eventos(id_evento):
@@ -849,7 +1004,11 @@ def show_crm_eventos(id_evento):
 			                ) > TRUNC(SYSDATE) THEN 'FUTURO'
 			                -- Caso contrário, é para hoje (de agora até o fim do dia)
 			                ELSE 'TRABALHANDO'
-			            END AS status_atendimento
+			            END AS status_atendimento,
+                        case
+                            when ce.data_encerramento is not null then TO_CHAR(ce.data_encerramento, 'YYYY-MM-DD HH24:MI:SS')
+                            else null
+                        end as data_encerramento
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
@@ -928,7 +1087,8 @@ def show_crm_eventos(id_evento):
             'desc_midia': row[25],
             'data_agendada': data_agendada_iso if row[26] else None,
             'data_visita': data_visita_iso if row[27] else None,
-            'status_atendimento': row[28]
+            'status_atendimento': row[28],
+            'data_encerramento': row[29]
         }
         query = f"""
             SELECT
