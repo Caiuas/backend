@@ -1863,9 +1863,9 @@ def crm_eventos_showroom_muda_cliente(id_evento):
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
         
-@crm_bp.route('/api/crm/eventos_showroom/muda_temperatura/<int:id_evento>', methods=['POST'])
+@crm_bp.route('/api/crm/eventos/muda_temperatura/<int:id_evento>', methods=['POST'])
 @token_required
-def crm_eventos_showroom_muda_temperatura(id_evento):
+def crm_eventos_muda_temperatura(id_evento):
     try:
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
@@ -1885,7 +1885,7 @@ def crm_eventos_showroom_muda_temperatura(id_evento):
                 AND saf.COD_FUNCAO = eu.COD_FUNCAO 
             WHERE 1=1
                 AND eu.DEMITIDO <> 'S'
-                AND lower(eu.EMAIl) = '{email}'
+                AND lower(eu.EMAIl) = '{email.lower()}'
             GROUP BY eu.COD_EMPRESA, eu.nome
             ORDER BY eu.cod_empresa
         """
@@ -1925,19 +1925,20 @@ def crm_eventos_showroom_muda_temperatura(id_evento):
         cod_temperatura = int(cod_temperatura)
         
         query = f"""
-            SELECT saf.COD_ACESSO 
+            SELECT cod_empresa,eu.nome 
             FROM empresas_usuarios eu
             LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
                 AND saf.COD_FUNCAO = eu.COD_FUNCAO 
             WHERE 1=1
                 AND eu.DEMITIDO <> 'S'
                 AND lower(eu.EMAIl) = '{email}'
-                AND saf.COD_ACESSO = '80320'
-            GROUP BY saf.COD_ACESSO
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
         """
         conn_oracle, cur_oracle = oracle()
         cur_oracle.execute(query)
         rows = cur_oracle.fetchall()
+        quem_alterou = rows[0][1]
         filter_responsavel = ''
         if len(rows) == 0:
             filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
@@ -1970,13 +1971,13 @@ def crm_eventos_showroom_muda_temperatura(id_evento):
             values (
                 {cod_empresa},
                 {cod_evento},
-                '{quem_remarcou}',
+                '{quem_alterou}',
                 5,
                 SYSDATE,
                 'Temperatura alterada para: {nome_temperatura[cod_temperatura]}',
                 'P',
                 seq_crm_COD_ACAO.nextval,
-                '{quem_remarcou}'
+                '{quem_alterou}'
             )
         """
         cur_oracle.execute(query)
@@ -2033,7 +2034,7 @@ def crm_eventos_showroom_muda_modelo_veiculo(id_evento):
         """
         cur_oracle.execute(query)
         rows = cur_oracle.fetchall()
-        quem_remarcou = rows[0][1]
+        quem_alterou = rows[0][1]
         
         
         cod_empresa = str(id_evento)[:2]
@@ -2071,7 +2072,7 @@ def crm_eventos_showroom_muda_modelo_veiculo(id_evento):
             where 1=1
                 and ce.cod_empresa = {cod_empresa}
                 and ce.cod_evento = {cod_evento}
-                {filter_responsavel}
+                
         """
         cur_oracle.execute(query)
         rows = cur_oracle.fetchall()
@@ -2115,13 +2116,13 @@ def crm_eventos_showroom_muda_modelo_veiculo(id_evento):
             values (
                 {cod_empresa},
                 {cod_evento},
-                '{quem_remarcou}',
+                '{quem_alterou}',
                 5,
                 SYSDATE,
                 'Modelo de veículo alterado de: {modelo_atual} para {novo_modelo}',
                 'P',
                 seq_crm_COD_ACAO.nextval,
-                '{quem_remarcou}'
+                '{quem_alterou}'
             )
         """
         cur_oracle.execute(query)
@@ -2553,7 +2554,111 @@ def crm_eventos_muda_midia(id_evento):
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
+
+@crm_bp.route('/api/crm/eventos/muda_tipo_evento/<int:id_evento>', methods=['PUT'])
+@token_required
+def crm_eventos_muda_tipo_evento(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        cod_evento = str(id_evento)[2:]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+        cod_tipo_evento = request.json.get('cod_tipo_evento', None)
+        if not cod_tipo_evento or not str(cod_tipo_evento).isdigit():
+            return jsonify({'status': 'error', 'message': 'Código do tipo de evento é obrigatório'}), 400
+        cod_tipo_evento = int(cod_tipo_evento)
+        
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_criou = rows[0][1]
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        
+        
+        
+        query = f"""
+            select data_criacao
+            from crm_eventos ce
+            where 1=1
+                and ce.cod_empresa = {cod_empresa}
+                and ce.cod_evento = {cod_evento}
+                {filter_responsavel}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+
+        query = f"""
+            select cet.cod_tipo_evento, cet.desc_tipo_evento
+            from crm_eventos_tipo cet
+            where 1=1
+                and cet.ativo = 'S'
+                and cet.cod_tipo_evento = {cod_tipo_evento}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Tipo de evento não encontrado'}), 404
+        nome_tipo_evento = rows[0][1]
+
+        query = f"""
+            update crm_eventos
+            set cod_tipo_evento = {cod_tipo_evento}
+            where cod_empresa = {cod_empresa}
+            and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_criou}',
+                136,
+                SYSDATE,
+                'Tipo de evento alterado para: {nome_tipo_evento}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_criou}'
+            )
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['status'] = 'success'
+        retorno['message'] = 'Tipo de evento atualizado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @crm_bp.route('/api/crm/eventos_tipo', methods=['GET'])
 @token_required
 def list_eventos_tipo():
