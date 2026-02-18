@@ -2658,6 +2658,108 @@ def crm_eventos_muda_tipo_evento(id_evento):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@crm_bp.route('/api/crm/eventos/muda_responsavel/<int:id_evento>', methods=['PUT'])
+@token_required
+def crm_eventos_muda_responsavel(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        cod_evento = str(id_evento)[2:]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+        novo_responsavel = request.json.get('email', None)
+        if novo_responsavel:
+            novo_responsavel = novo_responsavel.strip().lower()
+        if not novo_responsavel or not str(novo_responsavel).strip():
+            return jsonify({'status': 'error', 'message': 'Novo responsável é obrigatório'}), 400
+        
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_criou = rows[0][1]
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        
+        query = f"""
+            select data_criacao
+            from crm_eventos ce
+            where 1=1
+                and ce.cod_empresa = {cod_empresa}
+                and ce.cod_evento = {cod_evento}
+                {filter_responsavel}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        query = f"""
+            SELECT nome FROM empresas_usuarios
+            WHERE 1=1
+                AND DEMITIDO <> 'S'
+                AND lower(EMAIl) = '{novo_responsavel}'
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Novo responsável não encontrado no NBS'}), 404
+        novo_responsavel = rows[0][0]
+        
+        query = f"""
+            update crm_eventos
+            set RESPONSAVEL_PELO_EVENTO = '{novo_responsavel}'
+            where cod_empresa = {cod_empresa}
+            and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_criou}',
+                136,
+                SYSDATE,
+                'Responsável pelo evento alterado de {email} para {novo_responsavel}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_criou}'
+            )
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['status'] = 'success'
+        retorno['message'] = 'Responsável pelo evento atualizado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @crm_bp.route('/api/crm/eventos_tipo', methods=['GET'])
 @token_required
 def list_eventos_tipo():
