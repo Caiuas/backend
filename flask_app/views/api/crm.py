@@ -639,7 +639,7 @@ def descartar_evento(id_evento):
         
         
         query = f"""
-            update crm_eventos set status = 'D', cod_andamento = null, responsavel_pelo_evento = '{quem_descartou}', cod_descarte = {cod_descarte}
+            update crm_eventos set status = 'D', cod_andamento = 111, responsavel_pelo_evento = '{quem_descartou}', cod_descarte = {cod_descarte}, cod_tipo_fechamento = 3
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
@@ -727,7 +727,7 @@ def remover_descarte_evento(id_evento):
             return jsonify({'status': 'error', 'message': 'Evento não está descartado'}), 400
         
         query = f"""
-            update crm_eventos set status = 'P', cod_andamento = null, responsavel_pelo_evento = '{quem_removeu_descarte}', cod_descarte = null
+            update crm_eventos set status = 'P', cod_andamento = 2, responsavel_pelo_evento = '{quem_removeu_descarte}', cod_descarte = null, cod_tipo_fechamento = null
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
@@ -975,7 +975,7 @@ def show_crm_eventos(id_evento):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
-@crm_bp.route('/api/crm/eventos_showroom/<int:id_evento>', methods=['DELETE'])
+@crm_bp.route('/api/crm/eventos/<int:id_evento>', methods=['DELETE'])
 @token_required
 def delete_crm_eventos_showroom(id_evento):
     try:
@@ -1130,9 +1130,9 @@ def delete_crm_eventos_showroom(id_evento):
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
-@crm_bp.route('/api/crm/eventos_showroom/param_create', methods=['GET'])
+@crm_bp.route('/api/crm/eventos/param_create', methods=['GET'])
 @token_required
-def get_param_create_crm_eventos_showroom():
+def get_param_create_crm_eventos():
     try:
         retorno = {}
         token_data = request.token_data
@@ -1276,9 +1276,9 @@ def get_param_create_crm_eventos_showroom():
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@crm_bp.route('/api/crm/eventos_showroom', methods=['POST'])
+@crm_bp.route('/api/crm/eventos', methods=['POST'])
 @token_required
-def create_crm_eventos_showroom():
+def create_crm_eventos():
     try:
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
