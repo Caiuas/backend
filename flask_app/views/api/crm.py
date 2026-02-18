@@ -538,6 +538,206 @@ def list_crm_eventos():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@crm_bp.route('/api/crm/motivos_descarte', methods=['GET'])
+@token_required
+def get_motivos_descarte():
+    try:
+        query = f"""
+            SELECT COD_DESCARTE, DESCRICAO_DESCARTE
+            FROM CRM_DESCARTES
+            WHERE 1=1
+                AND ATIVO = 'S'
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            return jsonify({'status': 'error', 'message': 'Não tem motivos de descarte cadastrados'}), 404
+        retorno = {'motivos_descarte': []}
+        for row in rows:
+            retorno['motivos_descarte'].append({
+                'cod_descarte': row[0],
+                'descricao_descarte': row[1]
+            })
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos/descartar_evento/<int:id_evento>', methods=['PUT'])
+@token_required
+def descartar_evento(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_descartou = rows[0][1]
+        
+        query = f"""
+            select count(*) from crm_eventos
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        query = f"""
+            select count(*) from crm_eventos
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+                and cod_descarte is not null
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento já descartado'}), 400
+        
+        query = f"""
+            update crm_eventos set status = 'D', cod_andamento = null, responsavel_pelo_evento = '{quem_descartou}'
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_descartou}',
+                1,
+                SYSDATE,
+                'Evento descartado',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_descartou}')
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Evento descartado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos/remover_descarte/<int:id_evento>', methods=['PUT'])
+@token_required
+def remover_descarte_evento(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_removeu_descarte = rows[0][1]
+        
+        query = f"""
+            select count(*) from crm_eventos
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        query = f"""
+            select count(*) from crm_eventos
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+                and cod_descarte is null
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não está descartado'}), 400
+        
+        query = f"""
+            update crm_eventos set status = 'P', cod_andamento = null, responsavel_pelo_evento = '{quem_removeu_descarte}', cod_descarte = null
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_removeu_descarte}',
+                1,
+                SYSDATE,
+                'Descarte removido do evento',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_removeu_descarte}')
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Descarte removido do evento com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @crm_bp.route('/api/crm/eventos/<int:id_evento>', methods=['GET'])
 @token_required
 def show_crm_eventos(id_evento):
@@ -2784,7 +2984,7 @@ def list_eventos_tipo():
         conn_oracle.close()
         return jsonify({'status': 'success', 'eventos_tipo': eventos_tipo}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500    
     
 @crm_bp.route('/api/crm/midias', methods=['GET'])
 @token_required
