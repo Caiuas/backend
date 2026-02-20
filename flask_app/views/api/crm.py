@@ -236,11 +236,26 @@ def list_crm_eventos():
         tipo_evento = request.args.get('tipo_evento', None)
         initial_date = request.args.get('initial_date', None)
         final_date = request.args.get('final_date', None)
+        created_at_min = request.args.get('created_at_min', None)
+        created_at_max = request.args.get('created_at_max', None)
         current_page = int(request.args.get('current_page', 1))
         search = request.args.get('search', None)
         responsible = request.args.get('responsible', None)
         limit = int(request.args.get('limit', 100))
         retorno = {}
+        
+        filter_created_at = ''
+        if created_at_min and created_at_max:
+            try:
+                datetime.strptime(created_at_min, '%Y-%m-%d')
+                datetime.strptime(created_at_max, '%Y-%m-%d')
+                # se data de periodo for maior que um mês retorne erro
+                if (datetime.strptime(created_at_max, '%Y-%m-%d') - datetime.strptime(created_at_min, '%Y-%m-%d')).days > 31:
+                    return jsonify({'status': 'error', 'message': 'O período de criação não pode ser maior que 31 dias'}), 400
+                filter_created_at = f" AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{created_at_min}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{created_at_max}', 'YYYY-MM-DD') "
+                
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data de criação inválida. Use o formato YYYY-MM-DD'}), 400
         
         filter_tipo_evento = ''
         if tipo_evento:
@@ -332,7 +347,18 @@ def list_crm_eventos():
         
         query = f"""
                 SELECT
-                    count(*)
+                    COUNT(CASE 
+                        WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) < TRUNC(SYSDATE) 
+                        THEN 1 
+                    END) AS ATRASADO,
+                    COUNT(CASE 
+                        WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) = TRUNC(SYSDATE) 
+                        THEN 1 
+                    END) AS HOJE,
+                    COUNT(CASE 
+                        WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) > TRUNC(SYSDATE) 
+                        THEN 1 
+                    END) AS FUTURO
                 FROM
                     CRM_EVENTOS ce
                 LEFT JOIN EMPRESAS_USUARIOS eu ON
@@ -363,12 +389,17 @@ def list_crm_eventos():
                     {filter_initial_date}
                     {filter_final_date}
                     {filter_tipo_evento}
+                    {filter_created_at}
                     --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
                     --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
         """
         # return query
         cur_oracle.execute(query)
-        total = cur_oracle.fetchone()[0]
+        r = cur_oracle.fetchone()
+        atrasado = r[0]
+        hoje = r[1]
+        futuro = r[2]
+        total = atrasado + hoje + futuro
         if total == 0:
             return jsonify({'status': 'error', 'message': 'Não tem eventos showroom no período'}), 404
         offset = (current_page - 1) * limit
@@ -458,6 +489,7 @@ def list_crm_eventos():
                         {filter_search if search else ''}
                         {filter_initial_date}
                         {filter_final_date}
+                        {filter_created_at}
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
                     ORDER BY
@@ -473,6 +505,10 @@ def list_crm_eventos():
         retorno['total_eventos'] = total
         retorno['total_pages'] = total_pages
         retorno['current_page'] = current_page
+        retorno['limit'] = limit
+        retorno['total_atrasados'] = atrasado
+        retorno['total_hoje'] = hoje
+        retorno['total_futuros'] = futuro
         retorno['eventos'] = []
         for row in rows:
             if row[1]:  # data_criacao
@@ -534,6 +570,166 @@ def list_crm_eventos():
         cur_oracle.close()
         conn_oracle.close()
 
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos_retorno/<int:id_evento>', methods=['POST'])
+@token_required
+def create_evento_retorno(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_criou = rows[0][1]
+        
+        query = f"""
+            select count(*) from crm_eventos
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        query = f"""
+            select count(*) from CAIUAS_CRM_RETORNO
+            where 1=1
+                and cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+                and TRUNC(created_at) = TRUNC(SYSDATE)
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] > 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Já existe um evento de retorno criado para esse evento hoje'}), 400
+        
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_criou}',
+                1,
+                SYSDATE,
+                'Foi criado evento de retorno para o cliente',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_criou}')
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        query = f"""
+            INSERT INTO CAIUAS_CRM_RETORNO (id_retorno, cod_empresa, cod_evento, created_at, responsavel)
+            VALUES (
+            (SELECT NVL(MAX(id_retorno), 0) + 1 FROM CAIUAS_CRM_RETORNO),
+            {cod_empresa},
+            {cod_evento},
+            CURRENT_TIMESTAMP,
+            '{quem_criou}'
+            )
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Evento de retorno criado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos_retorno/<int:id_retorno>', methods=['DELETE'])
+@token_required
+def delete_evento_retorno(id_retorno):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_deletou = rows[0][1]
+        
+        query = f"""
+            select cod_empresa, cod_evento from CAIUAS_CRM_RETORNO
+            where 1=1
+                and id_retorno = {id_retorno}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row is None:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento de retorno não encontrado'}), 404
+        cod_empresa = row[0]
+        cod_evento = row[1]
+        
+        query = f"""
+            delete from CAIUAS_CRM_RETORNO
+            where 1=1
+                and id_retorno = {id_retorno}
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_deletou}',
+                1,
+                SYSDATE,
+                'Foi deletado o evento de retorno para o cliente',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_deletou}')
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['message'] = 'Evento de retorno deletado com sucesso'
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -1129,6 +1325,30 @@ def show_crm_eventos(id_evento):
                 'observacao': row[5],
                 'status': row[6]
             })
+        retorno['retornos'] = []
+        query = f"""
+            SELECT 
+                ccr.id_retorno, 
+                ccr.responsavel, 
+                eu.NOME_COMPLETO , 
+                TO_CHAR(ccr.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at
+            FROM CAIUAS_CRM_RETORNO ccr
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = ccr.responsavel
+            where 1=1 
+                and ccr.cod_empresa = {cod_empresa}
+                and ccr.cod_evento = {cod_evento}
+            ORDER BY ccr.created_at DESC
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        for row in rows:
+            retorno['retornos'].append({
+                'id_retorno': row[0],
+                'responsavel': row[1],
+                'nome_completo': row[2],
+                'created_at': row[3]
+            })
         cur_oracle.close()
         conn_oracle.close()
         return jsonify(retorno), 200
@@ -1454,7 +1674,16 @@ def create_crm_eventos():
         cod_modelo = data.get('cod_modelo', None)
         cod_midia = data.get('cod_midia', None)
         obsercacao = data.get('observacao', None)
+        data_criacao = data.get('data_criacao', None)
         cod_modelo = int(cod_modelo) if cod_modelo and str(cod_modelo).isdigit() else None
+        
+        str_data_criacao = "SYSDATE"
+        if data_criacao:
+            try:
+                data_criacao_obj = datetime.fromisoformat(data_criacao)
+                str_data_criacao = f"TO_DATE('{data_criacao_obj.strftime('%Y-%m-%d %H:%M:%S')}', 'YYYY-MM-DD HH24:MI:SS')"
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data de criação em formato inválido. Use ISO format.'}), 400
 
         conn_oracle, cur_oracle = oracle()
         if not cod_tipo_evento:
@@ -1563,11 +1792,11 @@ def create_crm_eventos():
                             '{nome_cliente_avulso}' ,
                             '{fone_cliente_avulso}',
                             {cod_midia},
-                            SYSDATE,
+                            {str_data_criacao},
                             seq_cod_cliente_honda.nextval,
                             {'\'Evento criado via API\'' if not obsercacao else f"'{obsercacao[:200]}'"},
                             '{criou_o_evento}',
-                            SYSDATE,
+                            {str_data_criacao},
                             '{obsercacao}',
                             {cod_andamento},
                             {cod_cliente if cod_cliente else 1},
