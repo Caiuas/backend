@@ -3,6 +3,8 @@ from database import oracle, chatwoot
 from dotenv import load_dotenv
 from datetime import datetime
 from auth import token_required
+import boto3
+import jpype
 load_dotenv()
 
 veiculos_bp = Blueprint('veiculos', __name__)
@@ -53,6 +55,17 @@ def format_oracle_date(date_value):
         return date_value.isoformat()
     
     return str(date_value)
+
+def _read_clob(clob_value):
+    """Converte CLOB do Oracle para string Python"""
+    if clob_value is None:
+        return ''
+    if hasattr(clob_value, 'read'):
+        return clob_value.read()
+    if hasattr(clob_value, 'getSubString'):
+        length = int(clob_value.length())
+        return str(clob_value.getSubString(jpype.JLong(1), length))
+    return str(clob_value)
 
 @veiculos_bp.route('/api/veiculos/estoque', methods=['GET'])
 def get_veiculos_estoque():
@@ -1170,12 +1183,16 @@ def create_processos():
             conn.close()
             return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
         
-        
+        query = f"""
+            SELECT NVL(MAX(id_processo), 0) + 1 FROM caiuas_veic_proc
+        """
+        cur.execute(query)
+        new_id = cur.fetchone()[0]
         
         query = f"""
             INSERT INTO caiuas_veic_proc (id_processo, cod_cliente, tipo, status, responsible, created_at, updated_at, ativo)
             SELECT 
-                (SELECT NVL(MAX(id_processo), 0) + 1 FROM caiuas_veic_proc), -- Gera o ID
+                {new_id},
                 '{cod_cliente}',
                 {tipo},
                 'Pendente',
@@ -1196,12 +1213,143 @@ def create_processos():
         """
         cur.execute(query)
         conn.commit()
+        query = f"""
+            INSERT INTO CAIUAS_VEIC_PROC_ETAPAS (id_etapa, nome_etapa, autorizadores, tipo, id_processo, created_at, UPDATED_AT, explicacao, observacao)
+            SELECT (SELECT NVL(MAX(id_etapa), 0) FROM CAIUAS_VEIC_PROC_ETAPAS) + ROWNUM AS id_etapa,
+                nome_etapa, 
+                autorizadores, 
+                {tipo},
+                {new_id},
+                CURRENT_TIMESTAMP, 
+                CURRENT_TIMESTAMP,
+                explicacao,
+                null
+            FROM CAIUAS_VEIC_PROC_ET_MOD
+            WHERE 1=1
+                AND tipo = {tipo}
+        """
+        cur.execute(query)
+        conn.commit()
         cur.close()
         conn.close()
+        
         retorno = {}
         retorno['message'] = 'Processo criado com sucesso'
         
         return jsonify(retorno), 201
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/veiculos/processos/obs_etapa', methods=['POST'])
+@token_required
+def add_obs_etapa():
+    try:
+        id_etapa = request.json.get('id_etapa', None)
+        observacao = request.json.get('observacao', None)
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        if not id_etapa or not observacao:
+            return jsonify({'status': 'error', 'message': 'id_etapa e observacao são obrigatórios'}), 400
+        conn, cur = oracle()
+        query = f"""
+            select id_processo from CAIUAS_VEIC_PROC_ETAPAS
+            where 1=1
+                and id_etapa = {id_etapa}
+        """
+        cur.execute(query)
+        id_processo = cur.fetchone()
+        if not id_processo:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Etapa não encontrada'}), 400
+        
+        query = f"""
+            UPDATE CAIUAS_VEIC_PROC_ETAPAS
+            SET observacao = '{observacao}',
+                updated_at = SYSDATE
+            WHERE id_etapa = {id_etapa}
+        """
+        cur.execute(query)
+        conn.commit()
+        
+        query = f"""
+            SELECT 
+                cvpe.id_etapa, 
+                cvpe.nome_etapa, 
+                cvpe.autorizadores, 
+                cvpe.tipo, 
+                cvpe.explicacao, 
+                TO_CHAR(cvpe.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at,
+                TO_CHAR(cvpe.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at,
+                cvpe.observacao
+            FROM CAIUAS_VEIC_PROC_ETAPAS cvpe 
+            WHERE 1=1
+                and cvpe.id_etapa = {id_etapa}
+            ORDER BY cvpe.id_etapa
+        """
+        # return query
+        cur.execute(query)
+        etapas = cur.fetchall()
+        retorno = {}
+        for etapa in etapas:
+            autorizadores = []
+            aut = etapa[2].split(',') if etapa[2] else []
+            for a in aut:
+                query = f"""
+                    SELECT eu.nome_completo, eu.EMAIL FROM EMPRESAS_USUARIOS eu
+                    WHERE upper(nome) = '{a.strip().upper()}'
+                """
+                autorizador = {}
+                cur.execute(query)
+                result = cur.fetchone()
+                if result:
+                    autorizador['nome_completo'] = result[0]
+                    autorizador['usuario_nbs'] = str(a).upper().strip()
+                    autorizador['email'] = result[1]
+                    query = f"""
+                        SELECT 
+                            TO_CHAR(cvpea.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at,
+                            TO_CHAR(cvpea.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at
+                        FROM CAIUAS_VEIC_PROC_ETAPAS_AUT cvpea
+                        WHERE 1=1
+                            AND cvpea.autorizador = '{a.strip().upper()}'
+                            AND cvpea.id_etapa = {etapa[0]}
+                    """
+                    cur.execute(query)
+                    aut_info = cur.fetchone()
+                    if aut_info:
+                        autorizador['created_at'] = aut_info[0]
+                        autorizador['updated_at'] = aut_info[1]
+                        autorizador['status'] = 'Autorizado'
+                    else:
+                        autorizador['created_at'] = None
+                        autorizador['updated_at'] = None
+                        autorizador['status'] = 'Pendente'
+                    autorizadores.append(autorizador)
+            etapa_info = {
+                'id_etapa': etapa[0],
+                'nome_etapa': etapa[1],
+                'autorizadores': autorizadores,
+                'tipo': etapa[3],
+                # essa explicação é um clob, converta para o texto
+                'explicacao': _read_clob(etapa[4]),
+                'observacao': _read_clob(etapa[7]),
+                'created_at': etapa[5],
+                'updated_at': etapa[6],
+                'arquivos': []
+            }
+            retorno['etapa'] = etapa_info
+        query = f"""
+            update caiuas_veic_proc
+            set updated_at = SYSDATE
+            where id_processo = {id_processo[0]}
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
@@ -1273,7 +1421,6 @@ def desativa_processo():
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
-    
     
 @veiculos_bp.route('/api/veiculos/processos/<int:id_processo>', methods=['GET'])
 @token_required
@@ -1380,6 +1527,79 @@ def show_processo(id_processo):
                 processo['tipo_descricao'] = 'Desconhecido'
                    
             retorno = processo
+        query = f"""
+            SELECT 
+                cvpe.id_etapa, 
+                cvpe.nome_etapa, 
+                cvpe.autorizadores, 
+                cvpe.tipo, 
+                cvpe.explicacao, 
+                TO_CHAR(cvpe.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at,
+                TO_CHAR(cvpe.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at,
+                cvpe.observacao
+            FROM CAIUAS_VEIC_PROC_ETAPAS cvpe 
+            WHERE 1=1
+                and cvpe.tipo = {retorno['tipo']}
+                and cvpe.id_processo = {id_processo}
+            ORDER BY cvpe.id_etapa
+        """
+        # return query
+        cur.execute(query)
+        etapas = cur.fetchall()
+        retorno['etapas'] = []
+        for etapa in etapas:
+            autorizadores = []
+            aut = etapa[2].split(',') if etapa[2] else []
+            for a in aut:
+                query = f"""
+                    SELECT eu.nome_completo, eu.EMAIL FROM EMPRESAS_USUARIOS eu
+                    WHERE upper(nome) = '{a.strip().upper()}'
+                """
+                autorizador = {}
+                cur.execute(query)
+                result = cur.fetchone()
+                if result:
+                    autorizador['nome_completo'] = result[0]
+                    autorizador['usuario_nbs'] = str(a).upper().strip()
+                    autorizador['email'] = result[1]
+                    query = f"""
+                        SELECT 
+                            TO_CHAR(cvpea.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at,
+                            TO_CHAR(cvpea.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at
+                        FROM CAIUAS_VEIC_PROC_ETAPAS_AUT cvpea
+                        WHERE 1=1
+                            AND cvpea.autorizador = '{a.strip().upper()}'
+                            AND cvpea.id_etapa = {etapa[0]}
+                    """
+                    cur.execute(query)
+                    aut_info = cur.fetchone()
+                    if aut_info:
+                        autorizador['created_at'] = aut_info[0]
+                        autorizador['updated_at'] = aut_info[1]
+                        autorizador['status'] = 'Autorizado'
+                    else:
+                        autorizador['created_at'] = None
+                        autorizador['updated_at'] = None
+                        autorizador['status'] = 'Pendente'
+                    autorizadores.append(autorizador)
+            etapa_info = {
+                'id_etapa': etapa[0],
+                'nome_etapa': etapa[1],
+                'autorizadores': autorizadores,
+                'tipo': etapa[3],
+                # essa explicação é um clob, converta para o texto
+                'explicacao': _read_clob(etapa[4]),
+                'observacao': _read_clob(etapa[7]),
+                'created_at': etapa[5],
+                'updated_at': etapa[6]
+            }
+            etapa_info['arquivos'] = []
+            retorno['etapas'].append(etapa_info)
+        
+        
+        cur.close()
+        conn.close()
+        
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
