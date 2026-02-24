@@ -1609,7 +1609,8 @@ def get_param_create_crm_eventos():
             FROM PRODUTOS_MODELOS pm
             WHERE 1=1
                 --AND pm.ATIVO = 'S'
-                and pm.internet = 'S'
+--                and pm.internet = 'S'
+                and pm.cod_produto = '110589'
             order by pm.descricao_modelo
         """
         cur_oracle.execute(query)
