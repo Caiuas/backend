@@ -75,3 +75,7 @@ def token_required(f):
 
     return decorated
 
+# rota de teste /
+@app.route('/', methods=['GET'])
+def home():
+    return 'oi'
