@@ -1039,11 +1039,7 @@ def list_processos():
         filter_user = ''
         if len(rows) == 0:
             filter_user = f"""
-                AND c.cod_cliente IN (
-                SELECT nome FROM empresas_usuarios eu
-                WHERE 1=1
                     AND lower(eu.EMAIl) = '{email}'
-                )
             """
         
         query = f"""
@@ -1052,6 +1048,8 @@ def list_processos():
             FROM caiuas_veic_proc cvp
                 LEFT JOIN clientes c ON 1=1
                     AND c.cod_cliente = cvp.cod_cliente
+                LEFT JOIN empresas_usuarios eu ON 1=1
+		            AND eu.nome = cvp.responsible
             where 1=1
                     {filter_user}
         """
@@ -1446,15 +1444,10 @@ def show_processo(id_processo):
         conn, cur = oracle()
         cur.execute(query)
         rows = cur.fetchall()
-        
         filter_user = ''
         if len(rows) == 0:
             filter_user = f"""
-                AND c.cod_cliente IN (
-                SELECT nome FROM empresas_usuarios eu
-                WHERE 1=1
                     AND lower(eu.EMAIl) = '{email}'
-                )
             """
             
         query = f"""
@@ -1479,7 +1472,7 @@ def show_processo(id_processo):
                 LEFT JOIN clientes c ON 1=1
                     AND c.cod_cliente = cvp.cod_cliente
                 LEFT JOIN empresas_usuarios eu ON 1=1
-		AND eu.nome = cvp.responsible
+		            AND eu.nome = cvp.responsible
             where 1=1
                 and cvp.id_processo = {id_processo}
                 {filter_user}
@@ -1536,7 +1529,8 @@ def show_processo(id_processo):
                 cvpe.explicacao, 
                 TO_CHAR(cvpe.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at,
                 TO_CHAR(cvpe.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at,
-                cvpe.observacao
+                cvpe.observacao,
+                cvpe.status
             FROM CAIUAS_VEIC_PROC_ETAPAS cvpe 
             WHERE 1=1
                 and cvpe.tipo = {retorno['tipo']}
@@ -1591,9 +1585,36 @@ def show_processo(id_processo):
                 'explicacao': _read_clob(etapa[4]),
                 'observacao': _read_clob(etapa[7]),
                 'created_at': etapa[5],
-                'updated_at': etapa[6]
+                'updated_at': etapa[6],
+                'status': etapa[8],
+                'arquivos': []
             }
-            etapa_info['arquivos'] = []
+            query = f"""
+            SELECT cvpef.id_file_etapa, cvpef.id_etapa, cvpef.id_file,
+            cf.id_file, cf.file_key, cf.bucket, cf.file_size, cf.content_type, cf.region, cf.created_at, cf.old_file_name
+            FROM CAIUAS_VEIC_PROC_ETAPAS_files cvpef
+            LEFT JOIN caiuas_files cf ON 1=1
+                AND cf.id_file = cvpef.id_file
+            WHERE 1=1
+                and cvpef.id_etapa = {etapa[0]}
+            """
+            cur.execute(query)
+            arquivos = cur.fetchall()
+            for arquivo in arquivos:
+                arquivo_info = {
+                    'id_file_etapa': arquivo[0],
+                    'id_etapa': arquivo[1],
+                    'id_file': arquivo[2],
+                    'file_key': arquivo[4],
+                    'bucket': arquivo[5],
+                    'file_size': arquivo[6],
+                    'content_type': arquivo[7],
+                    'region': arquivo[8],
+                    'created_at': arquivo[9],
+                    'old_file_name': arquivo[10]
+                }
+                etapa_info['arquivos'].append(arquivo_info)
+            
             retorno['etapas'].append(etapa_info)
         
         
@@ -1601,6 +1622,243 @@ def show_processo(id_processo):
         conn.close()
         
         return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+@veiculos_bp.route('/api/veiculos/processos/autorizar', methods=['POST'])
+@token_required
+def autorizar_etapa():
+    try:
+        id_etapa = request.json.get('id_etapa', None)
+        usuario_nbs = request.json.get('usuario_nbs', None)  # Autorizador específico enviado pelo frontend
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        
+        if not id_etapa:
+            return jsonify({'status': 'error', 'message': 'id_etapa é obrigatório'}), 400
+        
+        if not usuario_nbs:
+            return jsonify({'status': 'error', 'message': 'usuario_nbs é obrigatório'}), 400
+        
+        usuario_nbs = usuario_nbs.strip().upper()
+        
+        conn, cur = oracle()
+        
+        # 1. Busca o nome do usuário pelo email
+        query = f"""
+            SELECT eu.NOME
+            FROM empresas_usuarios eu
+            WHERE lower(eu.EMAIL) = '{email}'
+        """
+        cur.execute(query)
+        results = cur.fetchall()
+        
+        if not results:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+        
+        # Lista de nomes do usuário (pode ter mais de um)
+        nomes_usuario = [str(row[0]).upper().strip() for row in results]
+        
+        # 2. Verifica se o usuario_nbs enviado pertence ao usuário logado
+        if usuario_nbs not in nomes_usuario:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Não pode autorizar etapa por outro usuário'}), 403
+        
+        # 3. Busca os autorizadores da etapa
+        query = f"""
+            SELECT cvpe.AUTORIZADORES, cvpe.ID_PROCESSO
+            FROM CAIUAS_VEIC_PROC_ETAPAS cvpe
+            WHERE cvpe.ID_ETAPA = {id_etapa}
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+        
+        if not result:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Etapa não encontrada'}), 404
+        
+        autorizadores = result[0]
+        id_processo = result[1]
+        
+        if not autorizadores:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Etapa não possui autorizadores configurados'}), 400
+        
+        # 4. Verifica se o usuario_nbs está na lista de autorizadores da etapa
+        autorizadores_list = [a.strip().upper() for a in autorizadores.split(',')]
+        
+        if usuario_nbs not in autorizadores_list:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não é autorizador desta etapa'}), 400
+        
+        # 5. Verifica se já existe autorização para este usuario_nbs específico
+        query = f"""
+            SELECT AUTORIZADOR, id_autorizacao
+            FROM CAIUAS_VEIC_PROC_ETAPAS_AUT
+            WHERE ID_ETAPA = {id_etapa}
+              AND UPPER(AUTORIZADOR) = '{usuario_nbs}'
+        """
+        cur.execute(query)
+        autorizacao_existente = cur.fetchone()
+        
+        if autorizacao_existente:
+            # Já existe autorização para este usuario_nbs
+            # Verifica se deve remover (precisa do parâmetro remove_status)
+            remove_status = request.json.get('remove_status', False)
+            
+            if not remove_status:
+                cur.close()
+                conn.close()
+                return jsonify({
+                    'status': 'info',
+                    'message': 'Autorização já existe',
+                    'autorizador': usuario_nbs,
+                    'id_etapa': id_etapa,
+                    'acao': 'ja_autorizado'
+                }), 200
+            
+            # remove_status = True → remover autorização
+            id_autorizacao = autorizacao_existente[1]
+            
+            # Verifica se o processo já está com status Autorizado
+            query = f"""
+                SELECT STATUS
+                FROM caiuas_veic_proc
+                WHERE id_processo = {id_processo}
+            """
+            cur.execute(query)
+            status_processo = cur.fetchone()
+            
+            if status_processo and status_processo[0] == 'Autorizado':
+                cur.close()
+                conn.close()
+                return jsonify({'status': 'error', 'message': 'Não é possível remover autorização de um processo já autorizado'}), 400
+            
+            # Remove a autorização existente pelo ID específico
+            query = f"""
+                DELETE FROM CAIUAS_VEIC_PROC_ETAPAS_AUT
+                WHERE ID_AUTORIZACAO = {id_autorizacao}
+            """
+            cur.execute(query)
+            
+            # Atualiza o status da etapa para Pendente
+            query = f"""
+                UPDATE CAIUAS_VEIC_PROC_ETAPAS
+                SET STATUS = 'Pendente',
+                    UPDATED_AT = SYSDATE
+                WHERE ID_ETAPA = {id_etapa}
+            """
+            cur.execute(query)
+            
+            # Atualiza o updated_at do processo
+            query = f"""
+                UPDATE caiuas_veic_proc
+                SET updated_at = SYSDATE
+                WHERE id_processo = {id_processo}
+            """
+            cur.execute(query)
+            conn.commit()
+            
+            cur.close()
+            conn.close()
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Autorização removida com sucesso',
+                'autorizador': usuario_nbs,
+                'id_etapa': id_etapa,
+                'acao': 'removido'
+            }), 200
+        
+        # 6. Não existe autorização → adicionar para o usuario_nbs
+        query = f"""
+            INSERT INTO CAIUAS_VEIC_PROC_ETAPAS_AUT (ID_AUTORIZACAO, ID_ETAPA, AUTORIZADOR, CREATED_AT, UPDATED_AT)
+            VALUES (
+                (SELECT NVL(MAX(ID_AUTORIZACAO), 0) + 1 FROM CAIUAS_VEIC_PROC_ETAPAS_AUT),
+                {id_etapa},
+                '{usuario_nbs}',
+                SYSDATE,
+                SYSDATE
+            )
+        """
+        cur.execute(query)
+        
+        # 7. Verifica se todas as autorizações da etapa foram preenchidas
+        total_autorizadores = len(autorizadores_list)
+        
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC_ETAPAS_AUT
+            WHERE ID_ETAPA = {id_etapa}
+        """
+        cur.execute(query)
+        total_autorizacoes = cur.fetchone()[0]
+        
+        etapa_autorizada = False
+        processo_autorizado = False
+        
+        if total_autorizacoes >= total_autorizadores:
+            # Todas as autorizações preenchidas → marca etapa como Autorizado
+            query = f"""
+                UPDATE CAIUAS_VEIC_PROC_ETAPAS
+                SET STATUS = 'Autorizado',
+                    UPDATED_AT = SYSDATE
+                WHERE ID_ETAPA = {id_etapa}
+            """
+            cur.execute(query)
+            etapa_autorizada = True
+            
+            # 8. Verifica se todas as etapas do processo estão autorizadas
+            query = f"""
+                SELECT COUNT(*)
+                FROM CAIUAS_VEIC_PROC_ETAPAS
+                WHERE ID_PROCESSO = {id_processo}
+                  AND (STATUS IS NULL OR STATUS <> 'Autorizado')
+            """
+            cur.execute(query)
+            etapas_pendentes = cur.fetchone()[0]
+            
+            if etapas_pendentes == 0:
+                # Todas as etapas autorizadas → marca processo como Autorizado
+                query = f"""
+                    UPDATE CAIUAS_VEIC_PROC
+                    SET STATUS = 'Autorizado',
+                        UPDATED_AT = SYSDATE
+                    WHERE ID_PROCESSO = {id_processo}
+                """
+                cur.execute(query)
+                processo_autorizado = True
+        
+        # 9. Atualiza o updated_at do processo
+        query = f"""
+            UPDATE caiuas_veic_proc
+            SET updated_at = SYSDATE
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+        conn.commit()
+        
+        cur.close()
+        conn.close()
+        
+        response_data = {
+            'status': 'success',
+            'message': 'Etapa autorizada com sucesso',
+            'autorizador': usuario_nbs,
+            'id_etapa': id_etapa,
+            'acao': 'autorizado',
+            'etapa_autorizada': etapa_autorizada,
+            'processo_autorizado': processo_autorizado
+        }
+        
+        return jsonify(response_data), 200
+        
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
