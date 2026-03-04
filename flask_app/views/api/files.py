@@ -2,58 +2,338 @@ from flask import Blueprint, jsonify, request
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
-# from auth import token_required
+from auth import token_required
 import uuid
 import boto3
+from botocore.config import Config
+from database import postgres_site, oracle
 
 load_dotenv()
 files_bp = Blueprint('files_bp', __name__)
 
 @files_bp.route('/api/files/generate_presigned_url', methods=['POST'])
-# @token_required
+# @token_required # Descomente se for usar autenticação
 def generate_presigned_url():
     try:
+        # 1. Captura os dados
         file_name = request.json.get('file_name')
         file_size = request.json.get('file_size')
-        uuid_str = str(uuid.uuid4())
-        now = datetime.now()
-        # pasta no formato YYYY/MM/DD
-        date_path = now.strftime("%Y/%m/%d")
-        file_name = f"{date_path}/{uuid_str}_{file_name}"
-        
-        
+        file_type = request.json.get('file_type') # Recebe ex: "image/png"
+
+        # Validações básicas
         if not file_name:
             return jsonify({"error": "file_name is required"}), 400
-        if not file_size:
-            return jsonify({"error": "file_size is required"}), 400
-        if type(file_size) is not int:
-            return jsonify({"error": "file_size must be an integer"}), 400
         
-        # conn, cur = postgres_site()
-        # query = f"""
-        #     insert into files (filename, url, file_size, old_filename, created_at)
-        #     values
-        #     ( '{uuid_str}', '{file_name}', {file_size}, '{file_name}', now() )
-        # """
-        # cur.execute(query)
-        # conn.commit()
-        # cur.close()
-        # conn.close()
+        # 2. Tratamento do Content-Type (O PULO DO GATO)
+        # Se não vier tipo, usamos binário genérico.
+        # JAMAIS formate isso como string "'content-type': ...", use o valor puro.
+        if not file_type:
+            file_type = 'application/octet-stream'
 
+        # 3. Prepara o caminho do arquivo
+        uuid_str = str(uuid.uuid4())
+        now = datetime.now()
+        date_path = now.strftime("%Y/%m/%d")
+        # Nome final no S3
+        full_file_name = f"{date_path}/{uuid_str}"
+
+        # 4. Configura o Cliente S3 com Assinatura v4
         s3 = boto3.client(
             's3',
             aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
             aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-            region_name='sa-east-1'
+            region_name='sa-east-1',
+            config=Config(signature_version='s3v4') # Força padrão seguro
         )
 
+        # 5. Gera a URL Assinada
+        # O 'ContentType' aqui deve ser EXATAMENTE igual ao header do frontend
         presigned_url = s3.generate_presigned_url(
             'put_object',
-            Params={'Bucket': 'intranet-caiuas2', 'Key': file_name},
+            Params={
+                'Bucket': 'processos-caiuas', 
+                'Key': full_file_name, 
+                'ContentType': file_type 
+            },
             ExpiresIn=3600
         )
+        
+        print(f"DEBUG - Gerado URL para: {full_file_name} | Tipo: {file_type}")
 
-        return jsonify({"presigned_url": presigned_url}), 200
+        return jsonify({
+            "presigned_url": presigned_url,
+            "key": full_file_name, # Útil retornar a chave para salvar no banco depois
+            "bucket": 'processos-caiuas',
+            "content_type": file_type,
+            "region": 'sa-east-1'
+        }), 200
 
     except Exception as e:
+        print(f"ERRO: {e}")
         return jsonify({"error": str(e)}), 500
+    
+@files_bp.route('/api/files/register_file', methods=['POST'])
+# @token_required # Descomente se for usar autenticação
+def register_file():
+    try:
+        # 1. Captura os dados
+        file_key = request.json.get('file_key') # A chave gerada no S3 (ex: "2024/06/10/uuid")
+        file_name = request.json.get('file_name') # O nome original do arquivo (ex: "foto.png")
+        file_type = request.json.get('file_type') # O tipo do arquivo (ex: "image/png")
+        file_size = request.json.get('file_size') # O tamanho do arquivo em bytes
+
+        # Validações básicas
+        if not file_key or not file_name or not file_type:
+            return jsonify({"error": "file_key, file_name and file_type are required"}), 400
+
+        # 2. Aqui você pode salvar as informações no banco de dados
+        # Exemplo: Salvar na tabela 'files' com colunas (id, key, name, type, created_at)
+        # db.execute("INSERT INTO files (key, name, type) VALUES (%s, %s, %s)", (file_key, file_name, file_type))
+        
+        query = f"""
+            insert into files (filename, url, file_size, old_filename, created_at) values (
+                '{file_key}', 
+                'https://processos-caiuas.s3.sa-east-1.amazonaws.com/{file_key}', 
+                {file_size}, 
+                '{file_name}', 
+                now()
+            )
+            RETURNING id_file
+        """
+        conn, cursor = postgres_site()
+        cursor.execute(query)
+        id_file = cursor.fetchone()[0]
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        retorno = {}
+        retorno['id_file'] = id_file
+        retorno['filename'] = file_key
+        retorno['url'] = f'https://processos-caiuas.s3.sa-east-1.amazonaws.com/{file_key}'
+        retorno['file_size'] = file_size
+        retorno['old_filename'] = file_name
+        retorno['created_at'] = datetime.now().isoformat()
+        retorno['message'] = "File registered successfully"
+
+        print(f"DEBUG - Registrado arquivo: {file_key} | Nome: {file_name} | Tipo: {file_type}")
+
+        return jsonify(retorno), 200
+
+    except Exception as e:
+        print(f"ERRO: {e}")
+        return jsonify({"error": str(e)}), 500
+    
+@files_bp.route('/api/files/register_file_processos', methods=['POST'])
+@token_required # Descomente se for usar autenticação
+def register_file_processos():
+    try:
+        # 1. Captura os dados
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        file_key = request.json.get('file_key') # A chave gerada no S3 (ex: "2024/06/10/uuid")
+        bucket = request.json.get('bucket') # O nome original do arquivo (ex: "foto.png")
+        file_size = request.json.get('file_size') # O tipo do arquivo (ex: "image/png")
+        content_type = request.json.get('content_type') # O tamanho do arquivo em bytes
+        id_etapa = request.json.get('id_etapa') # ID da etapa do processo
+        region = request.json.get('region') # Região do bucket (ex: "sa-east-1")
+        old_file_name = request.json.get('old_file_name') # O nome original do arquivo (ex: "foto.png")
+
+        # Validações básicas
+        # Se todas as keys não forem fornecidas, retorna erro
+        if not all([file_key, bucket, file_size, content_type, id_etapa, region]):
+            return jsonify({"error": "file_key, bucket, file_size, content_type, id_etapa and region are required"}), 400
+        
+        query = f"""
+            SELECT cvpe.AUTORIZADORES, cvp.RESPONSIBLE  
+            FROM CAIUAS_VEIC_PROC_ETAPAS cvpe
+            LEFT JOIN CAIUAS_VEIC_PROC cvp ON 1=1
+                AND cvp.ID_PROCESSO = cvpe.ID_PROCESSO 
+            WHERE 1=1
+                AND cvpe.ID_ETAPA = {id_etapa}
+        """
+        conn_oracle, cursor_oracle = oracle()
+        cursor_oracle.execute(query)
+        result = cursor_oracle.fetchone()
+        if not result:
+            cursor_oracle.close()
+            conn_oracle.close()
+            return jsonify({"error": "Etapa não encontrada"}), 400
+        autorizadores = result[0]
+        responsavel = str(result[1]).lower() if result[1] else None
+        
+        query = f"""
+            SELECT eu.NOME  
+            FROM empresas_usuarios eu
+            WHERE 1=1
+                AND lower(eu.EMAIL) = '{email.strip().lower()}'
+        """
+        cursor_oracle.execute(query)
+        results = cursor_oracle.fetchall()
+        if not results:
+            cursor_oracle.close()
+            conn_oracle.close()
+            return jsonify({"error": "Usuário não encontrado no NBS"}), 400
+        usuarios_list = []
+        for row in results:
+            usuarios_list.append(str(row[0]).lower())
+        
+        autorizadores_list = [a.strip().lower() for a in autorizadores.split(',')] if autorizadores else []
+        quem_tem_permissao = set(autorizadores_list + ([responsavel] if responsavel else []))
+        tem_permissao = False
+        for usuario in usuarios_list:
+            if usuario in quem_tem_permissao:
+                tem_permissao = True
+                break
+        if not tem_permissao:
+            cursor_oracle.close()
+            conn_oracle.close()
+            return jsonify({"error": "Usuário não tem permissão para registrar arquivo nessa etapa"}), 403
+        # gera o caiuas_files_seq
+        query = f"""
+            SELECT caiuas_files_seq.NEXTVAL FROM dual
+        """
+        cursor_oracle.execute(query)
+        id_file = cursor_oracle.fetchone()[0]
+        query = f"""
+            INSERT INTO caiuas_files (
+                    id_file, 
+                    file_key, 
+                    bucket, 
+                    file_size, 
+                    content_type,
+                    region,
+                    created_at,
+                    old_file_name
+                ) VALUES (
+                    {id_file}, 
+                    '{file_key}', 
+                    '{bucket}', 
+                    {file_size}, 
+                    '{content_type}',
+                    '{region}',
+                    CURRENT_TIMESTAMP,
+                    '{old_file_name}'
+                )
+        """
+        cursor_oracle.execute(query)
+        conn_oracle.commit()
+        query = f"""
+            SELECT caiuas_etapa_files_seq.NEXTVAL FROM dual
+        """
+        cursor_oracle.execute(query)
+        id_etapa_file = cursor_oracle.fetchone()[0]
+        query = f"""
+            INSERT INTO CAIUAS_VEIC_PROC_ETAPAS_files (
+                    id_file_etapa, 
+                    id_etapa, 
+                    id_file
+                ) VALUES (
+                    {id_etapa_file}, 
+                    {id_etapa}, 
+                    {id_file}
+                )
+        """
+        cursor_oracle.execute(query)
+        conn_oracle.commit()
+        cursor_oracle.close()
+        conn_oracle.close()
+        
+
+
+        # 2. Aqui você pode salvar as informações no banco de dados
+        # Exemplo: Salvar na tabela 'files' com colunas (id, key, name, type, created_at)
+        # db.execute("INSERT INTO files (key, name, type) VALUES (%s, %s, %s)", (file_key, file_name, file_type))
+        
+        # query = f"""
+        #     insert into files (filename, url, file_size, old_filename, created_at) values (
+        #         '{file_key}', 
+        #         'https://processos-caiuas.s3.sa-east-1.amazonaws.com/{file_key}', 
+        #         {file_size}, 
+        #         '{file_name}', 
+        #         now()
+        #     )
+        #     RETURNING id_file
+        # """
+        # conn, cursor = postgres_site()
+        # cursor.execute(query)
+        # id_file = cursor.fetchone()[0]
+        # conn.commit()
+        # cursor.close()
+        # conn.close()
+        
+        retorno = {}
+        retorno['id_file'] = id_file
+        retorno['file_key'] = file_key
+        retorno['file_size'] = file_size
+        retorno['created_at'] = datetime.now().isoformat()
+        retorno['message'] = "File registered successfully"
+
+        return jsonify(retorno), 200
+
+    except Exception as e:
+        print(f"ERRO: {e}")
+        return jsonify({"error": str(e)}), 500
+    
+
+@files_bp.route('/api/files/download/<int:id_file>', methods=['GET'])
+@token_required
+def get_presigned_download_url(id_file):
+    """
+    Gera uma URL pré-assinada para download de um arquivo registrado.
+    """
+    try:
+        # 1. Busca os dados do arquivo no banco Oracle
+        query = f"""
+            SELECT cf.id_file, cf.file_key, cf.bucket, cf.content_type, cf.region, cf.file_size
+            FROM caiuas_files cf
+            WHERE cf.id_file = {id_file}
+        """
+        conn, cur = oracle()
+        cur.execute(query)
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not result:
+            return jsonify({"error": "Arquivo não encontrado"}), 404
+        
+        file_key = result[1]
+        bucket = result[2] or 'processos-caiuas'
+        content_type = result[3] or 'application/octet-stream'
+        region = result[4] or 'sa-east-1'
+        file_size = result[5]
+        
+        # 2. Configura o Cliente S3
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=region,
+            config=Config(signature_version='s3v4')
+        )
+        
+        # 3. Gera a URL pré-assinada para download (get_object)
+        presigned_url = s3.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': bucket,
+                'Key': file_key
+            },
+            ExpiresIn=3600  # URL válida por 1 hora
+        )
+        
+        return jsonify({
+            "presigned_url": presigned_url,
+            "id_file": id_file,
+            "file_key": file_key,
+            "bucket": bucket,
+            "content_type": content_type,
+            "file_size": file_size,
+            "expires_in": 3600
+        }), 200
+        
+    except Exception as e:
+        print(f"ERRO: {e}")
+        return jsonify({"error": str(e)}), 500
+    
