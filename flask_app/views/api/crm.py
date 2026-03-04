@@ -1204,7 +1204,11 @@ def show_crm_eventos(id_evento):
                         case
                             when ce.data_encerramento is not null then TO_CHAR(ce.data_encerramento, 'YYYY-MM-DD HH24:MI:SS')
                             else null
-                        end as data_encerramento
+                        end as data_encerramento,
+                        CASE
+                            WHEN (SELECT count(*) FROM caiuas_crm_test_drive cctd WHERE cctd.COD_EMPRESA = ce.COD_EMPRESA AND cctd.COD_EVENTO = ce.COD_EVENTO ) > 0 THEN 'TEM'
+                            ELSE 'NÃO'
+                        END TEM_TEST_DRIVE
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
@@ -1284,7 +1288,8 @@ def show_crm_eventos(id_evento):
             'data_agendada': data_agendada_iso if row[26] else None,
             'data_visita': data_visita_iso if row[27] else None,
             'status_atendimento': row[28],
-            'data_encerramento': row[29]
+            'data_encerramento': row[29],
+            'tem_test_drive': row[30]
         }
         query = f"""
             SELECT
@@ -1351,6 +1356,108 @@ def show_crm_eventos(id_evento):
             })
         cur_oracle.close()
         conn_oracle.close()
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos/muda_test_drive/<int:id_evento>', methods=['POST'])
+@token_required
+def muda_test_drive(id_evento):
+    try:
+        conn_oracle, cur_oracle = oracle()
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        cod_evento = str(id_evento)[2:]
+        if cod_empresa not in ['11', '33'] or not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+        
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_reativou = rows[0][1]
+        
+        query = f"""
+            SELECT COD_CLIENTE FROM CRM_EVENTOS
+            WHERE COD_EMPRESA = {cod_empresa} AND COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row is None:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        cod_cliente = row[0]
+        
+        query = f"""
+            SELECT count(*) FROM caiuas_crm_test_drive
+            WHERE COD_EMPRESA = {cod_empresa} AND COD_EVENTO = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        if row[0] == 0:
+            # inserir
+            query = f"""
+                INSERT INTO caiuas_crm_test_drive (COD_EMPRESA, COD_EVENTO, created_at, id)
+                VALUES ({cod_empresa}, {cod_evento}, SYSDATE, (select NVL(MAX(id),0) + 1 from caiuas_crm_test_drive))
+            """
+            cur_oracle.execute(query)
+            query = f"""
+                insert into crm_acoes
+                (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+                values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_reativou}',
+                1,
+                SYSDATE,
+                'Test drive adicionado ao evento',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_reativou}')
+            """
+            cur_oracle.execute(query)
+            message = 'Test drive adicionado ao evento'
+        else:
+            # remover
+            query = f"""
+                DELETE FROM caiuas_crm_test_drive
+                WHERE COD_EMPRESA = {cod_empresa} AND COD_EVENTO = {cod_evento}
+            """
+            cur_oracle.execute(query)
+            query = f"""
+                insert into crm_acoes
+                (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+                values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_reativou}',
+                1,
+                SYSDATE,
+                'Test drive removido do evento',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_reativou}')
+            """
+            cur_oracle.execute(query)
+            message = 'Test drive removido do evento'
+        
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        
+        retorno = {'message': message}
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
