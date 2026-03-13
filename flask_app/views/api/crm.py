@@ -3396,10 +3396,11 @@ def crm_eventos_muda_responsavel(id_evento):
         if not cod_evento.isdigit():
             return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
         cod_evento = int(cod_evento)
-        novo_responsavel = request.json.get('email', None)
-        if novo_responsavel:
-            novo_responsavel = novo_responsavel.strip().lower()
-        if not novo_responsavel or not str(novo_responsavel).strip():
+        nome_responsavel = request.json.get('nome_usuario', None)
+        
+        if nome_responsavel:
+            nome_responsavel = nome_responsavel.strip().upper()
+        if not nome_responsavel or not str(nome_responsavel).strip():
             return jsonify({'status': 'error', 'message': 'Novo responsável é obrigatório'}), 400
         
         query = f"""
@@ -3439,7 +3440,7 @@ def crm_eventos_muda_responsavel(id_evento):
             SELECT nome FROM empresas_usuarios
             WHERE 1=1
                 AND DEMITIDO <> 'S'
-                AND lower(EMAIl) = '{novo_responsavel}'
+                AND upper(nome) = '{nome_responsavel}'
         """
         cur_oracle.execute(query)
         rows = cur_oracle.fetchall()
@@ -3467,7 +3468,7 @@ def crm_eventos_muda_responsavel(id_evento):
                 '{quem_criou}',
                 136,
                 SYSDATE,
-                'Responsável pelo evento alterado de {email} para {novo_responsavel}',
+                'Responsável pelo evento alterado para {novo_responsavel}',
                 'P',
                 seq_crm_COD_ACAO.nextval,
                 '{quem_criou}'
@@ -3533,6 +3534,271 @@ def list_midias():
         cur_oracle.close()
         conn_oracle.close()
         return jsonify({'status': 'success', 'midias': midias}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+@crm_bp.route('/api/crm/responsaveis', methods=['GET'])
+@token_required
+def list_responsaveis():
+    try:
+        conn_oracle, cur_oracle = oracle()
+        retorno = {}
+        query = f"""
+            SELECT e.nome, eu.nome, eu.NOME_COMPLETO, eu.EMAIL 
+            FROM EMPRESAS_USUARIOS eu
+            LEFT JOIN empresas e ON 1=1
+                AND e.COD_EMPRESA = eu.COD_EMPRESA 
+            WHERE DEMITIDO <> 'S'
+            AND COD_FUNCAO <> 2
+            AND eu.email IS NOT NULL
+        """
+        cur_oracle.execute(query)
+        usuarios = cur_oracle.fetchall()
+        if len(usuarios) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não tem usuários cadastrados'}), 400
+        retorno['usuarios'] = []
+        for row in usuarios:
+            retorno['usuarios'].append({
+                'empresa': row[0],
+                'nome_usuario': row[1],
+                'nome_completo': row[2],
+                'email': row[3]
+            })
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify({'status': 'success', 'responsaveis': retorno['usuarios']}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+@crm_bp.route('/api/crm/evento_chatwoot', methods=['POST'])
+def cria_evento_chatwoot():
+    try:
+        data = request.get_json()
+        
+        conversation_id = data.get('id', None)
+        inbox_id = data['contact_inbox']['inbox_id'] if 'contact_inbox' in data and 'inbox_id' in data['contact_inbox'] else None
+        nome_cliente = data['meta']['sender']['name'] if 'meta' in data and 'sender' in data['meta'] and 'name' in data['meta']['sender'] else None
+        phone = data['meta']['sender']['phone_number'] if 'meta' in data and 'sender' in data['meta'] and 'phone_number' in data['meta']['sender'] else None
+        assignee = data['meta']['assignee']['id'] if 'meta' in data and 'assignee' in data['meta'] and 'id' in data['meta']['assignee'] else None
+        
+        # Verificar evento_nbs no nível raiz e dentro de meta
+        evento_nbs = None
+        if 'custom_attributes' in data and data['custom_attributes'] and 'evento_nbs' in data['custom_attributes']:
+            evento_nbs = data['custom_attributes']['evento_nbs']
+        elif 'meta' in data and 'custom_attributes' in data['meta'] and data['meta']['custom_attributes'] and 'evento_nbs' in data['meta']['custom_attributes']:
+            evento_nbs = data['meta']['custom_attributes']['evento_nbs']
+        
+        # Remover os 3 primeiros caracteres do telefone (ex: +55)
+        if phone and len(phone) > 3:
+            phone = phone[3:]
+        
+        if evento_nbs:
+            return (jsonify({'status': 'error', 'message': 'Evento já vinculado a um evento do NBS'}), 400)
+        
+        email_responsavel = None
+        nome_responsavel = None
+        
+        # Buscar email do assignee no chatwoot (somente se tiver assignee)
+        if assignee:
+            conn_chatwoot, cur_chatwoot = chatwoot()
+            query = f"""
+                    select uid from users
+                    where id = {assignee}
+            """
+            cur_chatwoot.execute(query)
+            rows = cur_chatwoot.fetchall()
+            cur_chatwoot.close()
+            conn_chatwoot.close()
+            
+            if len(rows) > 0:
+                email_responsavel = rows[0][0]
+        
+        # Se encontrou email, buscar nome do usuário no Oracle
+        if email_responsavel:
+            conn_oracle, cur_oracle = oracle()
+            query = f"""
+                SELECT eu.nome 
+                FROM empresas_usuarios eu
+                WHERE 1=1
+                    AND eu.DEMITIDO <> 'S'
+                    AND lower(eu.EMAIL) = '{email_responsavel.lower()}'
+                    AND eu.COD_EMPRESA IN (11, 33, 111)
+                ORDER BY eu.COD_EMPRESA
+            """
+            cur_oracle.execute(query)
+            rows = cur_oracle.fetchall()
+            
+            if len(rows) > 0:
+                nome_responsavel = rows[0][0]
+            
+            cur_oracle.close()
+            conn_oracle.close()
+        
+        # Definir quem criou o evento
+        criou_o_evento = nome_responsavel if nome_responsavel else 'NBS'
+        responsavel_pelo_evento = nome_responsavel  # Fica None se não identificado
+        
+        # Parâmetros fixos para criação do evento
+        cod_andamento = 2
+        cod_produto = 110589
+        cod_modelo = 116748
+        cod_tipo_evento = 829
+        cod_midia = 80  # Mídia padrão
+        
+        # Criar evento no NBS
+        conn_oracle, cur_oracle = oracle()
+        
+        # Obter próximo ID do evento
+        query = "SELECT seq_crm_COD_EVENTO.nextval FROM dual"
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        id_evento = row[0]
+        
+        # Inserir evento
+        query = f"""
+            INSERT INTO crm_eventos(
+                COD_EMPRESA,
+                COD_EVENTO,
+                COD_TIPO_EVENTO,
+                COD_PRIORIDADE,
+                NOME_CLIENTE_AVULSO,
+                FONE_CLIENTE_AVULSO,
+                cod_midia,
+                data_criacao,
+                cod_cliente_honda,
+                DESC_EVENTO,
+                CRIOU_O_EVENTO,
+                DATA_EVENTO,
+                OBS_memo,
+                COD_ANDAMENTO,
+                COD_CLIENTE,
+                STATUS,
+                RESPONSAVEL_PELO_EVENTO,
+                TIPO_ATENDIMENTO,
+                COD_PRODUTO,
+                COD_MODELO
+            ) VALUES(
+                11,
+                {id_evento},
+                {cod_tipo_evento},
+                2,
+                '{nome_cliente if nome_cliente else "Cliente Chatwoot"}',
+                '{phone if phone else ""}',
+                {cod_midia},
+                SYSDATE,
+                seq_cod_cliente_honda.nextval,
+                'Evento criado via Chatwoot',
+                '{criou_o_evento}',
+                SYSDATE,
+                'Evento criado via integração Chatwoot',
+                {cod_andamento},
+                1,
+                'P',
+                {f"'{responsavel_pelo_evento}'" if responsavel_pelo_evento else 'null'},
+                null,
+                {cod_produto},
+                {cod_modelo}
+            )
+        """
+        cur_oracle.execute(query)
+        
+        # Inserir ação do evento
+        query = f"""
+            INSERT INTO crm_acoes(
+                cod_empresa,
+                cod_evento,
+                responsavel,
+                tipo_acao,
+                data,
+                observacao,
+                status,
+                cod_acao,
+                quem_criou
+            ) VALUES (
+                11,
+                {id_evento},
+                {f"'{responsavel_pelo_evento}'" if responsavel_pelo_evento else 'null'},
+                1,
+                SYSDATE,
+                'Evento criado pela atendente {criou_o_evento}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{criou_o_evento}'
+            )
+        """
+        cur_oracle.execute(query)
+        
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        
+        cod_evento_completo = f"11{id_evento}"
+        url_evento_nbs = f"https://app.caiuas.com.br/crm/eventos/{cod_evento_completo}"
+        
+        # Atualizar custom_attributes e additional_attributes no Chatwoot
+        if conversation_id:
+            import json
+            conn_chatwoot, cur_chatwoot = chatwoot()
+            
+            # Buscar atributos atuais da conversa
+            query = f"""
+                SELECT additional_attributes, custom_attributes 
+                FROM conversations 
+                WHERE id = {conversation_id}
+            """
+            cur_chatwoot.execute(query)
+            row = cur_chatwoot.fetchone()
+            
+            if row:
+                # Converter PGobject para dicionário Python
+                additional_attributes_raw = row[0]
+                custom_attributes_raw = row[1]
+                
+                if additional_attributes_raw:
+                    additional_attributes = json.loads(str(additional_attributes_raw)) if not isinstance(additional_attributes_raw, dict) else additional_attributes_raw
+                else:
+                    additional_attributes = {}
+                    
+                if custom_attributes_raw:
+                    custom_attributes = json.loads(str(custom_attributes_raw)) if not isinstance(custom_attributes_raw, dict) else custom_attributes_raw
+                else:
+                    custom_attributes = {}
+                
+                # Adicionar evento_nbs aos atributos
+                additional_attributes['evento_nbs'] = url_evento_nbs
+                custom_attributes['evento_nbs'] = url_evento_nbs
+                
+                # Atualizar a conversa
+                additional_json = json.dumps(additional_attributes).replace("'", "''")
+                custom_json = json.dumps(custom_attributes).replace("'", "''")
+                
+                query = f"""
+                    UPDATE conversations 
+                    SET additional_attributes = '{additional_json}',
+                        custom_attributes = '{custom_json}'
+                    WHERE id = {conversation_id}
+                """
+                cur_chatwoot.execute(query)
+                conn_chatwoot.commit()
+            
+            cur_chatwoot.close()
+            conn_chatwoot.close()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Evento criado com sucesso',
+            'cod_evento': cod_evento_completo,
+            'url_evento_nbs': url_evento_nbs,
+            'nome_cliente': nome_cliente,
+            'phone': phone,
+            'inbox_id': inbox_id,
+            'email_responsavel': email_responsavel,
+            'nome_responsavel': nome_responsavel
+        }), 201
+        
+        
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
