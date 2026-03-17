@@ -8,7 +8,7 @@ load_dotenv()
 
 crm_bp = Blueprint('crm', __name__)
 
-def processar_obs_memo(obs_memo):
+def     processar_obs_memo(obs_memo):
     """
     Processa o campo obs_memo e retorna uma lista de dicionários
     com data, usuario e observação, preservando quebras de linha
@@ -1208,7 +1208,9 @@ def show_crm_eventos(id_evento):
                         CASE
                             WHEN (SELECT count(*) FROM caiuas_crm_test_drive cctd WHERE cctd.COD_EMPRESA = ce.COD_EMPRESA AND cctd.COD_EVENTO = ce.COD_EVENTO ) > 0 THEN 'TEM'
                             ELSE 'NÃO'
-                        END TEM_TEST_DRIVE
+                        END TEM_TEST_DRIVE,
+                        ce.COD_EMPRESA_ANTERIOR, 
+                        ce.COD_EVENTO_ANTERIOR
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
@@ -1289,7 +1291,9 @@ def show_crm_eventos(id_evento):
             'data_visita': data_visita_iso if row[27] else None,
             'status_atendimento': row[28],
             'data_encerramento': row[29],
-            'tem_test_drive': row[30]
+            'tem_test_drive': row[30],
+            'cod_empresa_anterior': row[31],
+            'cod_evento_anterior': row[32]
         }
         query = f"""
             SELECT
@@ -1975,6 +1979,8 @@ def crm_eventos_showroom_remarca_contato(id_evento):
         query = f"""
             select data_criacao
             from crm_eventos ce
+            left join empresas_usuarios eu on 1=1
+                and eu.nome = ce.RESPONSAVEL_PELO_EVENTO 
             where 1=1
                 and ce.cod_empresa = {cod_empresa}
                 and ce.cod_evento = {cod_evento}
@@ -2113,6 +2119,8 @@ def crm_eventos_showroom_update_observacao(id_evento):
         query = f"""
             select data_criacao
             from crm_eventos ce
+            left join empresas_usuarios eu on 1=1
+                and eu.nome = ce.RESPONSAVEL_PELO_EVENTO
             where 1=1
                 and ce.cod_empresa = {cod_empresa}
                 and ce.cod_evento = {cod_evento}
@@ -2422,6 +2430,8 @@ def crm_eventos_showroom_create_acao(id_evento):
         query = f"""
             select data_criacao
             from crm_eventos ce
+            left join empresas_usuarios eu on 1=1
+                and eu.nome = ce.RESPONSAVEL_PELO_EVENTO
             where 1=1
                 and ce.cod_empresa = {cod_empresa}
                 and ce.cod_evento = {cod_evento}
@@ -3482,6 +3492,148 @@ def crm_eventos_muda_responsavel(id_evento):
         retorno = {}
         retorno['status'] = 'success'
         retorno['message'] = 'Responsável pelo evento atualizado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos/vincular_evento_anterior/<int:id_evento>', methods=['POST'])
+@token_required
+def crm_eventos_vincular_evento_anterior(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_empresa = str(id_evento)[:2]
+        cod_evento = str(id_evento)[2:]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento)
+        cod_empresa_anterior = request.json.get('cod_empresa_anterior', None)
+        cod_evento_anterior = request.json.get('cod_evento_anterior', None)
+        
+        # Se ambos forem None, remove o vínculo
+        if cod_empresa_anterior is None and cod_evento_anterior is None:
+            conn_oracle, cur_oracle = oracle()
+            query = f"""
+                select data_criacao, status
+                from crm_eventos ce
+                where 1=1
+                    and ce.cod_empresa = {cod_empresa}
+                    and ce.cod_evento = {cod_evento}
+            """
+            cur_oracle.execute(query)
+            rows = cur_oracle.fetchall()
+            if len(rows) == 0:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+            
+            status_evento = rows[0][1]
+            if status_evento == 'E':
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Não é possível alterar vínculo de um evento encerrado'}), 400
+            if status_evento == 'D':
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Não é possível alterar vínculo de um evento descartado'}), 400
+            
+            query = f"""
+                update crm_eventos
+                set cod_evento_anterior = null,
+                    cod_empresa_anterior = null
+                where cod_empresa = {cod_empresa}
+                and cod_evento = {cod_evento}
+            """
+            cur_oracle.execute(query)
+            conn_oracle.commit()
+            cur_oracle.close()
+            conn_oracle.close()
+            retorno = {}
+            retorno['status'] = 'success'
+            retorno['message'] = f'Vínculo do evento {id_evento} removido com sucesso'
+            return jsonify(retorno), 200
+        
+        if not cod_empresa_anterior or not str(cod_empresa_anterior).isdigit():
+            return jsonify({'status': 'error', 'message': 'Código da empresa do evento anterior é obrigatório'}), 400
+        if not cod_evento_anterior or not str(cod_evento_anterior).isdigit():
+            return jsonify({'status': 'error', 'message': 'Código do evento anterior é obrigatório'}), 400
+        cod_empresa_anterior = int(cod_empresa_anterior)
+        cod_evento_anterior = int(cod_evento_anterior)
+        
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_criou = rows[0][1]
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        
+        query = f"""
+            select data_criacao, status
+            from crm_eventos ce
+            where 1=1
+                and ce.cod_empresa = {cod_empresa}
+                and ce.cod_evento = {cod_evento}
+                {filter_responsavel}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+        
+        status_evento = rows[0][1]
+        if status_evento == 'E':
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não é possível vincular evento anterior a um evento encerrado'}), 400
+        if status_evento == 'D':
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não é possível vincular evento anterior a um evento descartado'}), 400
+        
+        query = f"""
+            select data_criacao
+            from crm_eventos ce
+            where 1=1
+                and ce.cod_empresa = {cod_empresa_anterior}
+                and ce.cod_evento = {cod_evento_anterior}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento anterior não encontrado'}), 404
+        
+        query = f"""
+            update crm_eventos
+            set cod_evento_anterior = {cod_evento_anterior},
+                cod_empresa_anterior = {cod_empresa_anterior}
+            where cod_empresa = {cod_empresa}
+            and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        retorno = {}
+        retorno['status'] = 'success'
+        retorno['message'] = f'Evento {id_evento} vinculado ao evento anterior {cod_empresa_anterior}{cod_evento_anterior} com sucesso'
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
