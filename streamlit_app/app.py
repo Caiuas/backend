@@ -78,7 +78,7 @@ if not st.session_state.get("authenticated"):
 else:
     menu = st.sidebar.radio(
         "Menu",
-        ["RECEPCAO","CRM SHOWROOM","inicio","Veículos","Estoque de peças","Obsolescência de estoque","CRM","Base Clientes/Veículos"]
+        ["RECEPCAO","CRM SHOWROOM","inicio","Veículos","Estoque de peças","Obsolescência de estoque","CRM","Base Clientes/Veículos","IMPLANTACAO","HAMADA"]
     )
     
 
@@ -1044,8 +1044,7 @@ else:
             fig_eventos_veiculo.update_layout(height=350, showlegend=False)
             st.plotly_chart(fig_eventos_veiculo, use_container_width=True)
             st.dataframe(eventos_por_veiculo.sort_values('Quantidade', ascending=False), hide_index=True, use_container_width=True)
-    
-        
+         
     elif menu == "Veículos":
         st.title("Acompanhamento de veículos")
         # adiciona filtro lateral com seleção de data
@@ -1492,6 +1491,167 @@ else:
                     
             except Exception as e:
                 st.error(f"Erro ao executar a consulta: {e}")
+    
+    if menu == "IMPLANTACAO":
+        st.title("Acompanhamento de Implantação de Sistemas")
+        # st.info("Em construção... 🚧")
+        query = f"""
+        SELECT ce.COD_EMPRESA, ce.COD_EVENTO, ce.STATUS, cet.DESC_TIPO_EVENTO , ca.ANDAMENTO , cd.DESCRICAO_DESCARTE,cct.tag, ce.OBS_MEMO  
+        FROM CRM_EVENTOS ce
+        LEFT JOIN EMPRESAS_USUARIOS eu ON
+            1 = 1
+            AND eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+        LEFT JOIN CRM_ANDAMENTO ca ON
+            1 = 1
+            AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+        LEFT JOIN MIDIA m ON
+            1=1
+            AND m.COD_MIDIA = ce.COD_MIDIA 
+        LEFT JOIN clientes c ON
+            1 = 1
+            AND ce.COD_CLIENTE = c.COD_CLIENTE
+        LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+            AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+        LEFT JOIN CRM_DESCARTES cd on 1=1
+            and cd.COD_DESCARTE = ce.COD_DESCARTE
+        LEFT JOIN CRM_MOTIVO_PERDAS cmp ON 1=1
+            AND cmp.cod_motivo_perda = ce.cod_motivo_perda
+        LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+        LEFT JOIN caiuas_crm_tags cct ON 1=1
+            AND cct.cod_empresa = ce.COD_EMPRESA 
+            AND cct.cod_evento = ce.cod_evento
+        WHERE 1=1
+            AND ce.cod_tipo_evento=831
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result_oracle = cur_oracle.fetchall()
+        columns = [desc[0] for desc in cur_oracle.description]
+        df = pd.DataFrame(result_oracle, columns=columns)
+        
+        # replace none to ''
+        df = df.fillna('')
+        
+        cur_oracle.close()
+        conn_oracle.close()
+        
+        # adiciona botão de download de planilha
+        excel_buffer = io.BytesIO()
+        df.to_excel(excel_buffer, index=False, sheet_name="Implantação")
+        excel_buffer.seek(0)
+        st.download_button(
+            label="📥 Download da planilha (Excel)",
+            data=excel_buffer,
+            file_name="implantacao.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        st.dataframe(df, hide_index=True, use_container_width=True)
+        df = df[df['STATUS'] == 'P']
+        pivot = pd.pivot_table(df, index=['STATUS','ANDAMENTO','TAG'], values='COD_EVENTO', aggfunc='count').reset_index()
+        st.dataframe(pivot, hide_index=True, use_container_width=True)
+        
+    if menu == "HAMADA":
+        st.title("Acompanhamento HAMADA")
+        data_inicial_hamada = st.sidebar.date_input("Data Inicial", datetime.now().date(), key="hamada_data_inicial")
+        data_final_hamada = st.sidebar.date_input("Data Final", datetime.now().date(), key="hamada_data_final")
+        query = f"""
+        SELECT 
+            ce.COD_EMPRESA, 
+            ce.COD_EVENTO,
+            eu2.NOME_COMPLETO quem_criou,
+            eu.NOME_COMPLETO resp_atual,
+            ce.STATUS, 
+            cet.DESC_TIPO_EVENTO, 
+            m.DESCRICAO midia,
+            ca.ANDAMENTO, 
+            cd.DESCRICAO_DESCARTE, 
+            cct.tag, 
+            ce.OBS_MEMO
+        FROM CRM_EVENTOS ce
+        LEFT JOIN EMPRESAS_USUARIOS eu ON
+            1 = 1
+            AND eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+        LEFT JOIN empresas_usuarios eu2 ON 1=1
+        	AND eu2.nome = ce.criou_o_evento
+        LEFT JOIN CRM_ANDAMENTO ca ON
+            1 = 1
+            AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+        LEFT JOIN MIDIA m ON
+            1=1
+            AND m.COD_MIDIA = ce.COD_MIDIA 
+        LEFT JOIN clientes c ON
+            1 = 1
+            AND ce.COD_CLIENTE = c.COD_CLIENTE
+        LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+            AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+        LEFT JOIN CRM_DESCARTES cd on 1=1
+            and cd.COD_DESCARTE = ce.COD_DESCARTE
+        LEFT JOIN CRM_MOTIVO_PERDAS cmp ON 1=1
+            AND cmp.cod_motivo_perda = ce.cod_motivo_perda
+        LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+        LEFT JOIN caiuas_crm_tags cct ON 1=1
+            AND cct.cod_empresa = ce.COD_EMPRESA 
+            AND cct.cod_evento = ce.cod_evento
+        WHERE 1=1
+            AND ce.cod_tipo_evento in (829,819,821,815,817,831)
+            AND trunc(ce.DATA_CRIACAO) >= TO_DATE('{data_inicial_hamada}', 'YYYY-MM-DD')
+            AND trunc(ce.DATA_CRIACAO) <= TO_DATE('{data_final_hamada}', 'YYYY-MM-DD')
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result_oracle = cur_oracle.fetchall()
+        columns = [desc[0] for desc in cur_oracle.description]
+        df = pd.DataFrame(result_oracle, columns=columns, dtype=str)
+        
+        # replace none to ''
+        df = df.fillna('')
+        
+        cur_oracle.close()
+        conn_oracle.close()
+        
+        df['link'] = df.apply(lambda row: f"https://app.caiuas.com.br/crm/eventos/{row['COD_EMPRESA']}{row['COD_EVENTO']}", axis=1)
+        
+        
+        # adiciona botão de download de planilha com tabela formatada
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name="Implantação")
+            ws = writer.sheets["Implantação"]
+            from openpyxl.worksheet.table import Table, TableStyleInfo
+            tab = Table(
+                displayName="TabelaHamada",
+                ref=f"A1:{chr(64 + len(df.columns))}{len(df) + 1}"
+            )
+            tab.tableStyleInfo = TableStyleInfo(
+                name="TableStyleMedium9",
+                showFirstColumn=False,
+                showLastColumn=False,
+                showRowStripes=True,
+                showColumnStripes=False
+            )
+            ws.add_table(tab)
+        excel_buffer.seek(0)
+
+        st.download_button(
+            label="📥 Download da planilha (Excel)",
+            data=excel_buffer,
+            file_name="implantacao.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        st.dataframe(
+            df,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "link": st.column_config.LinkColumn(
+                    "Link",
+                    display_text="Abrir"
+                )
+            }
+        )
+        df = df[df['STATUS'] == 'P']
+        pivot = pd.pivot_table(df, index=['STATUS','ANDAMENTO','TAG'], values='COD_EVENTO', aggfunc='count').reset_index()
+        st.dataframe(pivot, hide_index=True, use_container_width=True)
         
     if st.sidebar.button("Sair", width="stretch"):
         st.query_params.clear()
