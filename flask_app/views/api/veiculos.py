@@ -549,7 +549,8 @@ def veiculos_modelos():
                     FROM PRODUTOS_MODELOS pm
                     WHERE 1=1
                         --AND pm.ATIVO = 'S'
-                        and pm.internet = 'S'
+        --                and pm.internet = 'S'
+                        and pm.cod_produto = '110589'
                     order by pm.descricao_modelo
         """
         conn_oracle, cur_oracle = oracle()
@@ -1625,6 +1626,192 @@ def show_processo(id_processo):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
+@veiculos_bp.route('/api/veiculos/processos/<int:id_processo>/proposta', methods=['PUT'])
+@token_required
+def add_proposta(id_processo):
+    try:
+        cod_proposta = request.json.get('cod_proposta', None)
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        if not cod_proposta:
+            return jsonify({'status': 'error', 'message': 'cod_proposta é obrigatório'}), 400
+        conn, cur = oracle()
+        query = f"""
+            select count(*) from caiuas_veic_proc
+            where 1=1
+                and id_processo = {id_processo}
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+        if result[0] == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 400
+        
+        # Verifica se a proposta já está vinculada a outro processo
+        query = f"""
+            SELECT id_processo FROM caiuas_veic_proc
+            WHERE 1=1
+                AND cod_proposta = '{cod_proposta}'
+                AND id_processo <> {id_processo}
+        """
+        cur.execute(query)
+        proposta_existente = cur.fetchone()
+        if proposta_existente:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': f'Proposta já vinculada ao processo {proposta_existente[0]}'}), 400
+        
+        query = f"""
+            UPDATE caiuas_veic_proc
+            SET cod_proposta = '{cod_proposta}',
+                updated_at = SYSDATE
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+        conn.commit()
+        
+        cur.close()
+        conn.close()
+        
+        retorno = {}
+        retorno['message'] = 'Proposta adicionada com sucesso'
+        
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/veiculos/processos/<int:id_processo>/reabre', methods=['PUT'])
+@token_required
+def reabre_processo(id_processo):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        permissao = '50190'
+        conn, cur = oracle()
+        query = f"""
+            select count(*) from caiuas_veic_proc
+            where 1=1
+                and id_processo = {id_processo}
+        """
+        
+        cur.execute(query)
+        result = cur.fetchone()
+        
+        # se naõ tiver permissão naõ pode reabrir
+        query = f"""
+            SELECT saf2.COD_ACESSO 
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf2 ON 1=1
+                    AND saf2.COD_FUNCAO = eu.COD_FUNCAO
+                WHERE 1=1
+                    AND eu.DEMITIDO <> 'S'
+                    AND saf2.COD_ACESSO = '{permissao}'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY saf2.COD_ACESSO
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não tem permissão para reabrir processos'}), 403
+        
+        
+        if result[0] == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado ou não está excluído'}), 400
+        
+        query = f"""
+            UPDATE caiuas_veic_proc
+            SET ativo = 1,
+                status = 'Pendente',
+                updated_at = SYSDATE
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+        conn.commit()
+        
+        cur.close()
+        conn.close()
+        
+        retorno = {}
+        retorno['message'] = 'Processo reaberto com sucesso'
+        
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/veiculos/processos/<int:id_processo>/finalizar', methods=['PUT'])
+@token_required
+def finaliza_processo(id_processo):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        
+        conn, cur = oracle()
+        
+        # Verifica se o processo existe
+        query = f"""
+            SELECT status FROM caiuas_veic_proc
+            WHERE 1=1
+                AND id_processo = {id_processo}
+                AND ativo = 1
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+        
+        if not result:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 404
+        
+        status_atual = result[0]
+        
+        if status_atual == 'Finalizado':
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo já está finalizado'}), 400
+        
+        # Verifica se todas as etapas estão concluídas
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC_ETAPAS
+            WHERE id_processo = {id_processo}
+              AND (status IS NULL OR status <> 'Autorizado')
+        """
+        cur.execute(query)
+        etapas_pendentes = cur.fetchone()[0]
+        
+        if etapas_pendentes > 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': f'Não é possível finalizar. Existem {etapas_pendentes} etapa(s) não concluída(s)'}), 400
+        
+        # Finaliza o processo
+        query = f"""
+            UPDATE caiuas_veic_proc
+            SET status = 'Autorizado',
+                updated_at = SYSDATE
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+        conn.commit()
+        
+        cur.close()
+        conn.close()
+        
+        retorno = {}
+        retorno['message'] = 'Processo finalizado com sucesso'
+        
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+
 @veiculos_bp.route('/api/veiculos/processos/autorizar', methods=['POST'])
 @token_required
 def autorizar_etapa():
@@ -1861,4 +2048,108 @@ def autorizar_etapa():
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
+    
+@veiculos_bp.route('/api/veiculos/propostas', methods=['GET'])
+@token_required
+def list_propostas():
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_proposta = request.args.get('cod_proposta', None)
+        cod_cliente = request.args.get('cod_cliente', None)
+        search = request.args.get('search', None)
+        cod_acesso = '50190'
+        current_page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        
+        query = f"""
+            SELECT saf2.COD_ACESSO 
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf2 ON 1=1
+                    AND saf2.COD_FUNCAO = eu.COD_FUNCAO 
+                WHERE 1=1
+                    AND eu.DEMITIDO <> 'S'
+                    AND saf2.COD_ACESSO = '{cod_acesso}'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY saf2.COD_ACESSO
+        """
+        conn, cur = oracle()
+        cur.execute(query)
+        rows = cur.fetchall()
+        filter_user = ''
+        if len(rows) == 0:
+            filter_user = f"""
+                    AND lower(eu.EMAIl) = '{email}'
+            """
+        filter_cod_proposta = ''
+        if cod_proposta:
+            filter_cod_proposta = f"""
+                AND vp.COD_PROPOSTA = '{cod_proposta}'
+            """
+        filter_cod_cliente = ''
+        if cod_cliente:
+            filter_cod_cliente = f"""
+                AND vp.COD_CLIENTE = '{cod_cliente}'
+            """    
+        filter_search = ''
+        if search:
+            filter_search = f"""
+                AND (
+                    vp.COD_PROPOSTA LIKE '%{search}%'
+                    OR c.NOME LIKE '%{search}%'
+                    OR pm.DESCRICAO_MODELO LIKE '%{search}%'
+                )
+            """
+        query = f"""
+        SELECT vp.COD_PROPOSTA, vp.EMISSAO,c.COD_CLIENTE, c.NOME nome_cliente, pm.DESCRICAO_MODELO, vp.VALOR_PROPOSTA,cvp.ID_PROCESSO
+            FROM veiculos_propostas vp
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = vp.VENDEDOR
+            LEFT JOIN PRODUTOS_MODELOS pm ON 1=1
+                AND pm.COD_PRODUTO = vp.COD_PRODUTO 
+                AND pm.COD_MODELO = vp.COD_MODELO 
+            LEFT JOIN clientes c ON 1=1
+                AND c.COD_CLIENTE = vp.COD_CLIENTE 
+            LEFT JOIN caiuas_veic_proc cvp ON 1=1
+	            AND cvp.COD_PROPOSTA = vp.COD_PROPOSTA 
+            WHERE 1=1
+                AND vp.STATUS_PROPOSTA in ('A')
+                {filter_user}
+                {filter_cod_proposta}
+                {filter_cod_cliente}
+                {filter_search}
+            ORDER BY vp.EMISSAO
+        """
+        cur.execute(query)
+        result = cur.fetchall()
+        total = len(result)
+        if total == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'success', 'propostas': []}), 204
+        retorno = {}
+        retorno['propostas'] = []
+        for row in result:
+            proposta = {
+                'cod_proposta': row[0],
+                'emissao': row[1],
+                'cod_cliente': row[2],
+                'nome_cliente': row[3],
+                'descricao_modelo': row[4],
+                'valor_proposta': float(row[5]) if row[5] else None,
+                'id_processo': row[6]
+            }
+            retorno['propostas'].append(proposta)
+        retorno['total'] = total
+        retorno['page'] = current_page
+        retorno['limit'] = limit
+        cur.close()
+        conn.close()
+        return jsonify(retorno), 200
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    
     
