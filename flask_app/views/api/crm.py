@@ -244,9 +244,20 @@ def list_crm_eventos():
         current_page = int(request.args.get('current_page', 1))
         search = request.args.get('search', None)
         responsible = request.args.get('responsible', None)
+        cod_empresa = request.args.get('cod_empresa', None)
         limit = int(request.args.get('limit', 100))
         retorno = {}
         
+        empresas_permitidas = ['11', '33', '111']
+        filter_empresa = ''
+        if cod_empresa:
+            empresas_lista = [e.strip() for e in cod_empresa.split(',') if e.strip()]
+            for e in empresas_lista:
+                if e not in empresas_permitidas:
+                    return jsonify({'status': 'error', 'message': f'Empresa inválida: {e}. Permitidas: 11, 33, 111'}), 400
+            empresas_in = ','.join(empresas_lista)
+            filter_empresa = f' AND eu.COD_EMPRESA IN ({empresas_in}) '
+
         filter_created_at = ''
         if created_at_min and created_at_max:
             try:
@@ -414,6 +425,7 @@ def list_crm_eventos():
                     {filter_final_date}
                     {filter_tipo_evento}
                     {filter_created_at}
+                    {filter_empresa}
                     --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
                     --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
         """
@@ -514,6 +526,7 @@ def list_crm_eventos():
                         {filter_initial_date}
                         {filter_final_date}
                         {filter_created_at}
+                        {filter_empresa}
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
                     ORDER BY
