@@ -228,6 +228,8 @@ def muda_andamento_evento_showroom(id_evento):
 @crm_bp.route('/api/crm/eventos', methods=['GET'])
 @token_required
 def list_crm_eventos():
+    conn_oracle = None
+    cur_oracle = None
     try:
         now = datetime.now().strftime("%Y-%m-%d")
         list_status = ['P','E','D','V','A','R','CP']
@@ -342,9 +344,30 @@ def list_crm_eventos():
         if len(rows) == 0:
             filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
         if filter_responsavel == '' and responsible:
-            responsible_list = responsible.split(',')
-            responsible_emails = "','".join([r.strip().lower() for r in responsible_list])
-            filter_responsavel = f" AND lower(eu.EMAIl) IN ('{responsible_emails}') "
+            lista_usuarios = [usuario.strip().upper() for usuario in responsible.split(',') if usuario.strip()]
+            if len(lista_usuarios) == 0:
+                return jsonify({'status': 'error', 'message': 'Responsável inválido'}), 400
+            for usuario in lista_usuarios:
+                if not re.match(r'^[A-Z0-9_]+$', usuario):
+                    return jsonify({'status': 'error', 'message': f'Responsável inválido: {usuario}'}), 400
+
+            usuarios_in = "','".join(lista_usuarios)
+            query = f"""
+                SELECT upper(eu.NOME) AS usuario
+                FROM empresas_usuarios eu
+                WHERE 1=1
+                    AND NVL(eu.DEMITIDO, 'N') <> 'S'
+                    AND upper(eu.NOME) IN ('{usuarios_in}')
+                GROUP BY upper(eu.NOME)
+            """
+            cur_oracle.execute(query)
+            usuarios_encontrados = {row[0] for row in cur_oracle.fetchall()}
+            usuarios_nao_encontrados = [usuario for usuario in lista_usuarios if usuario not in usuarios_encontrados]
+            if len(usuarios_nao_encontrados) > 0:
+                usuarios_nao_encontrados_str = ','.join(usuarios_nao_encontrados)
+                return jsonify({'status': 'error', 'message': f'Responsável não encontrado: {usuarios_nao_encontrados_str}'}), 400
+
+            filter_responsavel = f" AND upper(eu.NOME) IN ('{usuarios_in}') "
         
         query = f"""
                 SELECT
@@ -568,12 +591,20 @@ def list_crm_eventos():
                 'data_visita': data_visita_iso if row[25] else None,
                 'status_atendimento': row[26]
             })
-        cur_oracle.close()
-        conn_oracle.close()
-
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        if cur_oracle:
+            try:
+                cur_oracle.close()
+            except Exception:
+                pass
+        if conn_oracle:
+            try:
+                conn_oracle.close()
+            except Exception:
+                pass
 
 @crm_bp.route('/api/crm/eventos_retorno/<int:id_evento>', methods=['POST'])
 @token_required
