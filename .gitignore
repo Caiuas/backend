@@ -182,3 +182,8 @@ workers/myhonda/retornos/selenium_login_page.html
 workers/estoque_veiculos_des/veiculos.json
 .gitignore
 workers/estoque_veiculos_des/veiculos2.json
+
+
+# Arquivos de conexão
+oracle-jdbc-11.jar
+postgresql-42.7.5.jar
