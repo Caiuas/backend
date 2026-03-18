@@ -147,3 +147,15 @@
     volumes:
       - ./workers/envia_pesquisa_whatsapp:/app
     command: "python3 app.py"
+
+  worker_update_campanhas:
+    image: backend-flask_app
+    # mem_limit: 2g
+    container_name: worker_update_campanhas
+    restart: always
+    # tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/update_campanhas:/app
+    command: "python3 app.py"
