@@ -1560,6 +1560,12 @@ else:
             ce.COD_EVENTO,
             eu2.NOME_COMPLETO quem_criou,
             eu.NOME_COMPLETO resp_atual,
+            case
+                when ce.cod_empresa = 11 AND eu.nome NOT IN ('KAYLANY','STEF_HS') then 'Sorocaba'
+                when ce.cod_empresa = 33 then 'Indaiatuba'
+                WHEN eu.nome = 'KAYLANY' THEN 'Aquecimento'
+                WHEN eu.nome = 'STEF_HS' THEN 'Aquecimento'
+            end empresa,
             ce.STATUS, 
             cet.DESC_TIPO_EVENTO, 
             m.DESCRICAO midia,
