@@ -1655,9 +1655,83 @@ else:
                 )
             }
         )
+
+        query_chatwoot = f"""
+        SELECT
+            m.conversation_id,
+            m.account_id,
+            m.created_at,
+            entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url' AS link_campanha,
+            entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' AS id_campanha,
+            c.custom_attributes->>'evento_nbs' AS link_crm
+        FROM messages m
+        LEFT JOIN whatsapp_raw_payloads wrp ON wrp.source_id = m.source_id
+        CROSS JOIN LATERAL jsonb_array_elements(wrp.payload->'entry') AS entry
+        left join conversations c on c.id = m.conversation_id
+        WHERE wrp.payload IS NOT NULL
+          AND entry->'changes'->0->'value'->'messages'->0->'referral' IS NOT NULL
+                    AND m.created_at::date >= DATE '{data_inicial_hamada}'
+                    AND m.created_at::date <= DATE '{data_final_hamada}'
+        ORDER BY link_campanha
+        """
+        conn_chatwoot, cur_chatwoot = chatwoot()
+        cur_chatwoot.execute(query_chatwoot)
+        result_chatwoot = cur_chatwoot.fetchall()
+        columns_chatwoot = [desc[0] for desc in cur_chatwoot.description]
+        df_chatwoot = pd.DataFrame(result_chatwoot, columns=columns_chatwoot)
+        cur_chatwoot.close()
+        conn_chatwoot.close()
+
+        # Evita exibir None na tabela e mantém links vazios quando não existirem.
+        df_chatwoot = df_chatwoot.fillna('')
+        df_chatwoot = df_chatwoot.replace('None', '')
+
+        df_chatwoot['link_chat'] = df_chatwoot.apply(
+            lambda row: f"https://chat.caiuas.com.br/app/accounts/{row['account_id']}/conversations/{row['conversation_id']}"
+            if str(row.get('account_id', '')).strip() != '' and str(row.get('conversation_id', '')).strip() != ''
+            else '',
+            axis=1
+        )
+
+        df_chatwoot_excel = df_chatwoot[['conversation_id', 'created_at', 'link_campanha']].copy()
+
+        st.subheader("Campanhas (Chatwoot)")
+        total_linhas_chatwoot = len(df_chatwoot)
+        excel_buffer_chatwoot = io.BytesIO()
+        df_chatwoot_excel.to_excel(excel_buffer_chatwoot, index=False, sheet_name="Chatwoot")
+        excel_buffer_chatwoot.seek(0)
+        st.download_button(
+            label=f"📥 Download da tabela Chatwoot ({total_linhas_chatwoot} linhas)",
+            data=excel_buffer_chatwoot,
+            file_name=f"campanhas_chatwoot_hamada_{total_linhas_chatwoot}_linhas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_chatwoot_hamada"
+        )
+        st.dataframe(
+            df_chatwoot[['conversation_id', 'created_at', 'link_campanha', 'link_crm', 'link_chat']],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "link_campanha": st.column_config.LinkColumn(
+                    "Link Campanha",
+                    display_text="Abrir"
+                ),
+                "link_crm": st.column_config.LinkColumn(
+                    "Link Evento NBS",
+                    display_text="Abrir"
+                ),
+                "link_chat": st.column_config.LinkColumn(
+                    "Link Chat",
+                    display_text="Abrir"
+                )
+            }
+        )
+
         df = df[df['STATUS'] == 'P']
         pivot = pd.pivot_table(df, index=['STATUS','ANDAMENTO','TAG'], values='COD_EVENTO', aggfunc='count').reset_index()
         st.dataframe(pivot, hide_index=True, use_container_width=True)
+        
+        
         
     if st.sidebar.button("Sair", width="stretch"):
         st.query_params.clear()
