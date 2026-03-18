@@ -123,6 +123,7 @@ def get_crm_andamentos():
             FROM crm_andamento ca
             WHERE 1=1
                 AND ca.ATIVO = 'S'
+            order by ca.andamento
         """
         conn_oracle, cur_oracle = oracle()
         cur_oracle.execute(query)
