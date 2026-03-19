@@ -1663,11 +1663,14 @@ else:
             m.created_at,
             entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url' AS link_campanha,
             entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' AS id_campanha,
-            c.custom_attributes->>'evento_nbs' AS link_crm
+            c.custom_attributes->>'evento_nbs' AS link_crm,
+            u.name responsavel
         FROM messages m
         LEFT JOIN whatsapp_raw_payloads wrp ON wrp.source_id = m.source_id
         CROSS JOIN LATERAL jsonb_array_elements(wrp.payload->'entry') AS entry
         left join conversations c on c.id = m.conversation_id
+        left join users u on 1=1
+        	and u.id = c.assignee_id
         WHERE wrp.payload IS NOT NULL
           AND entry->'changes'->0->'value'->'messages'->0->'referral' IS NOT NULL
                     AND m.created_at::date >= DATE '{data_inicial_hamada}'
@@ -1708,7 +1711,7 @@ else:
             key="download_chatwoot_hamada"
         )
         st.dataframe(
-            df_chatwoot[['conversation_id', 'created_at', 'link_campanha', 'link_crm', 'link_chat']],
+            df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha', 'link_crm', 'link_chat']],
             hide_index=True,
             use_container_width=True,
             column_config={
