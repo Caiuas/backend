@@ -2282,6 +2282,8 @@ def crm_eventos_showroom_agenda_visita(id_evento):
         # Buscar evento
         query = f"""
             SELECT data_criacao, data_agendada, data_visita FROM crm_eventos ce
+            left join empresas_usuarios eu on 1=1
+                and eu.nome = ce.RESPONSAVEL_PELO_EVENTO
             WHERE ce.cod_empresa = {cod_empresa} AND ce.cod_evento = {cod_evento} {filter_responsavel}
         """
         cur_oracle.execute(query)
