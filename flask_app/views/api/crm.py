@@ -2595,6 +2595,8 @@ def crm_eventos_showroom_muda_cliente(id_evento):
         query = f"""
             select data_criacao
             from crm_eventos ce
+            left join empresas_usuarios eu on 1=1
+                and eu.nome = ce.RESPONSAVEL_PELO_EVENTO
             where 1=1
                 and ce.cod_empresa = {cod_empresa}
                 and ce.cod_evento = {cod_evento}
