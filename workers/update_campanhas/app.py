@@ -1,6 +1,8 @@
 import os
+import re
 import time
 import jaydebeapi
+from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -106,21 +108,101 @@ def processa_lote(cur_chatwoot):
     return len(rows), processadas, atualizadas
 
 
+def buscar_mensagens_atendimento(cur_chatwoot):
+    query = """
+        SELECT DISTINCT
+            m.conversation_id,
+            m.account_id,
+            m.inbox_id,
+            m.content,
+            m.id
+        FROM messages m
+        WHERE m.content LIKE 'Atendimento #%'
+          AND m.created_at >= NOW() - INTERVAL '30 days'
+    """
+    cur_chatwoot.execute(query)
+    return cur_chatwoot.fetchall()
+
+
+def buscar_link_por_hash(cur_chatwoot, hash_code):
+    query = """
+        SELECT url, phone FROM whatsapp_links
+        WHERE hash = ?
+    """
+    cur_chatwoot.execute(query, [hash_code])
+    return cur_chatwoot.fetchone()
+
+
+def adicionar_parametro_url(url, phone):
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    params['caiuas_number'] = [phone]
+    nova_query = urlencode(params, doseq=True)
+    return urlunparse(parsed._replace(query=nova_query))
+
+
+def atualiza_content_mensagem(cur_chatwoot, message_id):
+    query = """
+        UPDATE messages
+        SET content = REPLACE(content, 'Atendimento ', '')
+        WHERE id = ?
+    """
+    cur_chatwoot.execute(query, [message_id])
+
+
+def processa_lote_atendimento(cur_chatwoot):
+    rows = buscar_mensagens_atendimento(cur_chatwoot)
+    atualizadas = 0
+
+    for row in rows:
+        conversation_id = row[0]
+        content = row[3]
+        message_id = row[4]
+
+        match = re.search(r'Atendimento #([^:]+):', content)
+        if not match:
+            atualiza_content_mensagem(cur_chatwoot, message_id)
+            continue
+
+        hash_code = match.group(1).strip()
+
+        resultado_link = buscar_link_por_hash(cur_chatwoot, hash_code)
+        if resultado_link is None:
+            atualiza_content_mensagem(cur_chatwoot, message_id)
+            continue
+
+        url, phone = resultado_link[0], resultado_link[1]
+        if url and phone:
+            link_campanha = adicionar_parametro_url(url, phone)
+            if conversation_id is not None:
+                resultado = atualiza_conversation_link(cur_chatwoot, conversation_id, link_campanha)
+                if resultado:
+                    atualizadas += 1
+
+        atualiza_content_mensagem(cur_chatwoot, message_id)
+
+    return len(rows), atualizadas
+
+
 def main():
     conn_chatwoot, cur_chatwoot = chatwoot()
     try:
         while True:
             try:
                 total_lidas, total_processadas, total_atualizadas = processa_lote(cur_chatwoot)
+                total_atend_lidas, total_atend_atualizadas = processa_lote_atendimento(cur_chatwoot)
                 conn_chatwoot.commit()
                 print(
-                    "Lidas: {0} | Processadas: {1} | Conversations atualizadas: {2}".format(
+                    "Lidas: {0} | Processadas: {1} | Conversations atualizadas: {2} | "
+                    "Atendimentos lidos: {3} | Atendimentos atualizados: {4}".format(
                         total_lidas,
                         total_processadas,
                         total_atualizadas,
+                        total_atend_lidas,
+                        total_atend_atualizadas,
                     )
                 )
-                if total_atualizadas == 0:
+                if total_atualizadas == 0 and total_atend_atualizadas == 0:
                     time.sleep(1)
             except Exception as error:
                 conn_chatwoot.rollback()
