@@ -1657,25 +1657,32 @@ else:
         )
 
         query_chatwoot = f"""
-        SELECT
+        SELECT DISTINCT ON (m.conversation_id)
             m.conversation_id,
             m.account_id,
             m.created_at,
-            entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url' AS link_campanha,
+            CASE
+                WHEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url' IS NOT NULL
+                THEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url'
+                ELSE c.custom_attributes->>'link_campanha'
+            END AS link_campanha,
             entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' AS id_campanha,
             c.custom_attributes->>'evento_nbs' AS link_crm,
-            u.name responsavel
+            u.name AS responsavel,
+            c.custom_attributes
         FROM messages m
         LEFT JOIN whatsapp_raw_payloads wrp ON wrp.source_id = m.source_id
         CROSS JOIN LATERAL jsonb_array_elements(wrp.payload->'entry') AS entry
-        left join conversations c on c.id = m.conversation_id
-        left join users u on 1=1
-        	and u.id = c.assignee_id
-        WHERE wrp.payload IS NOT NULL
-          AND entry->'changes'->0->'value'->'messages'->0->'referral' IS NOT NULL
-                    AND m.created_at::date >= DATE '{data_inicial_hamada}'
-                    AND m.created_at::date <= DATE '{data_final_hamada}'
-        ORDER BY link_campanha
+        LEFT JOIN conversations c ON c.id = m.conversation_id
+        LEFT JOIN users u ON u.id = c.assignee_id
+        WHERE (
+            entry->'changes'->0->'value'->'messages'->0->'referral' IS NOT NULL
+            OR 
+            c.additional_attributes::text LIKE '%link_campanha%'
+        )
+                            AND m.created_at::date >= DATE '{data_inicial_hamada}'
+                            AND m.created_at::date <= DATE '{data_final_hamada}'
+        ORDER BY m.conversation_id, m.created_at
         """
         conn_chatwoot, cur_chatwoot = chatwoot()
         cur_chatwoot.execute(query_chatwoot)
