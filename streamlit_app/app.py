@@ -1604,6 +1604,7 @@ else:
             AND trunc(ce.DATA_CRIACAO) <= TO_DATE('{data_final_hamada}', 'YYYY-MM-DD')
         """
         conn_oracle, cur_oracle = oracle()
+        conn_chatwoot, cur_chatwoot = chatwoot()
         cur_oracle.execute(query)
         result_oracle = cur_oracle.fetchall()
         columns = [desc[0] for desc in cur_oracle.description]
@@ -1614,9 +1615,55 @@ else:
         
         cur_oracle.close()
         conn_oracle.close()
-        
+        lista_eventos = []        
         df['link'] = df.apply(lambda row: f"https://app.caiuas.com.br/crm/eventos/{row['COD_EMPRESA']}{row['COD_EVENTO']}", axis=1)
+        # adiciona todos os link na lista
+        for index, row in df.iterrows():
+            lista_eventos.append(f"https://app.caiuas.com.br/crm/eventos/{row['COD_EMPRESA']}{row['COD_EVENTO']}")
         
+        query = f"""
+        SELECT DISTINCT ON (m.conversation_id)
+            m.conversation_id,
+            m.account_id,
+        --    m.created_at,
+            CASE
+                WHEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url' IS NOT NULL
+                THEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url'
+                ELSE c.custom_attributes->>'link_campanha'
+            END AS campanha,
+            CASE
+                WHEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'evento_nbs' IS NOT NULL
+                THEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'evento_nbs'
+                ELSE c.custom_attributes->>'evento_nbs'
+            END AS evento_nbs
+        FROM messages m
+        LEFT JOIN whatsapp_raw_payloads wrp ON wrp.source_id = m.source_id
+        CROSS JOIN LATERAL jsonb_array_elements(wrp.payload->'entry') AS entry
+        LEFT JOIN conversations c ON c.id = m.conversation_id
+        LEFT JOIN users u ON u.id = c.assignee_id
+        WHERE 1=1
+            and c.additional_attributes->>'evento_nbs' IN ({','.join([f"'{link}'" for link in lista_eventos])})
+        """
+        cur_chatwoot.execute(query)
+        result_chatwoot = cur_chatwoot.fetchall()
+        columns_chatwoot = [desc[0] for desc in cur_chatwoot.description]
+        df_chatwoot = pd.DataFrame(result_chatwoot, columns=columns_chatwoot, dtype=str)
+        df = df.merge(df_chatwoot, left_on='link', right_on='evento_nbs', how='left')
+        df['link_chat'] = df.apply(
+            lambda row: f"https://chat.caiuas.com.br/app/accounts/{row['account_id']}/conversations/{row['conversation_id']}"
+            if str(row.get('account_id', '')).strip() != '' and str(row.get('conversation_id', '')).strip() != ''
+            else '',
+            axis=1
+        )   
+        del df['evento_nbs']
+        del df['account_id']
+        del df['conversation_id']
+        df = df.fillna('')
+        df = df.replace('None', '')
+        
+        # st.write(query)
+        
+        # st.dataframe(df_chatwoot, hide_index=True, use_container_width=True)
         
         # adiciona botão de download de planilha com tabela formatada
         excel_buffer = io.BytesIO()
@@ -1652,6 +1699,13 @@ else:
                 "link": st.column_config.LinkColumn(
                     "Link",
                     display_text="Abrir"
+                ),
+                "campanha": st.column_config.LinkColumn(
+                    "Campanha"
+                ),
+                "link_chat": st.column_config.LinkColumn(
+                    "Link Chat",
+                    display_text="Abrir"
                 )
             }
         )
@@ -1684,7 +1738,7 @@ else:
                             AND m.created_at::date <= DATE '{data_final_hamada}'
         ORDER BY m.conversation_id, m.created_at
         """
-        conn_chatwoot, cur_chatwoot = chatwoot()
+        
         cur_chatwoot.execute(query_chatwoot)
         result_chatwoot = cur_chatwoot.fetchall()
         columns_chatwoot = [desc[0] for desc in cur_chatwoot.description]
