@@ -4178,3 +4178,109 @@ def muda_proposta_evento(id_evento):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
+# muda data_criacao
+@crm_bp.route('/api/crm/eventos/muda_data_criacao/<int:id_evento>', methods=['POST'])
+@token_required
+def muda_data_criacao_evento(id_evento):
+    try:
+        data_criacao = request.json.get('data_criacao', None)
+
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+
+        if not id_evento or not str(id_evento).isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+
+        id_evento = str(id_evento)
+        cod_empresa = id_evento[:2]
+        cod_evento_str = id_evento[2:]
+
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'Empresa inválida'}), 400
+        if not cod_evento_str.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento_str)
+
+        if not data_criacao:
+            return jsonify({'status': 'error', 'message': 'data_criacao é obrigatória'}), 400
+
+        emails_autorizados = {'pablo.ti@caiuas.com.br'}
+        if email not in emails_autorizados:
+            return jsonify({'status': 'error', 'message': 'Você não tem permissão para alterar a data de criação do evento'}), 403
+
+        try:
+            data_criacao_dt = datetime.strptime(data_criacao, '%Y-%m-%dT%H:%M')
+        except ValueError:
+            return jsonify({'status': 'error', 'message': 'Formato de data inválido. Use YYYY-MM-DDTHH:MM'}), 400
+
+        conn_oracle, cur_oracle = oracle()
+
+        # Buscar usuário logado
+        query = f"""
+            SELECT eu.nome
+            FROM empresas_usuarios eu
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIL) = '{email}'
+                AND eu.COD_EMPRESA IN (11, 33, 111)
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 404
+        quem_alterou = rows[0][0]
+
+        # Verificar se evento existe
+        query = f"""
+            SELECT status FROM crm_eventos
+            WHERE cod_empresa = {cod_empresa}
+                AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+
+        data_formatada = data_criacao_dt.strftime('%d/%m/%Y %H:%M')
+        data_oracle = data_criacao_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        # Atualizar data_criacao
+        query = f"""
+            UPDATE crm_eventos
+            SET data_criacao = TO_DATE('{data_oracle}', 'YYYY-MM-DD HH24:MI:SS')
+            WHERE cod_empresa = {cod_empresa}
+                AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        # Registrar ação
+        query = f"""
+            INSERT INTO crm_acoes
+            (cod_empresa, cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            VALUES (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_alterou}',
+                1,
+                SYSDATE,
+                'Data de criação do evento alterada para {data_formatada}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_alterou}'
+            )
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+
+        return jsonify({'status': 'success', 'message': f'Data de criação do evento atualizada para {data_formatada}'}), 200
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
