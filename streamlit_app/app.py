@@ -654,6 +654,7 @@ else:
         data_final = st.sidebar.date_input("Data Final", datetime.now())
         query = f"""
             SELECT 
+                eu.cod_empresa,
                 concat(ce.COD_EMPRESA, ce.COD_EVENTO) cod_evento,
                 CASE
                     WHEN ca.andamento IS NULL THEN 'Não informado'
@@ -713,7 +714,7 @@ else:
                 LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
                 LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
                 WHERE 1=1
-                    AND ce.COD_TIPO_EVENTO IN (819,821,825,785,807,827,815,817,823,810,812)
+                    AND ce.COD_TIPO_EVENTO IN (785,807)
                     AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
         """
         con, cur = oracle()
@@ -748,6 +749,10 @@ else:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
+        empresa_selecionada = st.sidebar.selectbox("Filtrar por empresa", ["Todas", 11, 33])
+        if empresa_selecionada != "Todas":
+            df = df[df['COD_EMPRESA'] == empresa_selecionada]
+
         responsaveis = df['RESPONSAVEL'].unique()
         responsavel_selecionado = st.sidebar.selectbox("Filtrar por responsável", ["Todos"] + list(responsaveis))
         if responsavel_selecionado != "Todos":
@@ -1572,7 +1577,18 @@ else:
             ca.ANDAMENTO, 
             cd.DESCRICAO_DESCARTE, 
             cct.tag, 
-            ce.OBS_MEMO
+            ce.OBS_MEMO,
+            to_date(ce.data_criacao) data_criacao,
+            to_date(ce.data_encerramento) data_encerramento,
+            (
+            	SELECT to_DATE(max(ca.DATA)) FROM CRM_ACOES ca 
+    			WHERE 1=1
+            	AND ca.COD_EVENTO = ce.COD_EVENTO 
+            	AND ca.cod_empresa = ce.cod_empresa
+            	AND observacao LIKE ('Responsável pelo evento alterado para%')
+            	) data_transferencia,
+            to_date(ce.DATA_AGENDADA ) data_agendada,
+            to_date(cev.DATA_CRIACAO ) data_visita
         FROM CRM_EVENTOS ce
         LEFT JOIN EMPRESAS_USUARIOS eu ON
             1 = 1
@@ -1598,10 +1614,14 @@ else:
         LEFT JOIN caiuas_crm_tags cct ON 1=1
             AND cct.cod_empresa = ce.COD_EMPRESA 
             AND cct.cod_evento = ce.cod_evento
+        LEFT JOIN crm_eventos cev ON 1=1
+        	AND cev.COD_EVENTO = ce.COD_EVENTO_ANTERIOR 
+        	AND cev.COD_EMPRESA = ce.COD_EMPRESA_ANTERIOR 
         WHERE 1=1
             AND ce.cod_tipo_evento in (829,819,821,815,817,831)
             AND trunc(ce.DATA_CRIACAO) >= TO_DATE('{data_inicial_hamada}', 'YYYY-MM-DD')
             AND trunc(ce.DATA_CRIACAO) <= TO_DATE('{data_final_hamada}', 'YYYY-MM-DD')
+            
         """
         conn_oracle, cur_oracle = oracle()
         conn_chatwoot, cur_chatwoot = chatwoot()
@@ -1661,60 +1681,13 @@ else:
         df = df.fillna('')
         df = df.replace('None', '')
         
-        # st.write(query)
         
-        # st.dataframe(df_chatwoot, hide_index=True, use_container_width=True)
-        
-        # adiciona botão de download de planilha com tabela formatada
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name="Implantação")
-            ws = writer.sheets["Implantação"]
-            from openpyxl.worksheet.table import Table, TableStyleInfo
-            tab = Table(
-                displayName="TabelaHamada",
-                ref=f"A1:{chr(64 + len(df.columns))}{len(df) + 1}"
-            )
-            tab.tableStyleInfo = TableStyleInfo(
-                name="TableStyleMedium9",
-                showFirstColumn=False,
-                showLastColumn=False,
-                showRowStripes=True,
-                showColumnStripes=False
-            )
-            ws.add_table(tab)
-        excel_buffer.seek(0)
-
-        st.download_button(
-            label="📥 Download da planilha (Excel)",
-            data=excel_buffer,
-            file_name="implantacao.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        st.dataframe(
-            df,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "link": st.column_config.LinkColumn(
-                    "Link",
-                    display_text="Abrir"
-                ),
-                "campanha": st.column_config.LinkColumn(
-                    "Campanha"
-                ),
-                "link_chat": st.column_config.LinkColumn(
-                    "Link Chat",
-                    display_text="Abrir"
-                )
-            }
-        )
 
         query_chatwoot = f"""
         SELECT DISTINCT ON (m.conversation_id)
             m.conversation_id,
             m.account_id,
-            m.created_at,
+            c.created_at,
             CASE
                 WHEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url' IS NOT NULL
                 THEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url'
@@ -1734,9 +1707,9 @@ else:
             OR 
             c.additional_attributes::text LIKE '%link_campanha%'
         )
-                            AND m.created_at::date >= DATE '{data_inicial_hamada}'
-                            AND m.created_at::date <= DATE '{data_final_hamada}'
-        ORDER BY m.conversation_id, m.created_at
+                            AND c.created_at::date >= DATE '{data_inicial_hamada}'
+                            AND c.created_at::date <= DATE '{data_final_hamada}'
+        ORDER BY m.conversation_id, c.created_at
         """
         
         cur_chatwoot.execute(query_chatwoot)
@@ -1757,7 +1730,43 @@ else:
             axis=1
         )
 
-        df_chatwoot_excel = df_chatwoot[['conversation_id', 'created_at', 'link_campanha']].copy()
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Chats por responsável")
+            if df_chatwoot.empty or df_chatwoot['responsavel'].str.strip().eq('').all():
+                st.info("Nenhum dado encontrado para o período.")
+            else:
+                pivot_vendedor = pd.pivot_table(df_chatwoot, index='responsavel', values='conversation_id', aggfunc='count').reset_index().rename(columns={'conversation_id': 'total_chats'})
+                total_row_chats = pd.DataFrame({'responsavel': ['Total'], 'total_chats': [pivot_vendedor['total_chats'].sum()]})
+                pivot_vendedor_total = pd.concat([pivot_vendedor, total_row_chats], ignore_index=True)
+                styled_chats = pivot_vendedor_total.style.apply(
+                    lambda x: ['font-weight: bold' if x.name == len(pivot_vendedor_total) - 1 else '' for _ in x], axis=1
+                )
+                st.dataframe(styled_chats, hide_index=True, use_container_width=True)
+        with col2:
+            st.subheader("Eventos por resonsável")
+            df_eventos_filtrado = df[df['QUEM_CRIOU'].isin(['Stefany Cristine de Oliveira Araujo','EVELLYN KAYLANY SILVA'])]
+            if df_eventos_filtrado.empty:
+                st.info("Nenhum dado encontrado para o período.")
+            else:
+                pivot_vendedor_eventos = pd.pivot_table(df_eventos_filtrado, index='RESP_ATUAL', values='COD_EVENTO', aggfunc='count').reset_index()
+                pivot_vendedor_eventos.columns = ['RESP_ATUAL', 'total_eventos']
+                conv_por_resp = df[df['campanha'].str.strip() != ''].groupby('RESP_ATUAL')['campanha'].count().reset_index().rename(columns={'campanha': 'cont_conversao'})
+                pivot_vendedor_eventos = pivot_vendedor_eventos.merge(conv_por_resp, on='RESP_ATUAL', how='left').fillna(0)
+                pivot_vendedor_eventos['cont_conversao'] = pivot_vendedor_eventos['cont_conversao'].astype(int)
+                # Cria linha de total antes de renomear
+                total_row_eventos = pd.DataFrame({'RESP_ATUAL': ['Total'], 'total_eventos': [pivot_vendedor_eventos['total_eventos'].sum()], 'cont_conversao': [pivot_vendedor_eventos['cont_conversao'].sum()]})
+                pivot_vendedor_eventos_total = pd.concat([pivot_vendedor_eventos, total_row_eventos], ignore_index=True)
+                pivot_vendedor_eventos_total = pivot_vendedor_eventos_total.rename(columns={'RESP_ATUAL': 'Responsável', 'total_eventos': 'Total de Eventos', 'cont_conversao': 'Campanhas'})
+                styled_eventos = pivot_vendedor_eventos_total.style.apply(
+                    lambda x: ['font-weight: bold' if x.name == len(pivot_vendedor_eventos_total) - 1 else '' for _ in x], axis=1
+                )
+                st.dataframe(styled_eventos, hide_index=True, use_container_width=True)
+            
+        
+        
+        
+        df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','link_crm']].copy()
 
         st.subheader("Campanhas (Chatwoot)")
         total_linhas_chatwoot = len(df_chatwoot)
@@ -1791,12 +1800,94 @@ else:
             }
         )
 
-        df = df[df['STATUS'] == 'P']
-        pivot = pd.pivot_table(df, index=['STATUS','ANDAMENTO','TAG'], values='COD_EVENTO', aggfunc='count').reset_index()
-        st.dataframe(pivot, hide_index=True, use_container_width=True)
-        
-        
-        
+        date_cols = ['DATA_CRIACAO', 'DATA_ENCERRAMENTO', 'DATA_TRANSFERENCIA','DATA_AGENDADA','DATA_VISITA']
+        for col in date_cols:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+        excel_buffer_planilha_eventos = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer_planilha_eventos, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name="Implantação")
+            
+            ws = writer.sheets["Implantação"]
+            date_col_indices = [df.columns.get_loc(c) + 1 for c in date_cols if c in df.columns]
+            for col_idx in date_col_indices:
+                for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx, max_row=len(df) + 1):
+                    for cell in row:
+                        cell.number_format = 'DD/MM/YYYY'
+            from openpyxl.worksheet.table import Table, TableStyleInfo
+            tab = Table(
+                displayName="TabelaHamada",
+                ref=f"A1:{chr(64 + len(df.columns))}{len(df) + 1}"
+            )
+            tab.tableStyleInfo = TableStyleInfo(
+                name="TableStyleMedium9",
+                showFirstColumn=False,
+                showLastColumn=False,
+                showRowStripes=True,
+                showColumnStripes=False
+            )
+            ws.add_table(tab)
+        excel_buffer_planilha_eventos.seek(0)
+
+        st.download_button(
+            label="📥 Download da planilha (Excel)",
+            data=excel_buffer_planilha_eventos,
+            file_name="Eventos.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        # st.subheader("Leads por tipo de evento")
+        # contagem_tipo = (
+        #     df.groupby('DESC_TIPO_EVENTO')['COD_EVENTO']
+        #     .count()
+        #     .reset_index()
+        #     .rename(columns={'DESC_TIPO_EVENTO': 'Tipo de Evento', 'COD_EVENTO': 'Quantidade'})
+        #     .sort_values('Quantidade', ascending=False)
+        # )
+        # st.bar_chart(contagem_tipo.set_index('Tipo de Evento')['Quantidade'])
+
+        st.subheader("Filtrar tabela de eventos")
+        fcol1, fcol2, fcol3, fcol4 = st.columns(4)
+        with fcol1:
+            opcoes_empresa = sorted([v for v in df['COD_EMPRESA'].unique() if v != ''])
+            filtro_empresa = st.multiselect("Empresa", opcoes_empresa, key="filtro_cod_empresa")
+        with fcol2:
+            opcoes_tipo = sorted([v for v in df['DESC_TIPO_EVENTO'].unique() if v != ''])
+            filtro_tipo = st.multiselect("Tipo de Evento", opcoes_tipo, key="filtro_tipo_evento")
+        with fcol3:
+            opcoes_resp = sorted([v for v in df['RESP_ATUAL'].unique() if v != ''])
+            filtro_resp = st.multiselect("Responsável", opcoes_resp, key="filtro_resp_atual")
+        with fcol4:
+            opcoes_status = sorted([v for v in df['STATUS'].unique() if v != ''])
+            filtro_status = st.multiselect("Status", opcoes_status, key="filtro_status_hamada")
+
+        df_filtrado = df.copy()
+        if filtro_empresa:
+            df_filtrado = df_filtrado[df_filtrado['COD_EMPRESA'].isin(filtro_empresa)]
+        if filtro_tipo:
+            df_filtrado = df_filtrado[df_filtrado['DESC_TIPO_EVENTO'].isin(filtro_tipo)]
+        if filtro_resp:
+            df_filtrado = df_filtrado[df_filtrado['RESP_ATUAL'].isin(filtro_resp)]
+        if filtro_status:
+            df_filtrado = df_filtrado[df_filtrado['STATUS'].isin(filtro_status)]
+
+        st.caption(f"{len(df_filtrado)} registro(s) exibido(s)")
+        st.dataframe(
+            df_filtrado,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "link": st.column_config.LinkColumn("Link", display_text="Abrir"),
+                "campanha": st.column_config.LinkColumn("Campanha"),
+                "link_chat": st.column_config.LinkColumn("Link Chat", display_text="Abrir"),
+                "DATA_CRIACAO": st.column_config.DateColumn("Data Criação", format="DD/MM/YYYY"),
+                "DATA_ENCERRAMENTO": st.column_config.DateColumn("Data Encerramento", format="DD/MM/YYYY"),
+                "DATA_TRANSFERENCIA": st.column_config.DateColumn("Data Transferência", format="DD/MM/YYYY"),
+            }
+        )
+
+
+
     if st.sidebar.button("Sair", width="stretch"):
         st.query_params.clear()
         st.session_state.clear()
