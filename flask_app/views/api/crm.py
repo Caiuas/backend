@@ -332,6 +332,7 @@ def list_crm_eventos():
                     OR LOWER(concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST)) LIKE '%{search.lower()}%'
                     OR LOWER(pm.DESCRICAO_MODELO) LIKE '%{search.lower()}%'
                     OR TO_CHAR(ce.COD_EVENTO) = '{search}'
+                    
                 )
             """
         
@@ -814,7 +815,7 @@ def descartar_evento(id_evento):
         if cod_empresa not in ['11', '33']:
             return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
         cod_evento = str(id_evento)[2:]
-        observacao = request.json.get('observacao', '')
+        observacao = (request.json.get('observacao', '') or '').replace("'", "''")
         cod_descarte = request.json.get('cod_descarte', None)
         if not cod_evento.isdigit():
             return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
@@ -876,7 +877,7 @@ def descartar_evento(id_evento):
             conn_oracle.close()
             return jsonify({'status': 'error', 'message': 'Motivo de descarte inválido'}), 400
         
-        descricao_descarte = row[1]
+        descricao_descarte = (row[1] or '').replace("'", "''")
         
         
         query = f"""
@@ -1255,7 +1256,8 @@ def show_crm_eventos(id_evento):
                             ELSE 'NÃO'
                         END TEM_TEST_DRIVE,
                         ce.COD_EMPRESA_ANTERIOR, 
-                        ce.COD_EVENTO_ANTERIOR
+                        ce.COD_EVENTO_ANTERIOR,
+                        vp.cod_proposta
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
@@ -1266,6 +1268,7 @@ def show_crm_eventos(id_evento):
                     LEFT JOIN CRM_DESCARTES cd on cd.COD_DESCARTE = ce.COD_DESCARTE
                     LEFT JOIN CRM_MOTIVO_PERDAS cmp ON cmp.cod_motivo_perda = ce.cod_motivo_perda
                     LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO 
+                    LEFT JOIN veiculos_propostas vp ON vp.COD_PROPOSTA = ce.cod_proposta and vp.STATUS_PROPOSTA <> 'C'
                     WHERE
                         1 = 1
                         --AND ce.COD_TIPO_EVENTO IN (785)
@@ -1338,7 +1341,8 @@ def show_crm_eventos(id_evento):
             'data_encerramento': row[29],
             'tem_test_drive': row[30],
             'cod_empresa_anterior': row[31],
-            'cod_evento_anterior': row[32]
+            'cod_evento_anterior': row[32],
+            'cod_proposta': row[33]
         }
         query = f"""
             SELECT
@@ -4003,3 +4007,174 @@ def cria_evento_chatwoot():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
+# muda cod_proposta
+@crm_bp.route('/api/crm/eventos/<id_evento>/proposta', methods=['POST'])
+@token_required
+def muda_proposta_evento(id_evento):
+    try:
+        cod_proposta = request.json.get('cod_proposta', None)
+
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+
+        if not id_evento or not str(id_evento).isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+
+        id_evento = str(id_evento)
+        cod_empresa = id_evento[:2]
+        cod_evento_str = id_evento[2:]
+
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'Empresa inválida'}), 400
+        if not cod_evento_str.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = int(cod_evento_str)
+
+        conn_oracle, cur_oracle = oracle()
+
+        # Buscar usuário logado
+        query = f"""
+            SELECT eu.nome
+            FROM empresas_usuarios eu
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIL) = '{email}'
+                AND eu.COD_EMPRESA IN (11, 33, 111)
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 404
+        quem_criou = rows[0][0]
+
+        # Verificar status do evento
+        query = f"""
+            SELECT status FROM crm_eventos
+            WHERE 1=1
+                AND cod_empresa = {cod_empresa}
+                AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
+
+        status_evento = rows[0][0]
+        if status_evento == 'E':
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento encerrado, não é possível alterar a proposta'}), 400
+        if status_evento == 'D':
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Evento descartado, não é possível alterar a proposta'}), 400
+
+        # Se cod_proposta for nulo, remove o vínculo
+        if not cod_proposta or not str(cod_proposta).strip():
+            query = f"""
+                UPDATE crm_eventos
+                SET cod_proposta = NULL
+                WHERE cod_empresa = {cod_empresa}
+                    AND cod_evento = {cod_evento}
+            """
+            cur_oracle.execute(query)
+            query = f"""
+                INSERT INTO crm_acoes
+                (cod_empresa, cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+                VALUES (
+                    {cod_empresa},
+                    {cod_evento},
+                    '{quem_criou}',
+                    136,
+                    SYSDATE,
+                    'Proposta removida do evento',
+                    'P',
+                    seq_crm_COD_ACAO.nextval,
+                    '{quem_criou}'
+                )
+            """
+            cur_oracle.execute(query)
+            conn_oracle.commit()
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'success', 'message': 'Proposta removida do evento com sucesso'}), 200
+
+        # Verificar se outra evento já usa essa proposta
+        query = f"""
+            SELECT cod_empresa, cod_evento FROM crm_eventos
+            WHERE 1=1
+                and COD_TIPO_EVENTO IN (785,807)
+                AND cod_proposta = '{cod_proposta}'
+                AND NOT (cod_empresa = {cod_empresa} AND cod_evento = {cod_evento})
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) > 0:
+            outro = f"{rows[0][0]}{rows[0][1]}"
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': f'Proposta já vinculada ao evento {outro}'}), 400
+
+        # Verificar se proposta existe e buscar vendedor
+        query = f"""
+            SELECT vp.VENDEDOR, lower(eu.EMAIL)
+            FROM VEICULOS_PROPOSTAS vp
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = vp.VENDEDOR
+                AND eu.DEMITIDO <> 'S'
+            WHERE vp.COD_PROPOSTA = '{cod_proposta}'
+                AND ROWNUM = 1
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Proposta não encontrada'}), 404
+
+        vendedor_email = rows[0][1]
+        emails_permitidos = {'pablo.ti@caiuas.com.br', 'rodrigo.hamada@caiuas.com.br'}
+        if vendedor_email and str(vendedor_email).strip().lower() != email and email not in emails_permitidos:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Apenas o vendedor da proposta pode vinculá-la'}), 403
+
+        # Atualizar cod_proposta no evento
+        query = f"""
+            UPDATE crm_eventos
+            SET cod_proposta = '{cod_proposta}'
+            WHERE cod_empresa = {cod_empresa}
+                AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        # Adicionar ação
+        query = f"""
+            INSERT INTO crm_acoes
+            (cod_empresa, cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            VALUES (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_criou}',
+                136,
+                SYSDATE,
+                'Proposta {cod_proposta} vinculada ao evento',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_criou}'
+            )
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+
+        return jsonify({'status': 'success', 'message': f'Proposta {cod_proposta} vinculada ao evento com sucesso'}), 200
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
