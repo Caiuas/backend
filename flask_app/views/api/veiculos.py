@@ -2115,15 +2115,17 @@ def list_propostas():
             LEFT JOIN caiuas_veic_proc cvp ON 1=1
 	            AND cvp.COD_PROPOSTA = vp.COD_PROPOSTA 
             WHERE 1=1
-                AND vp.STATUS_PROPOSTA in ('A')
+                AND vp.STATUS_PROPOSTA in ('A','V')
                 {filter_user}
                 {filter_cod_proposta}
                 {filter_cod_cliente}
                 {filter_search}
             ORDER BY vp.EMISSAO
         """
+        
         cur.execute(query)
         result = cur.fetchall()
+        
         total = len(result)
         if total == 0:
             cur.close()
