@@ -18,6 +18,69 @@ import pytz
 # 1. Configuração da página
 st.set_page_config(page_title="Caiuás - Acesso Rápido",layout="wide")
 
+# ---------------------------------------------------------------------------
+# 2. Controle de acesso por menu
+# pablo.ti@caiuas.com.br tem acesso a tudo automaticamente.
+# Para liberar outros usuários, adicione o e-mail na lista correspondente.
+# ---------------------------------------------------------------------------
+
+EMAIL_ADMIN = "pablo.ti@caiuas.com.br"
+
+EMAILS_RECEPCAO = [
+    "pablo.ti@caiuas.com.br",
+    "mirela.novaga@caiuas.com.br",
+    "Isadora.fraga@caiuas.com.br"
+]
+
+EMAILS_CRM_SHOWROOM = [
+    "pablo.ti@caiuas.com.br",
+    "rodrigo.hamada@caiuas.com.br",
+    "cristiane.aguilar@caiuas.com.br",
+    "franciele.mayer@caiuas.com.br"
+]
+
+EMAILS_INICIO = [
+    "pablo.ti@caiuas.com.br",
+]
+
+EMAILS_VEICULOS = [
+    "pablo.ti@caiuas.com.br",
+]
+
+EMAILS_ESTOQUE_PECAS = [
+    "pablo.ti@caiuas.com.br",
+]
+
+EMAILS_OBSOLESCENCIA_ESTOQUE = [
+    "pablo.ti@caiuas.com.br",
+]
+
+EMAILS_CRM = [
+    "pablo.ti@caiuas.com.br"
+]
+
+EMAILS_BASE_CLIENTES = [
+    "pablo.ti@caiuas.com.br",
+]
+
+EMAILS_IMPLANTACAO = [
+    "pablo.ti@caiuas.com.br",
+]
+
+EMAILS_HAMADA = [
+    "pablo.ti@caiuas.com.br",
+    "rodrigo.hamada@caiuas.com.br"
+]
+
+EMAILS_CHAT = [
+    "pablo.ti@caiuas.com.br",
+    "rodrigo.hamada@caiuas.com.br"
+]
+
+def tem_acesso(email_usuario, lista_emails):
+    """Retorna True se o e-mail é admin ou está na lista do menu."""
+    return email_usuario == EMAIL_ADMIN or email_usuario in lista_emails
+
 # 2. Funções de Autenticação
 def realizar_login(email, password):
     url = "https://app.caiuas.com.br/api/login"
@@ -53,6 +116,7 @@ if url_token:
     if dados_usuario:
         st.session_state.authenticated = True
         st.session_state.user_name = dados_usuario.get("name", "Usuário")
+        st.session_state.user_email = dados_usuario.get("email", "")
         st.session_state.token = url_token
     else:
         # Se o token na URL expirou, limpa a URL
@@ -76,9 +140,43 @@ if not st.session_state.get("authenticated"):
             else:
                 st.error("Credenciais inválidas ou erro no servidor.")
 else:
+    email_usuario = st.session_state.get("user_email", "")
+
+    menus_disponiveis = []
+    if tem_acesso(email_usuario, EMAILS_RECEPCAO):
+        menus_disponiveis.append("RECEPCAO")
+    if tem_acesso(email_usuario, EMAILS_CRM_SHOWROOM):
+        menus_disponiveis.append("Fluxo de loja")
+    if tem_acesso(email_usuario, EMAILS_INICIO):
+        menus_disponiveis.append("inicio")
+    if tem_acesso(email_usuario, EMAILS_VEICULOS):
+        menus_disponiveis.append("Veículos")
+    if tem_acesso(email_usuario, EMAILS_ESTOQUE_PECAS):
+        menus_disponiveis.append("Estoque de peças")
+    if tem_acesso(email_usuario, EMAILS_OBSOLESCENCIA_ESTOQUE):
+        menus_disponiveis.append("Obsolescência de estoque")
+    if tem_acesso(email_usuario, EMAILS_CRM):
+        menus_disponiveis.append("CRM")
+    if tem_acesso(email_usuario, EMAILS_BASE_CLIENTES):
+        menus_disponiveis.append("Base Clientes/Veículos")
+    if tem_acesso(email_usuario, EMAILS_IMPLANTACAO):
+        menus_disponiveis.append("IMPLANTACAO")
+    if tem_acesso(email_usuario, EMAILS_HAMADA):
+        menus_disponiveis.append("Leads")
+    if tem_acesso(email_usuario, EMAILS_CHAT):
+        menus_disponiveis.append("Chat")
+
+    if not menus_disponiveis:
+        st.warning("Seu usuário não possui acesso a nenhum menu. Entre em contato com o administrador.")
+        if st.button("Sair"):
+            st.query_params.clear()
+            st.session_state.clear()
+            st.rerun()
+        st.stop()
+
     menu = st.sidebar.radio(
         "Menu",
-        ["RECEPCAO","CRM SHOWROOM","inicio","Veículos","Estoque de peças","Obsolescência de estoque","CRM","Base Clientes/Veículos","IMPLANTACAO","HAMADA"]
+        menus_disponiveis
     )
     
 
@@ -647,8 +745,8 @@ else:
                 fig3.update_layout(yaxis_title='Total de Eventos', xaxis_title='Tipo de Atendimento', uniformtext_minsize=8, uniformtext_mode='hide', xaxis_tickangle=-45)
                 st.plotly_chart(fig3, use_container_width=True)
 
-    if menu == "CRM SHOWROOM":
-        st.title("Acompanhamento de CRM - Showroom")
+    if menu == "Fluxo de loja":
+        st.title("Acompanhamento de Fluxo de Loja")
         # st.write("Em desenvolvimento...")
         data_inicial = st.sidebar.date_input("Data Inicial", datetime.now())
         data_final = st.sidebar.date_input("Data Final", datetime.now())
@@ -701,7 +799,14 @@ else:
                     WHEN (SELECT count(*) FROM caiuas_crm_test_drive cctd WHERE cctd.COD_EMPRESA = ce.COD_EMPRESA AND cctd.COD_EVENTO = ce.COD_EVENTO ) > 0 THEN 'TEM'
                     ELSE 'NÃO'
                 END TEM_TEST_DRIVE,
-                ce.data_criacao
+                ce.data_criacao,
+                ce.COD_TIPO_EVENTO,
+                TRUNC(cel.data_criacao) data_lead,
+                CASE
+                    WHEN eu_lead.NOME_COMPLETO IS NOT NULL THEN upper(eu_lead.NOME_COMPLETO)
+                    ELSE 'SEM RESPONSÁVEL'
+                END responsavel_lead,
+                TRUNC(cel.data_agendada) data_agendada_lead
                 FROM crm_eventos ce
                 LEFT JOIN CRM_ANDAMENTO ca ON 1=1
                     AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO 
@@ -713,14 +818,88 @@ else:
                     AND pm.COD_MODELO = ce.COD_MODELO 
                 LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
                 LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
+                LEFT JOIN crm_eventos cel ON 1=1
+                    AND ce.COD_EVENTO_ANTERIOR = cel.COD_EVENTO
+                    AND ce.COD_EMPRESA_ANTERIOR = cel.COD_EMPRESA
+                LEFT JOIN EMPRESAS_USUARIOS eu_lead ON 1=1
+                    AND eu_lead.NOME = cel.RESPONSAVEL_PELO_EVENTO
                 WHERE 1=1
                     AND ce.COD_TIPO_EVENTO IN (785,807)
+                    AND ce.status <> 'D'
                     AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
         """
         con, cur = oracle()
         cur.execute(query)
         results = cur.fetchall()
         df = pd.DataFrame(results, columns=[desc[0] for desc in cur.description])
+        query = f"""
+        SELECT
+            ccr.cod_empresa,
+            concat(ce.COD_EMPRESA, ce.COD_EVENTO) cod_evento,
+            TRUNC(ccr.created_at) data_retorno,
+            CASE
+                WHEN ca.andamento IS NULL THEN 'Não informado'
+                ELSE ca.andamento
+            END andamento,
+            CASE
+                WHEN ce.status = 'P' THEN 'Pendente'
+                WHEN ce.status = 'E' THEN 'Encerrado'
+                WHEN ce.status = 'D' THEN 'Descartado'
+                WHEN ce.status = 'V' THEN 'Pendente'
+                WHEN ce.status = 'R' THEN 'Pendente'
+                WHEN ce.status = 'A' THEN 'Pendente'
+                ELSE 'Não informado'
+            END status,
+            CASE
+                WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO
+                ELSE c.NOME
+            END nome_cliente,
+            TRUNC(ce.data_agendada) data_agendada,
+            TRUNC(ce.data_visita) data_visita,
+            upper(cet.DESC_TIPO_EVENTO) tipo_evento,
+            CASE
+                WHEN eu.NOME_COMPLETO IS NOT NULL THEN upper(eu.NOME_COMPLETO)
+                ELSE 'SEM RESPONSÁVEL'
+            END responsavel,
+            CASE
+                WHEN ce.cod_modelo IS NOT NULL THEN pm.descricao_modelo
+                ELSE 'VEÍCULO NAO DEFINIDO'
+            END veiculo,
+            (SELECT count(*) FROM CAIUAS_CRM_RETORNO ccr2
+             WHERE ccr2.COD_EMPRESA = ce.COD_EMPRESA
+               AND ccr2.COD_EVENTO = ce.COD_EVENTO) qtd_retornos,
+            CASE
+                WHEN (SELECT count(*) FROM caiuas_crm_test_drive cctd WHERE cctd.COD_EMPRESA = ce.COD_EMPRESA AND cctd.COD_EVENTO = ce.COD_EVENTO) > 0 THEN 'TEM'
+                ELSE 'NÃO'
+            END tem_test_drive,
+            TRUNC(ce.data_criacao) data_criacao
+        FROM CAIUAS_CRM_RETORNO ccr
+        LEFT JOIN crm_eventos ce ON 1=1
+            AND ce.COD_EVENTO = ccr.COD_EVENTO
+            AND ce.COD_EMPRESA = ccr.COD_EMPRESA
+        LEFT JOIN CRM_ANDAMENTO ca ON 1=1
+            AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+        LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+            AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+        LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+            AND eu.NOME = ce.RESPONSAVEL_PELO_EVENTO
+        LEFT JOIN PRODUTOS_MODELOS pm ON 1=1
+            AND pm.COD_MODELO = ce.COD_MODELO
+        LEFT JOIN MIDIA m ON 1=1
+            AND m.COD_MIDIA = ce.COD_MIDIA
+        LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
+        LEFT JOIN crm_eventos cel ON 1=1
+            AND ce.COD_EVENTO_ANTERIOR = cel.COD_EVENTO 
+            AND ce.COD_EMPRESA_ANTERIOR = cel.COD_EMPRESA
+        WHERE 1=1
+            AND ce.status <> 'D'
+            AND TRUNC(ccr.created_at) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD')
+            AND TRUNC(ccr.created_at) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
+        """
+        cur.execute(query)
+        results = cur.fetchall()
+        df_retorno = pd.DataFrame(results, columns=[desc[0] for desc in cur.description])
+        
         cur.close()
         con.close()
         
@@ -733,19 +912,36 @@ else:
         df['DATA_CONTATO'] = df['DATA_CONTATO'].dt.strftime('%Y-%m-%d').fillna('-')
         df['DATA_AGENDADA'] = df['DATA_AGENDADA'].dt.strftime('%Y-%m-%d').fillna('-')
         df['DATA_VISITA'] = df['DATA_VISITA'].dt.strftime('%Y-%m-%d').fillna('-')
+        df['DATA_LEAD'] = pd.to_datetime(df['DATA_LEAD'], errors='coerce')
+        df['DATA_LEAD'] = df['DATA_LEAD'].dt.strftime('%Y-%m-%d').fillna('-')
+        df['DATA_AGENDADA_LEAD'] = pd.to_datetime(df['DATA_AGENDADA_LEAD'], errors='coerce')
+        df['DATA_AGENDADA_LEAD'] = df['DATA_AGENDADA_LEAD'].dt.strftime('%Y-%m-%d').fillna('-')
         
         # Substituir None/NaN nas demais colunas
         df = df.fillna('-')
         # link é conct https://app.caiuas.com.br/crm/eventos/ + cod_evento
         df['LINK'] = df['COD_EVENTO'].apply(lambda x: f"https://app.caiuas.com.br/crm/eventos/{x}")
         
+        df_retorno['DATA_RETORNO'] = pd.to_datetime(df_retorno['DATA_RETORNO'], errors='coerce')
+        df_retorno['DATA_RETORNO'] = df_retorno['DATA_RETORNO'].dt.strftime('%Y-%m-%d').fillna('-')
+        df_retorno['DATA_AGENDADA'] = pd.to_datetime(df_retorno['DATA_AGENDADA'], errors='coerce')
+        df_retorno['DATA_AGENDADA'] = df_retorno['DATA_AGENDADA'].dt.strftime('%Y-%m-%d').fillna('-')
+        df_retorno['DATA_VISITA'] = pd.to_datetime(df_retorno['DATA_VISITA'], errors='coerce')
+        df_retorno['DATA_VISITA'] = df_retorno['DATA_VISITA'].dt.strftime('%Y-%m-%d').fillna('-')
+        df_retorno['DATA_CRIACAO'] = pd.to_datetime(df_retorno['DATA_CRIACAO'], errors='coerce')
+        df_retorno['DATA_CRIACAO'] = df_retorno['DATA_CRIACAO'].dt.strftime('%Y-%m-%d').fillna('-')
+        df_retorno = df_retorno.fillna('-')
+        df_retorno['LINK'] = df_retorno['COD_EVENTO'].apply(lambda x: f"https://app.caiuas.com.br/crm/eventos/{x}")
+        
         excel_buffer = io.BytesIO()
-        df.to_excel(excel_buffer, index=False, sheet_name="Eventos CRM Showroom")
+        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name="Primeira passagem")
+            df_retorno.to_excel(writer, index=False, sheet_name="Retornos")
         excel_buffer.seek(0)
         st.download_button(
             label="Download da planilha de eventos",
             data=excel_buffer,
-            file_name="eventos_crm_showroom.xlsx",
+            file_name="eventos_fluxo_de_loja.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
@@ -774,6 +970,31 @@ else:
         if status_evento_selecionado != "Todos":
             df = df[df['STATUS'] == status_evento_selecionado]
         
+        # Gráfico: Total de Primeiras Passagens vs Retornos
+        total_primeiras = len(df)
+        total_retornos = len(df_retorno)
+        df_comparativo = pd.DataFrame({
+            "Tipo": ["Primeiras Passagens", "Retornos"],
+            "Total": [total_primeiras, total_retornos]
+        })
+        col_chart1, col_chart2 = st.columns([1, 2])
+        with col_chart1:
+            st.metric("Primeiras Passagens", total_primeiras)
+            st.metric("Retornos", total_retornos)
+        with col_chart2:
+            fig_comparativo = px.bar(
+                df_comparativo,
+                x="Tipo",
+                y="Total",
+                text="Total",
+                color="Tipo",
+                color_discrete_map={"Primeiras Passagens": "#3498db", "Retornos": "#e67e22"},
+                title="Primeiras Passagens vs Retornos no período"
+            )
+            fig_comparativo.update_traces(textposition='outside')
+            fig_comparativo.update_layout(showlegend=False, yaxis_title="Total", xaxis_title="")
+            st.plotly_chart(fig_comparativo, use_container_width=True)
+
         # Seção com 3 colunas de indicadores
         st.subheader("Indicadores")
         col1, col2, col3 = st.columns(3)
@@ -850,7 +1071,30 @@ else:
             
         
         
-        st.subheader("Detalhes dos eventos")
+        # Tabela: Primeiras passagens por modelo de veículo
+        st.subheader("Primeiras passagens por modelo de veículo")
+        eventos_por_modelo = (
+            df.groupby('VEICULO')['COD_EVENTO']
+            .count()
+            .reset_index()
+            .rename(columns={'VEICULO': 'Modelo', 'COD_EVENTO': 'Quantidade'})
+            .sort_values('Quantidade', ascending=False)
+        )
+        st.dataframe(eventos_por_modelo, hide_index=True)
+
+        # Tabela: Passagens Varejo - CRIS (apenas tipo 785)
+        st.subheader("Passagens Varejo - CRIS")
+        df_varejo_cris = df[df['COD_TIPO_EVENTO'] == 785]
+        varejo_cris_por_modelo = (
+            df_varejo_cris.groupby('VEICULO')['COD_EVENTO']
+            .count()
+            .reset_index()
+            .rename(columns={'VEICULO': 'Modelo', 'COD_EVENTO': 'Quantidade'})
+            .sort_values('Quantidade', ascending=False)
+        )
+        st.dataframe(varejo_cris_por_modelo, hide_index=True)
+
+        st.subheader("Eventos")
         st.dataframe(
             df, 
             hide_index=True,
@@ -860,7 +1104,19 @@ else:
                     display_text="Abrir"
                 )
             }
-        )  
+        )
+
+        st.subheader("Retornos")
+        st.dataframe(
+            df_retorno,
+            hide_index=True,
+            column_config={
+                "LINK": st.column_config.LinkColumn(
+                    "Abrir Evento",
+                    display_text="Abrir"
+                )
+            }
+        )
     
     if menu == "RECEPCAO":
         st.title("Acompanhamento - Fluxo de loja")
@@ -1050,7 +1306,7 @@ else:
             st.plotly_chart(fig_eventos_veiculo, use_container_width=True)
             st.dataframe(eventos_por_veiculo.sort_values('Quantidade', ascending=False), hide_index=True, use_container_width=True)
          
-    elif menu == "Veículos":
+    if menu == "Veículos":
         st.title("Acompanhamento de veículos")
         # adiciona filtro lateral com seleção de data
         data_inicial = st.sidebar.date_input("Data Inicial", datetime.now())
@@ -1555,8 +1811,8 @@ else:
         pivot = pd.pivot_table(df, index=['STATUS','ANDAMENTO','TAG'], values='COD_EVENTO', aggfunc='count').reset_index()
         st.dataframe(pivot, hide_index=True, use_container_width=True)
         
-    if menu == "HAMADA":
-        st.title("Acompanhamento HAMADA")
+    if menu == "Leads":
+        st.title("Acompanhamento de Leads")
         data_inicial_hamada = st.sidebar.date_input("Data Inicial", datetime.now().date(), key="hamada_data_inicial")
         data_final_hamada = st.sidebar.date_input("Data Final", datetime.now().date(), key="hamada_data_final")
         query = f"""
@@ -1680,125 +1936,26 @@ else:
         del df['conversation_id']
         df = df.fillna('')
         df = df.replace('None', '')
-        
-        
-
-        query_chatwoot = f"""
-        SELECT DISTINCT ON (m.conversation_id)
-            m.conversation_id,
-            m.account_id,
-            c.created_at,
-            CASE
-                WHEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url' IS NOT NULL
-                THEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url'
-                ELSE c.custom_attributes->>'link_campanha'
-            END AS link_campanha,
-            entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' AS id_campanha,
-            c.custom_attributes->>'evento_nbs' AS link_crm,
-            u.name AS responsavel,
-            c.custom_attributes
-        FROM messages m
-        LEFT JOIN whatsapp_raw_payloads wrp ON wrp.source_id = m.source_id
-        CROSS JOIN LATERAL jsonb_array_elements(wrp.payload->'entry') AS entry
-        LEFT JOIN conversations c ON c.id = m.conversation_id
-        LEFT JOIN users u ON u.id = c.assignee_id
-        WHERE (
-            entry->'changes'->0->'value'->'messages'->0->'referral' IS NOT NULL
-            OR 
-            c.additional_attributes::text LIKE '%link_campanha%'
-        )
-                            AND c.created_at::date >= DATE '{data_inicial_hamada}'
-                            AND c.created_at::date <= DATE '{data_final_hamada}'
-        ORDER BY m.conversation_id, c.created_at
-        """
-        
-        cur_chatwoot.execute(query_chatwoot)
-        result_chatwoot = cur_chatwoot.fetchall()
-        columns_chatwoot = [desc[0] for desc in cur_chatwoot.description]
-        df_chatwoot = pd.DataFrame(result_chatwoot, columns=columns_chatwoot)
         cur_chatwoot.close()
         conn_chatwoot.close()
 
-        # Evita exibir None na tabela e mantém links vazios quando não existirem.
-        df_chatwoot = df_chatwoot.fillna('')
-        df_chatwoot = df_chatwoot.replace('None', '')
-
-        df_chatwoot['link_chat'] = df_chatwoot.apply(
-            lambda row: f"https://chat.caiuas.com.br/app/accounts/{row['account_id']}/conversations/{row['conversation_id']}"
-            if str(row.get('account_id', '')).strip() != '' and str(row.get('conversation_id', '')).strip() != ''
-            else '',
-            axis=1
-        )
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Chats por responsável")
-            if df_chatwoot.empty or df_chatwoot['responsavel'].str.strip().eq('').all():
-                st.info("Nenhum dado encontrado para o período.")
-            else:
-                pivot_vendedor = pd.pivot_table(df_chatwoot, index='responsavel', values='conversation_id', aggfunc='count').reset_index().rename(columns={'conversation_id': 'total_chats'})
-                total_row_chats = pd.DataFrame({'responsavel': ['Total'], 'total_chats': [pivot_vendedor['total_chats'].sum()]})
-                pivot_vendedor_total = pd.concat([pivot_vendedor, total_row_chats], ignore_index=True)
-                styled_chats = pivot_vendedor_total.style.apply(
-                    lambda x: ['font-weight: bold' if x.name == len(pivot_vendedor_total) - 1 else '' for _ in x], axis=1
-                )
-                st.dataframe(styled_chats, hide_index=True, use_container_width=True)
-        with col2:
-            st.subheader("Eventos por resonsável")
-            df_eventos_filtrado = df[df['QUEM_CRIOU'].isin(['Stefany Cristine de Oliveira Araujo','EVELLYN KAYLANY SILVA'])]
-            if df_eventos_filtrado.empty:
-                st.info("Nenhum dado encontrado para o período.")
-            else:
-                pivot_vendedor_eventos = pd.pivot_table(df_eventos_filtrado, index='RESP_ATUAL', values='COD_EVENTO', aggfunc='count').reset_index()
-                pivot_vendedor_eventos.columns = ['RESP_ATUAL', 'total_eventos']
-                conv_por_resp = df[df['campanha'].str.strip() != ''].groupby('RESP_ATUAL')['campanha'].count().reset_index().rename(columns={'campanha': 'cont_conversao'})
-                pivot_vendedor_eventos = pivot_vendedor_eventos.merge(conv_por_resp, on='RESP_ATUAL', how='left').fillna(0)
-                pivot_vendedor_eventos['cont_conversao'] = pivot_vendedor_eventos['cont_conversao'].astype(int)
-                # Cria linha de total antes de renomear
-                total_row_eventos = pd.DataFrame({'RESP_ATUAL': ['Total'], 'total_eventos': [pivot_vendedor_eventos['total_eventos'].sum()], 'cont_conversao': [pivot_vendedor_eventos['cont_conversao'].sum()]})
-                pivot_vendedor_eventos_total = pd.concat([pivot_vendedor_eventos, total_row_eventos], ignore_index=True)
-                pivot_vendedor_eventos_total = pivot_vendedor_eventos_total.rename(columns={'RESP_ATUAL': 'Responsável', 'total_eventos': 'Total de Eventos', 'cont_conversao': 'Campanhas'})
-                styled_eventos = pivot_vendedor_eventos_total.style.apply(
-                    lambda x: ['font-weight: bold' if x.name == len(pivot_vendedor_eventos_total) - 1 else '' for _ in x], axis=1
-                )
-                st.dataframe(styled_eventos, hide_index=True, use_container_width=True)
-            
-        
-        
-        
-        df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','link_crm']].copy()
-
-        st.subheader("Campanhas (Chatwoot)")
-        total_linhas_chatwoot = len(df_chatwoot)
-        excel_buffer_chatwoot = io.BytesIO()
-        df_chatwoot_excel.to_excel(excel_buffer_chatwoot, index=False, sheet_name="Chatwoot")
-        excel_buffer_chatwoot.seek(0)
-        st.download_button(
-            label=f"📥 Download da tabela Chatwoot ({total_linhas_chatwoot} linhas)",
-            data=excel_buffer_chatwoot,
-            file_name=f"campanhas_chatwoot_hamada_{total_linhas_chatwoot}_linhas.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="download_chatwoot_hamada"
-        )
-        st.dataframe(
-            df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha', 'link_crm', 'link_chat']],
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "link_campanha": st.column_config.LinkColumn(
-                    "Link Campanha",
-                    display_text="Abrir"
-                ),
-                "link_crm": st.column_config.LinkColumn(
-                    "Link Evento NBS",
-                    display_text="Abrir"
-                ),
-                "link_chat": st.column_config.LinkColumn(
-                    "Link Chat",
-                    display_text="Abrir"
-                )
-            }
-        )
+        st.subheader("Eventos por responsável")
+        df_eventos_filtrado = df[df['QUEM_CRIOU'].isin(['Stefany Cristine de Oliveira Araujo','EVELLYN KAYLANY SILVA'])]
+        if df_eventos_filtrado.empty:
+            st.info("Nenhum dado encontrado para o período.")
+        else:
+            pivot_vendedor_eventos = pd.pivot_table(df_eventos_filtrado, index='RESP_ATUAL', values='COD_EVENTO', aggfunc='count').reset_index()
+            pivot_vendedor_eventos.columns = ['RESP_ATUAL', 'total_eventos']
+            conv_por_resp = df[df['campanha'].str.strip() != ''].groupby('RESP_ATUAL')['campanha'].count().reset_index().rename(columns={'campanha': 'cont_conversao'})
+            pivot_vendedor_eventos = pivot_vendedor_eventos.merge(conv_por_resp, on='RESP_ATUAL', how='left').fillna(0)
+            pivot_vendedor_eventos['cont_conversao'] = pivot_vendedor_eventos['cont_conversao'].astype(int)
+            total_row_eventos = pd.DataFrame({'RESP_ATUAL': ['Total'], 'total_eventos': [pivot_vendedor_eventos['total_eventos'].sum()], 'cont_conversao': [pivot_vendedor_eventos['cont_conversao'].sum()]})
+            pivot_vendedor_eventos_total = pd.concat([pivot_vendedor_eventos, total_row_eventos], ignore_index=True)
+            pivot_vendedor_eventos_total = pivot_vendedor_eventos_total.rename(columns={'RESP_ATUAL': 'Responsável', 'total_eventos': 'Total de Eventos', 'cont_conversao': 'Campanhas'})
+            styled_eventos = pivot_vendedor_eventos_total.style.apply(
+                lambda x: ['font-weight: bold' if x.name == len(pivot_vendedor_eventos_total) - 1 else '' for _ in x], axis=1
+            )
+            st.dataframe(styled_eventos, hide_index=True, use_container_width=True)
 
         date_cols = ['DATA_CRIACAO', 'DATA_ENCERRAMENTO', 'DATA_TRANSFERENCIA','DATA_AGENDADA','DATA_VISITA']
         for col in date_cols:
@@ -1886,7 +2043,93 @@ else:
             }
         )
 
+    if menu == "Chat":
+        st.title("Acompanhamento - Campanhas (Chatwoot)")
+        data_inicial_chat = st.sidebar.date_input("Data Inicial", datetime.now().date(), key="chat_data_inicial")
+        data_final_chat = st.sidebar.date_input("Data Final", datetime.now().date(), key="chat_data_final")
 
+        query_chatwoot = f"""
+        SELECT DISTINCT ON (m.conversation_id)
+            m.conversation_id,
+            m.account_id,
+            c.created_at,
+            CASE
+                WHEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url' IS NOT NULL
+                THEN entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_url'
+                ELSE c.custom_attributes->>'link_campanha'
+            END AS link_campanha,
+            entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' AS id_campanha,
+            c.custom_attributes->>'evento_nbs' AS link_crm,
+            u.name AS responsavel,
+            c.custom_attributes,
+            entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' as source_id
+        FROM messages m
+        LEFT JOIN whatsapp_raw_payloads wrp ON wrp.source_id = m.source_id
+        CROSS JOIN LATERAL jsonb_array_elements(wrp.payload->'entry') AS entry
+        LEFT JOIN conversations c ON c.id = m.conversation_id
+        LEFT JOIN users u ON u.id = c.assignee_id
+        WHERE (
+            entry->'changes'->0->'value'->'messages'->0->'referral' IS NOT NULL
+            OR
+            c.additional_attributes::text LIKE '%link_campanha%'
+        )
+            AND c.created_at::date >= DATE '{data_inicial_chat}'
+            AND c.created_at::date <= DATE '{data_final_chat}'
+        ORDER BY m.conversation_id, c.created_at
+        """
+
+        conn_chatwoot, cur_chatwoot = chatwoot()
+        cur_chatwoot.execute(query_chatwoot)
+        result_chatwoot = cur_chatwoot.fetchall()
+        columns_chatwoot = [desc[0] for desc in cur_chatwoot.description]
+        df_chatwoot = pd.DataFrame(result_chatwoot, columns=columns_chatwoot)
+        cur_chatwoot.close()
+        conn_chatwoot.close()
+
+        df_chatwoot = df_chatwoot.fillna('')
+        df_chatwoot = df_chatwoot.replace('None', '')
+        df_chatwoot['link_chat'] = df_chatwoot.apply(
+            lambda row: f"https://chat.caiuas.com.br/app/accounts/{row['account_id']}/conversations/{row['conversation_id']}"
+            if str(row.get('account_id', '')).strip() != '' and str(row.get('conversation_id', '')).strip() != ''
+            else '',
+            axis=1
+        )
+
+        st.subheader("Chats por responsável")
+        if df_chatwoot.empty or df_chatwoot['responsavel'].str.strip().eq('').all():
+            st.info("Nenhum dado encontrado para o período.")
+        else:
+            pivot_vendedor = pd.pivot_table(df_chatwoot, index='responsavel', values='conversation_id', aggfunc='count').reset_index().rename(columns={'conversation_id': 'total_chats'})
+            total_row_chats = pd.DataFrame({'responsavel': ['Total'], 'total_chats': [pivot_vendedor['total_chats'].sum()]})
+            pivot_vendedor_total = pd.concat([pivot_vendedor, total_row_chats], ignore_index=True)
+            styled_chats = pivot_vendedor_total.style.apply(
+                lambda x: ['font-weight: bold' if x.name == len(pivot_vendedor_total) - 1 else '' for _ in x], axis=1
+            )
+            st.dataframe(styled_chats, hide_index=True, use_container_width=True)
+
+        df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','source_id','link_crm']].copy()
+        st.subheader("Campanhas (Chatwoot)")
+        total_linhas_chatwoot = len(df_chatwoot)
+        excel_buffer_chatwoot = io.BytesIO()
+        df_chatwoot_excel.to_excel(excel_buffer_chatwoot, index=False, sheet_name="Chatwoot")
+        excel_buffer_chatwoot.seek(0)
+        st.download_button(
+            label=f"📥 Download da tabela Chatwoot ({total_linhas_chatwoot} linhas)",
+            data=excel_buffer_chatwoot,
+            file_name=f"campanhas_chatwoot_{total_linhas_chatwoot}_linhas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_chatwoot_chat"
+        )
+        st.dataframe(
+            df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha', 'link_crm', 'link_chat']],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "link_campanha": st.column_config.LinkColumn("Link Campanha", display_text="Abrir"),
+                "link_crm": st.column_config.LinkColumn("Link Evento NBS", display_text="Abrir"),
+                "link_chat": st.column_config.LinkColumn("Link Chat", display_text="Abrir"),
+            }
+        )
 
     if st.sidebar.button("Sair", width="stretch"):
         st.query_params.clear()
