@@ -2143,6 +2143,13 @@ else:
         submenu_pv = st.sidebar.radio("Submenu", ["Eventos Abertos"], key="pv_submenu")
         data_inicial_pv = st.sidebar.date_input("Data Inicial", datetime.now().date(), key="pv_data_inicial")
         data_final_pv = st.sidebar.date_input("Data Final", datetime.now().date(), key="pv_data_final")
+        empresa_pv = st.sidebar.selectbox("Empresa", ["Todos", "Indaiatuba", "Sorocaba"], key="pv_empresa")
+        if empresa_pv == "Indaiatuba":
+            filtro_empresa_pv = "AND ce.COD_EMPRESA = 33"
+        elif empresa_pv == "Sorocaba":
+            filtro_empresa_pv = "AND ce.COD_EMPRESA = 11"
+        else:
+            filtro_empresa_pv = ""
 
         if submenu_pv == "Eventos Abertos":
             st.subheader("Eventos Abertos")
@@ -2174,6 +2181,7 @@ else:
             AND os.COD_EMPRESA = oa.COD_EMPRESA 
         WHERE 1=1
         AND ce.COD_TIPO_EVENTO NOT IN (831,819,30,829,267,180,22,785,807,815,817,810,690)  
+        {filtro_empresa_pv}
         AND TRUNC(
                 CASE
                     WHEN ce.data_novo_contato IS NULL
@@ -2260,6 +2268,7 @@ else:
                 AND os.COD_EMPRESA = oa.COD_EMPRESA 
             WHERE 1=1
             AND ce.COD_TIPO_EVENTO NOT IN (831,819,30,829,267,180,22,785,807,815,817,810,690)  
+            {filtro_empresa_pv}
             AND TRUNC(
                     CASE
                         WHEN ce.data_novo_contato IS NULL
@@ -2336,6 +2345,7 @@ else:
                 AND os.COD_EMPRESA = oa.COD_EMPRESA 
             WHERE 1=1
             AND ce.COD_TIPO_EVENTO NOT IN (831,819,30,829,267,180,22,785,807,815,817,810,690)  
+            {filtro_empresa_pv}
             AND TRUNC(
                     CASE
                         WHEN ce.data_novo_contato IS NULL
@@ -2404,6 +2414,7 @@ else:
                 AND os.COD_EMPRESA = oa.COD_EMPRESA 
             WHERE 1=1
             AND ce.COD_TIPO_EVENTO NOT IN (831,819,30,829,267,180,22,785,807,815,817,810,690)  
+            {filtro_empresa_pv}
             AND TRUNC(
                     CASE
                         WHEN ce.data_novo_contato IS NULL
@@ -2482,6 +2493,7 @@ else:
                 AND cmp.COD_MOTIVO_PERDA = ce.COD_MOTIVO_PERDA 
             WHERE 1=1
             AND ce.COD_TIPO_EVENTO NOT IN (831,819,30,829,267,180,22,785,807,815,817,810,690)  
+            {filtro_empresa_pv}
             AND TRUNC(ce.DATA_ENCERRAMENTO) >= TO_DATE('{data_inicial_pv}', 'YYYY-MM-DD')
             AND TRUNC(ce.DATA_ENCERRAMENTO) <= TO_DATE('{data_final_pv}', 'YYYY-MM-DD')
             AND cmp.DESC_MOTIVO IS NOT NULL
@@ -2545,6 +2557,7 @@ else:
                 AND cmp.COD_MOTIVO_PERDA = ce.COD_MOTIVO_PERDA 
             WHERE 1=1
             AND ce.COD_TIPO_EVENTO NOT IN (831,819,30,829,267,180,22,785,807,815,817,810,690)  
+            {filtro_empresa_pv}
             AND TRUNC(ce.DATA_ENCERRAMENTO) >= TO_DATE('{data_inicial_pv}', 'YYYY-MM-DD')
             AND TRUNC(ce.DATA_ENCERRAMENTO) <= TO_DATE('{data_final_pv}', 'YYYY-MM-DD')
             AND cmp.DESC_MOTIVO IS NOT NULL
