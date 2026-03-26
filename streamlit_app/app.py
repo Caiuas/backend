@@ -2600,6 +2600,99 @@ else:
             except Exception as e:
                 st.error(f"Erro ao carregar matriz de descartes: {e}")
 
+            # --- Tabela Detalhada ---
+            query_pv_detalhe = f"""
+            SELECT 
+                ce.COD_EMPRESA,
+                ce.COD_EVENTO,
+                TRUNC(
+                    CASE
+                        WHEN ce.DATA_NOVO_CONTATO IS NULL
+                        THEN ce.DATA_EVENTO
+                        ELSE ce.DATA_NOVO_CONTATO
+                    END
+                ) AS DATA_CONTATO,
+                TRUNC(ce.DATA_CRIACAO) AS DATA_CRIACAO,
+                TRUNC(ce.DATA_ENCERRAMENTO) AS DATA_ENCERRAMENTO,
+                ce.STATUS,
+                eu.NOME_COMPLETO AS NOME_RESPONSAVEL,
+                cmp.DESC_MOTIVO AS MOTIVO_DESCARTE,
+                oa.NUMERO_OS,
+                oa.COD_OS_AGENDA
+            FROM CRM_EVENTOS ce 
+            LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+                AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = ce.RESPONSAVEL_PELO_EVENTO
+            LEFT JOIN OS_AGENDA oa ON 1=1
+                AND oa.CRM_COD_EMPRESA = ce.COD_EMPRESA
+                AND oa.CRM_COD_EVENTO = ce.COD_EVENTO
+            LEFT JOIN os os ON 1=1
+                AND os.NUMERO_OS = oa.NUMERO_OS 
+                AND os.COD_EMPRESA = oa.COD_EMPRESA 
+            LEFT JOIN CRM_MOTIVO_PERDAS cmp ON 1=1
+                AND cmp.COD_MOTIVO_PERDA = ce.COD_MOTIVO_PERDA 
+            WHERE 1=1
+            AND ce.COD_TIPO_EVENTO NOT IN (831,819,30,829,267,180,22,785,807,815,817,810,690)  
+            {filtro_empresa_pv}
+            AND TRUNC(
+                    CASE
+                        WHEN ce.DATA_NOVO_CONTATO IS NULL
+                        THEN ce.DATA_EVENTO
+                        ELSE ce.DATA_NOVO_CONTATO
+                    END
+                    ) >= TO_DATE('{data_inicial_pv}', 'YYYY-MM-DD')
+            AND TRUNC(
+                    CASE
+                        WHEN ce.DATA_NOVO_CONTATO IS NULL
+                        THEN ce.DATA_EVENTO
+                        ELSE ce.DATA_NOVO_CONTATO
+                    END
+                    ) <= TO_DATE('{data_final_pv}', 'YYYY-MM-DD')
+            ORDER BY DATA_CONTATO DESC
+            """
+            try:
+                conn_pv7, cur_pv7 = oracle()
+                cur_pv7.execute(query_pv_detalhe)
+                result_pv7 = cur_pv7.fetchall()
+                columns_pv7 = [desc[0] for desc in cur_pv7.description]
+                df_pv_det = pd.DataFrame(result_pv7, columns=columns_pv7)
+                cur_pv7.close()
+                conn_pv7.close()
+
+                if not df_pv_det.empty:
+                    df_pv_det['DATA_CONTATO'] = pd.to_datetime(df_pv_det['DATA_CONTATO'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('-')
+                    df_pv_det['DATA_CRIACAO'] = pd.to_datetime(df_pv_det['DATA_CRIACAO'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('-')
+                    df_pv_det['DATA_ENCERRAMENTO'] = pd.to_datetime(df_pv_det['DATA_ENCERRAMENTO'], errors='coerce').dt.strftime('%d/%m/%Y').fillna('-')
+                    df_pv_det = df_pv_det.fillna('-')
+                    df_pv_det['LINK'] = df_pv_det.apply(
+                        lambda row: f"https://app.caiuas.com.br/crm/eventos/{row['COD_EMPRESA']}{row['COD_EVENTO']}", axis=1
+                    )
+
+                    st.subheader("Planilha Detalhada")
+                    st.dataframe(
+                        df_pv_det.rename(columns={
+                            'COD_EMPRESA': 'Empresa',
+                            'COD_EVENTO': 'Evento',
+                            'DATA_CONTATO': 'Data Contato',
+                            'DATA_CRIACAO': 'Data Criação',
+                            'DATA_ENCERRAMENTO': 'Data Encerramento',
+                            'STATUS': 'Status',
+                            'NOME_RESPONSAVEL': 'Responsável',
+                            'MOTIVO_DESCARTE': 'Motivo Descarte',
+                            'NUMERO_OS': 'Nº OS',
+                            'COD_AGENDA': 'Cód Agenda',
+                            'LINK': 'Evento NBS',
+                        }),
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Evento NBS": st.column_config.LinkColumn("Evento NBS", display_text="Abrir"),
+                        }
+                    )
+            except Exception as e:
+                st.error(f"Erro ao carregar planilha detalhada: {e}")
+
         except Exception as e:
             st.error(f"Erro ao executar a consulta: {e}")
 
