@@ -8,7 +8,7 @@ load_dotenv()
 
 crm_bp = Blueprint('crm', __name__)
 
-def     processar_obs_memo(obs_memo):
+def processar_obs_memo(obs_memo):
     """
     Processa o campo obs_memo e retorna uma lista de dicionários
     com data, usuario e observação, preservando quebras de linha
@@ -139,7 +139,7 @@ def get_crm_andamentos():
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
-        
+
 @crm_bp.route('/api/crm/eventos_showroom/muda_andamento/<int:id_evento>', methods=['POST'])
 @token_required
 def muda_andamento_evento_showroom(id_evento):
@@ -881,7 +881,7 @@ def descartar_evento(id_evento):
         
         
         query = f"""
-            update crm_eventos set status = 'D', cod_andamento = 111, responsavel_pelo_evento = '{quem_descartou}', cod_descarte = {cod_descarte}, cod_tipo_fechamento = 3
+            update crm_eventos set status = 'D', cod_andamento = 111, cod_descarte = {cod_descarte}, cod_tipo_fechamento = 3
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
@@ -1514,7 +1514,7 @@ def muda_test_drive(id_evento):
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
+
 @crm_bp.route('/api/crm/eventos/<int:id_evento>', methods=['DELETE'])
 @token_required
 def delete_crm_eventos_showroom(id_evento):
@@ -1669,7 +1669,7 @@ def delete_crm_eventos_showroom(id_evento):
         except:
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
+
 @crm_bp.route('/api/crm/eventos/param_create', methods=['GET'])
 @token_required
 def get_param_create_crm_eventos():
@@ -1980,7 +1980,7 @@ def create_crm_eventos():
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
+
 @crm_bp.route('/api/crm/eventos_showroom/remarca_contato/<int:id_evento>', methods=['POST'])
 @token_required
 def crm_eventos_showroom_remarca_contato(id_evento):
@@ -2113,7 +2113,7 @@ def crm_eventos_showroom_remarca_contato(id_evento):
         except:
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
+
 @crm_bp.route('/api/crm/eventos_showroom/update_observacao/<int:id_evento>', methods=['POST'])
 @token_required
 def crm_eventos_showroom_update_observacao(id_evento):
@@ -2251,7 +2251,7 @@ def crm_eventos_showroom_update_observacao(id_evento):
         except:
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
+
 @crm_bp.route('/api/crm/eventos_showroom/agenda_visita/<int:id_evento>', methods=['POST'])
 @token_required
 def crm_eventos_showroom_agenda_visita(id_evento):
@@ -2432,7 +2432,7 @@ def crm_eventos_showroom_agenda_visita(id_evento):
         except:
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
-  
+
 @crm_bp.route('/api/crm/eventos_showroom/create_acao/<int:id_evento>', methods=['POST'])
 @token_required
 def crm_eventos_showroom_create_acao(id_evento):
@@ -2558,7 +2558,7 @@ def crm_eventos_showroom_create_acao(id_evento):
         except:
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
+
 @crm_bp.route('/api/crm/eventos_showroom/muda_cliente/<int:id_evento>', methods=['POST'])
 @token_required
 def crm_eventos_showroom_muda_cliente(id_evento):
@@ -2650,7 +2650,7 @@ def crm_eventos_showroom_muda_cliente(id_evento):
         except:
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 500
-        
+
 @crm_bp.route('/api/crm/eventos/muda_temperatura/<int:id_evento>', methods=['POST'])
 @token_required
 def crm_eventos_muda_temperatura(id_evento):
@@ -3716,7 +3716,7 @@ def list_eventos_tipo():
         return jsonify({'status': 'success', 'eventos_tipo': eventos_tipo}), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500    
-    
+
 @crm_bp.route('/api/crm/midias', methods=['GET'])
 @token_required
 def list_midias():
@@ -3741,7 +3741,7 @@ def list_midias():
         return jsonify({'status': 'success', 'midias': midias}), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
+
 @crm_bp.route('/api/crm/responsaveis', methods=['GET'])
 @token_required
 def list_responsaveis():
@@ -3776,7 +3776,7 @@ def list_responsaveis():
         return jsonify({'status': 'success', 'responsaveis': retorno['usuarios']}), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
+
 @crm_bp.route('/api/crm/evento_chatwoot', methods=['POST'])
 def cria_evento_chatwoot():
     try:
@@ -4006,8 +4006,7 @@ def cria_evento_chatwoot():
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    
-# muda cod_proposta
+
 @crm_bp.route('/api/crm/eventos/<id_evento>/proposta', methods=['POST'])
 @token_required
 def muda_proposta_evento(id_evento):
@@ -4178,8 +4177,6 @@ def muda_proposta_evento(id_evento):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-
-# muda data_criacao
 @crm_bp.route('/api/crm/eventos/muda_data_criacao/<int:id_evento>', methods=['POST'])
 @token_required
 def muda_data_criacao_evento(id_evento):
