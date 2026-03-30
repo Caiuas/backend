@@ -784,8 +784,9 @@ else:
                     ELSE c.NOME 
                 END nome_cliente,
                 TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) data_contato,
-                ce.data_agendada,
-                ce.data_visita,
+                --ce.data_agendada,
+                --ce.data_visita,
+                ce.cod_proposta,
                 upper(cet.DESC_TIPO_EVENTO) tipo_evento,
                 CASE
                     WHEN eu.NOME_COMPLETO IS NOT NULL THEN upper(eu.NOME_COMPLETO)
@@ -813,7 +814,9 @@ else:
                     WHEN eu_lead.NOME_COMPLETO IS NOT NULL THEN upper(eu_lead.NOME_COMPLETO)
                     ELSE 'SEM RESPONSÁVEL'
                 END responsavel_lead,
-                TRUNC(cel.data_agendada) data_agendada_lead
+                TRUNC(cel.data_agendada) data_agendada_lead,
+                vp.STATUS_PROPOSTA,
+                TRIM(TO_CHAR(ce.COD_EMPRESA_ANTERIOR)) || TRIM(TO_CHAR(ce.COD_EVENTO_ANTERIOR)) cod_evento_anterior
                 FROM crm_eventos ce
                 LEFT JOIN CRM_ANDAMENTO ca ON 1=1
                     AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO 
@@ -830,6 +833,8 @@ else:
                     AND ce.COD_EMPRESA_ANTERIOR = cel.COD_EMPRESA
                 LEFT JOIN EMPRESAS_USUARIOS eu_lead ON 1=1
                     AND eu_lead.NOME = cel.RESPONSAVEL_PELO_EVENTO
+                LEFT JOIN VEICULOS_PROPOSTAS vp ON 1=1
+                	AND vp.COD_PROPOSTA = ce.COD_PROPOSTA
                 WHERE 1=1
                     AND ce.COD_TIPO_EVENTO IN (785,807)
                     AND ce.status <> 'D'
@@ -838,7 +843,16 @@ else:
         con, cur = oracle()
         cur.execute(query)
         results = cur.fetchall()
-        df = pd.DataFrame(results, columns=[desc[0] for desc in cur.description])
+        df = pd.DataFrame(results, columns=[desc[0] for desc in cur.description], dtype=str)
+        # remova o .0 do cod_proposta ele é SRT
+        df['COD_PROPOSTA'] = df['COD_PROPOSTA'].str.replace('.0', '', regex=False)
+        
+        # se status_proposta = 'V' altere o status do evento para "Faturado", se tiver proposta e se status da proposta for "C" altere o status do evento para proposta cancelada, se for outro adicione Aguardando cancelamento
+        df['STATUS'] = df.apply(lambda row: 'Faturado' if row['STATUS_PROPOSTA'] == 'V' else ('Proposta Cancelada' if row['STATUS_PROPOSTA'] == 'C' else ('Aguardando faturamento' if row['STATUS_PROPOSTA'] not in ['V', 'C', None, ''] else row['STATUS'])), axis=1)
+        df['STATUS_ATENDIMENTO'] = df.apply(lambda row: 'Faturado' if row['STATUS_PROPOSTA'] == 'V' else ('Proposta Cancelada' if row['STATUS_PROPOSTA'] == 'C' else ('Aguardando faturamento' if row['STATUS_PROPOSTA'] not in ['V', 'C', None, ''] else row['STATUS'])), axis=1)
+        
+        
+        
         query = f"""
         SELECT
             ccr.cod_empresa,
@@ -861,8 +875,7 @@ else:
                 WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO
                 ELSE c.NOME
             END nome_cliente,
-            TRUNC(ce.data_agendada) data_agendada,
-            TRUNC(ce.data_visita) data_visita,
+            ce.cod_proposta,
             upper(cet.DESC_TIPO_EVENTO) tipo_evento,
             CASE
                 WHEN eu.NOME_COMPLETO IS NOT NULL THEN upper(eu.NOME_COMPLETO)
@@ -912,13 +925,9 @@ else:
         
         # Converter colunas de data para datetime
         df['DATA_CONTATO'] = pd.to_datetime(df['DATA_CONTATO'], errors='coerce')
-        df['DATA_AGENDADA'] = pd.to_datetime(df['DATA_AGENDADA'], errors='coerce')
-        df['DATA_VISITA'] = pd.to_datetime(df['DATA_VISITA'], errors='coerce')
         
         # Formatar datas como string (YYYY-MM-DD) e substituir NaT por string vazia
         df['DATA_CONTATO'] = df['DATA_CONTATO'].dt.strftime('%Y-%m-%d').fillna('-')
-        df['DATA_AGENDADA'] = df['DATA_AGENDADA'].dt.strftime('%Y-%m-%d').fillna('-')
-        df['DATA_VISITA'] = df['DATA_VISITA'].dt.strftime('%Y-%m-%d').fillna('-')
         df['DATA_LEAD'] = pd.to_datetime(df['DATA_LEAD'], errors='coerce')
         df['DATA_LEAD'] = df['DATA_LEAD'].dt.strftime('%Y-%m-%d').fillna('-')
         df['DATA_AGENDADA_LEAD'] = pd.to_datetime(df['DATA_AGENDADA_LEAD'], errors='coerce')
@@ -926,15 +935,14 @@ else:
         
         # Substituir None/NaN nas demais colunas
         df = df.fillna('-')
-        # link é conct https://app.caiuas.com.br/crm/eventos/ + cod_evento
-        df['LINK'] = df['COD_EVENTO'].apply(lambda x: f"https://app.caiuas.com.br/crm/eventos/{x}")
+        df['COD_EVENTO_ANTERIOR'] = df['COD_EVENTO_ANTERIOR'].replace('-', '')
+        df['link_fluxo'] = df['COD_EVENTO'].apply(lambda x: f"https://app.caiuas.com.br/crm/eventos/{x}")
+        df['link_lead'] = df['COD_EVENTO_ANTERIOR'].apply(
+            lambda x: f"https://app.caiuas.com.br/crm/eventos/{x}" if str(x).strip() != '' else ''
+        )
         
         df_retorno['DATA_RETORNO'] = pd.to_datetime(df_retorno['DATA_RETORNO'], errors='coerce')
         df_retorno['DATA_RETORNO'] = df_retorno['DATA_RETORNO'].dt.strftime('%Y-%m-%d').fillna('-')
-        df_retorno['DATA_AGENDADA'] = pd.to_datetime(df_retorno['DATA_AGENDADA'], errors='coerce')
-        df_retorno['DATA_AGENDADA'] = df_retorno['DATA_AGENDADA'].dt.strftime('%Y-%m-%d').fillna('-')
-        df_retorno['DATA_VISITA'] = pd.to_datetime(df_retorno['DATA_VISITA'], errors='coerce')
-        df_retorno['DATA_VISITA'] = df_retorno['DATA_VISITA'].dt.strftime('%Y-%m-%d').fillna('-')
         df_retorno['DATA_CRIACAO'] = pd.to_datetime(df_retorno['DATA_CRIACAO'], errors='coerce')
         df_retorno['DATA_CRIACAO'] = df_retorno['DATA_CRIACAO'].dt.strftime('%Y-%m-%d').fillna('-')
         df_retorno = df_retorno.fillna('-')
@@ -984,7 +992,7 @@ else:
             "Tipo": ["Primeiras Passagens", "Retornos"],
             "Total": [total_primeiras, total_retornos]
         })
-        col_chart1, col_chart2 = st.columns([1, 2])
+        col_chart1, col_chart2, col_chart3 = st.columns([1, 2, 2])
         with col_chart1:
             st.metric("Primeiras Passagens", total_primeiras)
             st.metric("Retornos", total_retornos)
@@ -1001,6 +1009,16 @@ else:
             fig_comparativo.update_traces(textposition='outside')
             fig_comparativo.update_layout(showlegend=False, yaxis_title="Total", xaxis_title="")
             st.plotly_chart(fig_comparativo, use_container_width=True)
+        with col_chart3:
+            st.markdown("**Eventos por Status de Atendimento**")
+            df_status_atendimento = (
+                df.groupby('STATUS_ATENDIMENTO')['COD_EVENTO']
+                .count()
+                .reset_index()
+                .rename(columns={'STATUS_ATENDIMENTO': 'Status', 'COD_EVENTO': 'Quantidade'})
+                .sort_values('Quantidade', ascending=False)
+            )
+            st.dataframe(df_status_atendimento, hide_index=True, use_container_width=True)
 
         # Seção com 3 colunas de indicadores
         st.subheader("Indicadores")
@@ -1106,10 +1124,14 @@ else:
             df, 
             hide_index=True,
             column_config={
-                "LINK": st.column_config.LinkColumn(
-                    "Abrir Evento",
+                "link_fluxo": st.column_config.LinkColumn(
+                    "Link Fluxo",
                     display_text="Abrir"
-                )
+                ),
+                "link_lead": st.column_config.LinkColumn(
+                    "Link Lead",
+                    display_text="Abrir"
+                ),
             }
         )
 
@@ -1122,6 +1144,71 @@ else:
                     "Abrir Evento",
                     display_text="Abrir"
                 )
+            }
+        )
+
+        st.subheader("Propostas Faturadas")
+        query_faturadas = f"""
+        SELECT 
+            vp.VENDEDOR, 
+            vp.cod_proposta, 
+            vp.STATUS_PROPOSTA, 
+            vp.COD_CLIENTE, 
+            c.NOME, 
+            c.TELEFONE_CEL, 
+            c.TELEFONE_COM, 
+            c.TELEFONE_RES, 
+            c.TELEFONE_FAX, 
+            ce.FONE_CLIENTE_AVULSO,
+            CASE
+                WHEN ce.COD_EVENTO IS NOT NULL THEN concat('https://app.caiuas.com.br/crm/eventos/',concat(ce.COD_EMPRESA, ce.COD_EVENTO))
+                ELSE null
+            END link_fluxo,
+            CASE
+                WHEN ce.COD_EVENTO_ANTERIOR IS NOT NULL THEN concat('https://app.caiuas.com.br/crm/eventos/',concat(ce.COD_EMPRESA_ANTERIOR, ce.COD_EVENTO_ANTERIOR))
+                ELSE null
+            END link_lead
+        FROM VEICULOS_PROPOSTAS vp 
+        LEFT JOIN clientes c ON 1=1
+            AND c.COD_CLIENTE = vp.COD_CLIENTE 
+        LEFT JOIN CRM_EVENTOS ce ON 1=1
+            AND ce.COD_PROPOSTA = vp.COD_PROPOSTA 
+            AND ce.COD_TIPO_EVENTO IN (785,807)
+        LEFT JOIN CRM_EVENTOS ce2 ON 1=1
+            AND ce2.COD_PROPOSTA = ce.COD_EVENTO_ANTERIOR 
+            AND ce2.COD_EMPRESA = ce.COD_EMPRESA_ANTERIOR 
+        WHERE 1=1
+            AND TRUNC(vp.DATA_VENDA) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD')
+            AND TRUNC(vp.DATA_VENDA) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
+            AND vp.STATUS_PROPOSTA = 'V'
+        ORDER BY vp.VENDEDOR, vp.COD_PROPOSTA
+        """
+        con_fat, cur_fat = oracle()
+        cur_fat.execute(query_faturadas)
+        results_fat = cur_fat.fetchall()
+        df_faturadas = pd.DataFrame(results_fat, columns=[desc[0] for desc in cur_fat.description])
+        cur_fat.close()
+        con_fat.close()
+        df_faturadas = df_faturadas.fillna('')
+        df_faturadas.columns = [c.lower() for c in df_faturadas.columns]
+
+        excel_buffer_fat = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer_fat, engine='xlsxwriter') as writer:
+            df_faturadas.to_excel(writer, index=False, sheet_name="Propostas Faturadas")
+        excel_buffer_fat.seek(0)
+        st.download_button(
+            label="Download Propostas Faturadas",
+            data=excel_buffer_fat,
+            file_name="propostas_faturadas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        st.dataframe(
+            df_faturadas,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "link_fluxo": st.column_config.LinkColumn("Link Fluxo", display_text="Abrir"),
+                "link_lead": st.column_config.LinkColumn("Link Lead", display_text="Abrir"),
             }
         )
     
@@ -1851,7 +1938,9 @@ else:
             	AND observacao LIKE ('Responsável pelo evento alterado para%')
             	) data_transferencia,
             to_date(ce.DATA_AGENDADA ) data_agendada,
-            to_date(cev.DATA_CRIACAO ) data_visita
+            to_date(cev.DATA_CRIACAO ) data_visita,
+            ce.COD_EMPRESA_ANTERIOR, 
+            ce.COD_EVENTO_ANTERIOR
         FROM CRM_EVENTOS ce
         LEFT JOIN EMPRESAS_USUARIOS eu ON
             1 = 1
@@ -1899,10 +1988,20 @@ else:
         cur_oracle.close()
         conn_oracle.close()
         lista_eventos = []        
-        df['link'] = df.apply(lambda row: f"https://app.caiuas.com.br/crm/eventos/{row['COD_EMPRESA']}{row['COD_EVENTO']}", axis=1)
+        df['link_fluxo'] = df.apply(lambda row: f"https://app.caiuas.com.br/crm/eventos/{row['COD_EMPRESA']}{row['COD_EVENTO']}", axis=1)
         # adiciona todos os link na lista
         for index, row in df.iterrows():
             lista_eventos.append(f"https://app.caiuas.com.br/crm/eventos/{row['COD_EMPRESA']}{row['COD_EVENTO']}")
+        
+        df['link_lead'] = df.apply(
+            lambda row: f"https://app.caiuas.com.br/crm/eventos/{row['COD_EMPRESA_ANTERIOR']}{row['COD_EVENTO_ANTERIOR']}"
+            if str(row['COD_EMPRESA_ANTERIOR']).strip() != '' and str(row['COD_EVENTO_ANTERIOR']).strip() != ''
+            else '',
+            axis=1
+        )
+        for index, row in df.iterrows():
+            if str(row['COD_EMPRESA_ANTERIOR']).strip() != '' and str(row['COD_EVENTO_ANTERIOR']).strip() != '':
+                lista_eventos.append(f"https://app.caiuas.com.br/crm/eventos/{row['COD_EMPRESA_ANTERIOR']}{row['COD_EVENTO_ANTERIOR']}")
         
         query = f"""
         SELECT DISTINCT ON (m.conversation_id)
@@ -1931,7 +2030,7 @@ else:
         result_chatwoot = cur_chatwoot.fetchall()
         columns_chatwoot = [desc[0] for desc in cur_chatwoot.description]
         df_chatwoot = pd.DataFrame(result_chatwoot, columns=columns_chatwoot, dtype=str)
-        df = df.merge(df_chatwoot, left_on='link', right_on='evento_nbs', how='left')
+        df = df.merge(df_chatwoot, left_on='link_fluxo', right_on='evento_nbs', how='left')
         df['link_chat'] = df.apply(
             lambda row: f"https://chat.caiuas.com.br/app/accounts/{row['account_id']}/conversations/{row['conversation_id']}"
             if str(row.get('account_id', '')).strip() != '' and str(row.get('conversation_id', '')).strip() != ''
@@ -2041,7 +2140,8 @@ else:
             hide_index=True,
             use_container_width=True,
             column_config={
-                "link": st.column_config.LinkColumn("Link", display_text="Abrir"),
+                "link_fluxo": st.column_config.LinkColumn("Link", display_text="Abrir"),
+                "link_lead": st.column_config.LinkColumn("Lead", display_text="Abrir"),
                 "campanha": st.column_config.LinkColumn("Campanha"),
                 "link_chat": st.column_config.LinkColumn("Link Chat", display_text="Abrir"),
                 "DATA_CRIACAO": st.column_config.DateColumn("Data Criação", format="DD/MM/YYYY"),
