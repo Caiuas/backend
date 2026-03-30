@@ -8,6 +8,12 @@ load_dotenv()
 
 crm_bp = Blueprint('crm', __name__)
 
+# Usuários com permissão para alterar data_visita em eventos showroom
+ALLOWED_DATA_VISITA_EMAILS = [
+    'pablo.ti@caiuas.com.br',
+    'rodrigo.hamada@caiuas.com.br',
+]
+
 def processar_obs_memo(obs_memo):
     """
     Processa o campo obs_memo e retorna uma lista de dicionários
@@ -2310,6 +2316,12 @@ def crm_eventos_showroom_agenda_visita(id_evento):
         cur_oracle.execute(query)
         quem_alterou = cur_oracle.fetchone()[0]
         
+        # Verificar permissão para alterar data_visita
+        if 'data_visita' in data and email not in ALLOWED_DATA_VISITA_EMAILS:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Sem permissão para alterar data_visita'}), 403
+
         observacoes = []
         updates = [f"quem_remarcou = '{quem_alterou}'"]
         
