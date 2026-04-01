@@ -57,7 +57,7 @@ def process_leads():
         row = [str(field).replace("'", "") if isinstance(field, str) else field for field in row]
         observacao = f"""
             Lead ID: {row[1]}
-            nome_completo: {row[2]}
+            nome_completo: {row[2][:100]}
             tipo: {row[3]}
             modelo_interesse: {row[4]}
             cpf: {row[5]}
@@ -105,8 +105,8 @@ def process_leads():
                                 seq_crm_COD_EVENTO.nextval,
                                 {cod_tipo_evento},
                                 2,
-                                '{row[2]}',
-                                '{row[8]}',
+                                '{row[2][:100]}',
+                                '{row[8]}',  
                                 18,
                                 SYSDATE,
                                 seq_cod_cliente_honda.nextval,
