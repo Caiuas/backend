@@ -2369,10 +2369,10 @@ def crm_eventos_showroom_agenda_visita(id_evento):
                         return jsonify({'status': 'error', 'message': 'Formato da data_visita inválido'}), 400
                     
                     # Verificar se data_visita não é menor que data_agendada
-                    if data_visita_str < data_agendada_str:
-                        cur_oracle.close()
-                        conn_oracle.close()
-                        return jsonify({'status': 'error', 'message': 'A data_visita não pode ser anterior à data_agendada'}), 400
+                    # if data_visita_str < data_agendada_str:
+                    #     cur_oracle.close()
+                    #     conn_oracle.close()
+                    #     return jsonify({'status': 'error', 'message': 'A data_visita não pode ser anterior à data_agendada'}), 400
                     
                     updates.append(f"data_visita = TO_DATE('{data_visita_str}', 'YYYY-MM-DD HH24:MI:SS')")
                     observacoes.append(f"Data de visita alterada para {data_visita_str}")
@@ -2402,10 +2402,10 @@ def crm_eventos_showroom_agenda_visita(id_evento):
                 
                 # Verificar se data_visita não é menor que data_agendada
                 data_agendada_comparar = data_agendada_atual.strftime('%Y-%m-%d %H:%M:%S') if isinstance(data_agendada_atual, datetime) else str(data_agendada_atual)
-                if data_visita_str < data_agendada_comparar:
-                    cur_oracle.close()
-                    conn_oracle.close()
-                    return jsonify({'status': 'error', 'message': 'A data_visita não pode ser anterior à data_agendada'}), 400
+                # if data_visita_str < data_agendada_comparar:
+                #     cur_oracle.close()
+                #     conn_oracle.close()
+                #     return jsonify({'status': 'error', 'message': 'A data_visita não pode ser anterior à data_agendada'}), 400
                 
                 updates.append(f"data_visita = TO_DATE('{data_visita_str}', 'YYYY-MM-DD HH24:MI:SS')")
                 observacoes.append(f"Data de visita alterada para {data_visita_str}")
@@ -3766,6 +3766,17 @@ def list_responsaveis():
             LEFT JOIN empresas e ON 1=1
                 AND e.COD_EMPRESA = eu.COD_EMPRESA 
             WHERE DEMITIDO <> 'S'
+            AND EU.COD_EMPRESA IN (11, 33)
+            AND EU.COD_FUNCAO IN (15
+                ,37
+                ,14
+                ,41
+                ,1
+                ,39
+                ,12
+                ,26
+                ,10
+                ,112)
             AND COD_FUNCAO <> 2
             AND eu.email IS NOT NULL
         """
