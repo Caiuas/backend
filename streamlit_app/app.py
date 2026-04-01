@@ -1115,7 +1115,7 @@ else:
 
         # Tabela: Passagens Varejo - CRIS (apenas tipo 785)
         st.subheader("Passagens Varejo - CRIS")
-        df_varejo_cris = df[df['COD_TIPO_EVENTO'] == 785]
+        df_varejo_cris = df[df['COD_TIPO_EVENTO'] == '785']
         varejo_cris_por_modelo = (
             df_varejo_cris.groupby('VEICULO')['COD_EVENTO']
             .count()
@@ -1944,6 +1944,22 @@ else:
             	AND observacao LIKE ('Responsável pelo evento alterado para%')
             	) data_transferencia,
             to_date(ce.DATA_AGENDADA ) data_agendada,
+            (
+        SELECT MAX(ca_resp.RESPONSAVEL) KEEP (DENSE_RANK LAST ORDER BY ca_resp.DATA)
+        FROM CRM_ACOES ca_resp
+        WHERE ca_resp.COD_EVENTO = ce.COD_EVENTO
+          AND ca_resp.COD_EMPRESA = ce.COD_EMPRESA
+          AND ca_resp.TIPO_ACAO = 12
+          AND ca_resp.OBSERVACAO LIKE 'Agendamento marcado%'
+    ) responsavel_agendamento,
+    (
+        SELECT MIN(ca_resp.RESPONSAVEL) KEEP (DENSE_RANK LAST ORDER BY ca_resp.DATA desc)
+        FROM CRM_ACOES ca_resp
+        WHERE ca_resp.COD_EVENTO = ce.COD_EVENTO
+          AND ca_resp.COD_EMPRESA = ce.COD_EMPRESA
+          AND ca_resp.TIPO_ACAO = 12
+          AND ca_resp.OBSERVACAO LIKE 'Agendamento marcado%'
+    ) resp_prim_agendamento,
             to_date(cev.DATA_CRIACAO ) data_visita,
             ce.COD_EMPRESA_ANTERIOR, 
             ce.COD_EVENTO_ANTERIOR
