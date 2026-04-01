@@ -77,6 +77,10 @@ EMAILS_CHAT = [
     "rodrigo.hamada@caiuas.com.br"
 ]
 
+EMAILS_ACOMPANHAMENTO_CHAT = [
+    "pablo.ti@caiuas.com.br",
+]
+
 EMAILS_POS_VENDAS = [
     "pablo.ti@caiuas.com.br",
     "cristiane.aguilar@caiuas.com.br"
@@ -170,6 +174,8 @@ else:
         menus_disponiveis.append("Leads")
     if tem_acesso(email_usuario, EMAILS_CHAT):
         menus_disponiveis.append("Chat")
+    if tem_acesso(email_usuario, EMAILS_ACOMPANHAMENTO_CHAT):
+        menus_disponiveis.append("Acompanhamento Chat")
     if tem_acesso(email_usuario, EMAILS_POS_VENDAS):
         menus_disponiveis.append("Acompanhamento Pós Vendas")
 
@@ -2237,6 +2243,81 @@ else:
                 "link_chat": st.column_config.LinkColumn("Link Chat", display_text="Abrir"),
             }
         )
+
+    if menu == "Acompanhamento Chat":
+        st.title("Acompanhamento Chat (Chatwoot)")
+
+        query_acomp_chat = """
+        SELECT
+            u.name AS responsavel,
+            COUNT(*) AS total,
+            COUNT(c.custom_attributes->>'evento_nbs') AS total_com_evento,
+            COUNT(*) - COUNT(c.custom_attributes->>'evento_nbs') AS total_sem_evento
+        FROM conversations c
+        LEFT JOIN users u ON c.assignee_id = u.id
+        WHERE c.inbox_id IN (1, 3)
+            AND c.status = 0
+        GROUP BY u.name
+        ORDER BY total DESC
+        """
+
+        try:
+            conn_ac, cur_ac = chatwoot()
+            cur_ac.execute(query_acomp_chat)
+            result_ac = cur_ac.fetchall()
+            columns_ac = [desc[0] for desc in cur_ac.description]
+            df_ac = pd.DataFrame(result_ac, columns=columns_ac)
+            cur_ac.close()
+            conn_ac.close()
+
+            df_ac['responsavel'] = df_ac['responsavel'].fillna('Sem responsável')
+            df_ac['total'] = df_ac['total'].astype(int)
+            df_ac['total_com_evento'] = df_ac['total_com_evento'].astype(int)
+            df_ac['total_sem_evento'] = df_ac['total_sem_evento'].astype(int)
+
+            total_row = pd.DataFrame({
+                'responsavel': ['Total'],
+                'total': [df_ac['total'].sum()],
+                'total_com_evento': [df_ac['total_com_evento'].sum()],
+                'total_sem_evento': [df_ac['total_sem_evento'].sum()],
+            })
+            df_ac_com_total = pd.concat([df_ac, total_row], ignore_index=True)
+
+            styled_ac = df_ac_com_total.rename(columns={
+                'responsavel': 'Responsável',
+                'total': 'Total',
+                'total_com_evento': 'Com Evento NBS',
+                'total_sem_evento': 'Sem Evento NBS',
+            }).style.apply(
+                lambda x: ['font-weight: bold' if x.name == len(df_ac_com_total) - 1 else '' for _ in x], axis=1
+            )
+
+            col_ac1, col_ac2 = st.columns(2)
+
+            with col_ac1:
+                st.subheader("Conversas abertas por responsável")
+                st.dataframe(styled_ac, hide_index=True, use_container_width=True)
+
+            with col_ac2:
+                st.subheader("Com vs. Sem Evento NBS")
+                total_com = df_ac['total_com_evento'].sum()
+                total_sem = df_ac['total_sem_evento'].sum()
+                df_pizza = pd.DataFrame({
+                    'Situação': ['Com Evento NBS', 'Sem Evento NBS'],
+                    'Quantidade': [total_com, total_sem],
+                })
+                fig_ac = px.pie(
+                    df_pizza,
+                    values='Quantidade',
+                    names='Situação',
+                    color='Situação',
+                    color_discrete_map={'Com Evento NBS': '#2ecc71', 'Sem Evento NBS': '#e74c3c'},
+                )
+                fig_ac.update_traces(textposition='inside', textinfo='percent+label+value')
+                st.plotly_chart(fig_ac, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Erro ao carregar dados do Chatwoot: {e}")
 
     if menu == "Acompanhamento Pós Vendas":
         st.title("Acompanhamento Pós Vendas")
