@@ -12,6 +12,8 @@ crm_bp = Blueprint('crm', __name__)
 ALLOWED_DATA_VISITA_EMAILS = [
     'pablo.ti@caiuas.com.br',
     'rodrigo.hamada@caiuas.com.br',
+    'mirela.novaga@caiuas.com.br',
+    'isadora.fraga@caiuas.com.br'
 ]
 
 def processar_obs_memo(obs_memo):
@@ -252,7 +254,12 @@ def list_crm_eventos():
         responsible = request.args.get('responsible', None)
         cod_empresa = request.args.get('cod_empresa', None)
         limit = int(request.args.get('limit', 100))
+        pendente_autorizacao = request.args.get('pendente_autorizacao', None)
         retorno = {}
+        
+        filter_pendente_autorizacao = ''
+        if pendente_autorizacao is not None:
+            filter_pendente_autorizacao = " and ced.authorization_date is null and ced.cod_evento is not null "
         
         empresas_permitidas = ['11', '33', '111']
         filter_empresa = ''
@@ -421,7 +428,8 @@ def list_crm_eventos():
                     and cd.COD_DESCARTE = ce.COD_DESCARTE
                 LEFT JOIN CRM_MOTIVO_PERDAS cmp ON 1=1
                     AND cmp.cod_motivo_perda = ce.cod_motivo_perda
-                LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO 
+                LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+                LEFT JOIN caiuas_crm_eventos_descartados ced ON ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
                 WHERE
                     1 = 1
                     --AND ce.COD_TIPO_EVENTO IN (785)
@@ -433,6 +441,7 @@ def list_crm_eventos():
                     {filter_tipo_evento}
                     {filter_created_at}
                     {filter_empresa}
+                    {filter_pendente_autorizacao}
                     --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
                     --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
         """
@@ -522,7 +531,8 @@ def list_crm_eventos():
                     LEFT JOIN CRM_EVENTOS_TIPO cet ON cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
                     LEFT JOIN CRM_DESCARTES cd on cd.COD_DESCARTE = ce.COD_DESCARTE
                     LEFT JOIN CRM_MOTIVO_PERDAS cmp ON cmp.cod_motivo_perda = ce.cod_motivo_perda
-                    LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO 
+                    LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+                    LEFT JOIN caiuas_crm_eventos_descartados ced ON ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
                     WHERE
                         1 = 1
                         --AND ce.COD_TIPO_EVENTO IN (785)
@@ -534,6 +544,7 @@ def list_crm_eventos():
                         {filter_final_date}
                         {filter_created_at}
                         {filter_empresa}
+                        {filter_pendente_autorizacao}
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
                         --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
                     ORDER BY
@@ -625,6 +636,102 @@ def list_crm_eventos():
                 conn_oracle.close()
             except Exception:
                 pass
+
+@crm_bp.route('/api/crm/eventos_descartados', methods=['GET'])
+@token_required
+def list_eventos_descartados():
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        conn_oracle, cur_oracle = oracle()
+
+        acesso_query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+        cur_oracle.execute(acesso_query)
+        acesso_rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(acesso_rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+
+        query = f"""
+            SELECT
+                cced.cod_empresa,
+                cced.cod_evento,
+                cced.status,
+                cced.cod_andamento,
+                cced.cod_tipo_fechamento,
+                cced.quem_descartou,
+                eu_descartou.NOME_COMPLETO quem_descartou_nome_completo,
+                TO_CHAR(cced.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+                cced.quem_autorizou,
+                TO_CHAR(cced.authorization_date, 'YYYY-MM-DD HH24:MI:SS') AS authorization_date,
+                CASE
+                    WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO
+                    ELSE c.NOME
+                END nome_cliente,
+                concat(c.PREFIXO_CEL, c.TELEFONE_CEL) tel_cel,
+                ce.fone_cliente_avulso,
+                ce.RESPONSAVEL_PELO_EVENTO,
+                eu.NOME_COMPLETO responsavel_nome_completo,
+                cet.DESC_TIPO_EVENTO,
+                ca.ANDAMENTO,
+                cd.DESCRICAO_DESCARTE,
+                TO_CHAR(ce.DATA_CRIACAO, 'YYYY-MM-DD HH24:MI:SS') AS data_criacao_evento,
+                pm.descricao_modelo
+            FROM caiuas_crm_eventos_descartados cced
+            LEFT JOIN crm_eventos ce ON ce.COD_EMPRESA = cced.cod_empresa AND ce.COD_EVENTO = cced.cod_evento
+            LEFT JOIN clientes c ON c.COD_CLIENTE = ce.COD_CLIENTE
+            LEFT JOIN empresas_usuarios eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO AND NVL(eu.DEMITIDO, 'N') <> 'S'
+            LEFT JOIN empresas_usuarios eu_descartou ON eu_descartou.nome = cced.quem_descartou AND NVL(eu_descartou.DEMITIDO, 'N') <> 'S'
+            LEFT JOIN crm_eventos_tipo cet ON cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+            LEFT JOIN crm_andamento ca ON ca.COD_ANDAMENTO = cced.cod_andamento
+            LEFT JOIN crm_descartes cd ON cd.COD_DESCARTE = ce.COD_DESCARTE
+            LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+            WHERE 1=1
+                AND cced.authorization_date IS NULL
+                {filter_responsavel}
+            ORDER BY cced.created_at DESC
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        retorno = {'eventos_descartados': []}
+        for row in rows:
+            retorno['eventos_descartados'].append({
+                'cod_empresa': row[0],
+                'cod_evento': row[1],
+                'status_anterior': row[2],
+                'cod_andamento_anterior': row[3],
+                'cod_tipo_fechamento_anterior': row[4],
+                'quem_descartou': row[5],
+                'quem_descartou_nome_completo': row[6],
+                'created_at': row[7],
+                'quem_autorizou': row[8],
+                'authorization_date': row[9],
+                'nome_cliente': row[10],
+                'tel_cel': row[11],
+                'fone_cliente_avulso': row[12],
+                'responsavel_pelo_evento': row[13],
+                'responsavel_nome_completo': row[14],
+                'desc_tipo_evento': row[15],
+                'andamento': row[16],
+                'descricao_descarte': row[17],
+                'data_criacao_evento': row[18],
+                'descricao_modelo': row[19]
+            })
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @crm_bp.route('/api/crm/eventos_retorno/<int:id_evento>', methods=['POST'])
 @token_required
@@ -856,7 +963,7 @@ def descartar_evento(id_evento):
             return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
         
         query = f"""
-            select count(*) from crm_eventos
+            select status, cod_andamento, cod_tipo_fechamento from crm_eventos
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
@@ -864,10 +971,13 @@ def descartar_evento(id_evento):
         """
         cur_oracle.execute(query)
         row = cur_oracle.fetchone()
-        if row[0] == 0:
+        if row is None:
             cur_oracle.close()
             conn_oracle.close()
             return jsonify({'status': 'error', 'message': 'Evento já descartado'}), 400
+        status_anterior = row[0]
+        cod_andamento_anterior = row[1]
+        cod_tipo_fechamento_anterior = row[2]
         
         query = f"""
             SELECT COD_DESCARTE, DESCRICAO_DESCARTE
@@ -885,6 +995,23 @@ def descartar_evento(id_evento):
         
         descricao_descarte = (row[1] or '').replace("'", "''")
         
+        sql_cod_andamento = 'NULL' if cod_andamento_anterior is None else cod_andamento_anterior
+        sql_cod_tipo_fechamento = 'NULL' if cod_tipo_fechamento_anterior is None else cod_tipo_fechamento_anterior
+        sql_status = 'NULL' if status_anterior is None else f"'{status_anterior}'"
+        query = f"""
+            insert into caiuas_crm_eventos_descartados (cod_empresa, cod_evento, status, cod_andamento, cod_tipo_fechamento, quem_descartou, created_at)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                {sql_status},
+                {sql_cod_andamento},
+                {sql_cod_tipo_fechamento},
+                '{quem_descartou}',
+                CURRENT_TIMESTAMP
+            )
+        """
+        # return query
+        cur_oracle.execute(query)
         
         query = f"""
             update crm_eventos set status = 'D', cod_andamento = 111, cod_descarte = {cod_descarte}, cod_tipo_fechamento = 3
@@ -918,12 +1045,19 @@ def descartar_evento(id_evento):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+ALLOWED_REMOVER_DESCARTE_EMAILS = [
+    'rodrigo.hamada@caiuas.com.br',
+    'pablo.ti@caiuas.com.br'
+]
+
 @crm_bp.route('/api/crm/eventos/remover_descarte/<int:id_evento>', methods=['PUT'])
 @token_required
 def remover_descarte_evento(id_evento):
     try:
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
+        if email not in ALLOWED_REMOVER_DESCARTE_EMAILS:
+            return jsonify({'status': 'error', 'message': 'Sem permissão para remover descarte'}), 403
         cod_empresa = str(id_evento)[:2]
         if cod_empresa not in ['11', '33']:
             return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
@@ -946,7 +1080,7 @@ def remover_descarte_evento(id_evento):
         cur_oracle.execute(query)
         rows = cur_oracle.fetchall()
         quem_removeu_descarte = rows[0][1]
-        
+
         query = f"""
             select count(*) from crm_eventos
             where 1=1
@@ -959,7 +1093,7 @@ def remover_descarte_evento(id_evento):
             cur_oracle.close()
             conn_oracle.close()
             return jsonify({'status': 'error', 'message': 'Evento não encontrado'}), 404
-        
+
         query = f"""
             select count(*) from crm_eventos
             where 1=1
@@ -973,14 +1107,52 @@ def remover_descarte_evento(id_evento):
             cur_oracle.close()
             conn_oracle.close()
             return jsonify({'status': 'error', 'message': 'Evento não está descartado'}), 400
-        
+
         query = f"""
-            update crm_eventos set status = 'P', cod_andamento = 2, responsavel_pelo_evento = '{quem_removeu_descarte}', cod_descarte = null, cod_tipo_fechamento = null
+            SELECT cod_empresa, cod_evento, status, cod_andamento, cod_tipo_fechamento, quem_autorizou, authorization_date
+            FROM caiuas_crm_eventos_descartados
+            WHERE cod_empresa = {cod_empresa}
+                AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row_descartado = cur_oracle.fetchone()
+
+        if row_descartado is not None:
+            if row_descartado[5] is not None and row_descartado[6] is not None:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Descarte já autorizado, não pode remover'}), 400
+            status_restaurar = row_descartado[2] or 'P'
+            cod_andamento_restaurar = row_descartado[3] if row_descartado[3] is not None else 2
+            cod_tipo_fechamento_restaurar = row_descartado[4]
+        else:
+            status_restaurar = 'P'
+            cod_andamento_restaurar = 2
+            cod_tipo_fechamento_restaurar = None
+
+        sql_cod_tipo_fechamento_restaurar = 'NULL' if cod_tipo_fechamento_restaurar is None else cod_tipo_fechamento_restaurar
+
+        query = f"""
+            update crm_eventos set
+                status = '{status_restaurar}',
+                cod_andamento = {cod_andamento_restaurar},
+                responsavel_pelo_evento = '{quem_removeu_descarte}',
+                cod_descarte = null,
+                cod_tipo_fechamento = {sql_cod_tipo_fechamento_restaurar}
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
         """
         cur_oracle.execute(query)
+
+        if row_descartado is not None:
+            query = f"""
+                delete from caiuas_crm_eventos_descartados
+                where cod_empresa = {cod_empresa}
+                    and cod_evento = {cod_evento}
+            """
+            cur_oracle.execute(query)
+
         query = f"""
             insert into crm_acoes
             (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
@@ -1002,6 +1174,87 @@ def remover_descarte_evento(id_evento):
         retorno = {}
         retorno['message'] = 'Descarte removido do evento com sucesso'
         return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos/autorizar_descarte/<int:id_evento>', methods=['PUT'])
+@token_required
+def autorizar_descarte_evento(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        if email not in ALLOWED_REMOVER_DESCARTE_EMAILS:
+            return jsonify({'status': 'error', 'message': 'Sem permissão para autorizar descarte'}), 403
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_autorizou = rows[0][1]
+
+        query = f"""
+            SELECT quem_autorizou, authorization_date
+            FROM caiuas_crm_eventos_descartados
+            WHERE cod_empresa = {cod_empresa}
+                AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row_descartado = cur_oracle.fetchone()
+
+        if row_descartado is None:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Descarte não encontrado'}), 404
+
+        if row_descartado[0] is not None and row_descartado[1] is not None:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Descarte já autorizado'}), 400
+
+        query = f"""
+            UPDATE caiuas_crm_eventos_descartados
+            SET quem_autorizou = '{quem_autorizou}',
+                authorization_date = CURRENT_TIMESTAMP
+            WHERE cod_empresa = {cod_empresa}
+                AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_autorizou}',
+                1,
+                SYSDATE,
+                'Descarte do evento autorizado por {quem_autorizou}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_autorizou}')
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify({'message': 'Descarte autorizado com sucesso'}), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -3776,7 +4029,8 @@ def list_responsaveis():
                 ,12
                 ,26
                 ,10
-                ,112)
+                ,112
+                ,108)
             AND COD_FUNCAO <> 2
             AND eu.email IS NOT NULL
         """
