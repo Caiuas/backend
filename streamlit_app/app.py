@@ -1256,10 +1256,10 @@ else:
             c.TELEFONE_RES, 
             c.TELEFONE_FAX, 
             ce.FONE_CLIENTE_AVULSO,
-            CASE
-                WHEN ce.COD_EVENTO IS NOT NULL THEN concat('https://app.caiuas.com.br/crm/eventos/',concat(ce.COD_EMPRESA, ce.COD_EVENTO))
-                ELSE null
-            END link_fluxo,
+            --CASE
+            --    WHEN ce.COD_EVENTO IS NOT NULL THEN concat('https://app.caiuas.com.br/crm/eventos/',concat(ce.COD_EMPRESA, ce.COD_EVENTO))
+            --    ELSE null
+            --END link_fluxo,
             CASE
                 WHEN ce.COD_EVENTO_ANTERIOR IS NOT NULL THEN concat('https://app.caiuas.com.br/crm/eventos/',concat(ce.COD_EMPRESA_ANTERIOR, ce.COD_EVENTO_ANTERIOR))
                 ELSE null
@@ -1269,10 +1269,10 @@ else:
             AND c.COD_CLIENTE = vp.COD_CLIENTE 
         LEFT JOIN CRM_EVENTOS ce ON 1=1
             AND ce.COD_PROPOSTA = vp.COD_PROPOSTA 
-            AND ce.COD_TIPO_EVENTO IN (785,807)
-        LEFT JOIN CRM_EVENTOS ce2 ON 1=1
-            AND ce2.COD_PROPOSTA = ce.COD_EVENTO_ANTERIOR 
-            AND ce2.COD_EMPRESA = ce.COD_EMPRESA_ANTERIOR 
+            AND ce.COD_TIPO_EVENTO IN (785,807,819,821,815,817,810,812)
+        --LEFT JOIN CRM_EVENTOS ce2 ON 1=1
+        --    AND ce2.COD_PROPOSTA = ce.COD_EVENTO_ANTERIOR 
+        --    AND ce2.COD_EMPRESA = ce.COD_EMPRESA_ANTERIOR 
         WHERE 1=1
             AND TRUNC(vp.DATA_VENDA) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD')
             AND TRUNC(vp.DATA_VENDA) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
