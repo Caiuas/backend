@@ -850,6 +850,96 @@ else:
         cur.execute(query)
         results = cur.fetchall()
         df = pd.DataFrame(results, columns=[desc[0] for desc in cur.description], dtype=str)
+        query = f"""
+            SELECT 
+            eu.cod_empresa,
+            concat(ce.COD_EMPRESA, ce.COD_EVENTO) cod_evento,
+            CASE
+                WHEN ca.andamento IS NULL THEN 'Não informado'
+                ELSE ca.andamento
+            END andamento,
+            CASE
+                WHEN ce.status = 'P' THEN 'Pendente'
+                WHEN ce.status = 'E' THEN 'Encerrado'
+                WHEN ce.status = 'D' THEN 'Descartado'
+                WHEN ce.status = 'V' THEN 'Pendente'
+                WHEN ce.status = 'R' THEN 'Pendente'
+                WHEN ce.status = 'A' THEN 'Pendente'
+                ELSE 'Não informado'
+            END status,
+            CASE
+                WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) < TRUNC(SYSDATE) THEN 'ATRASADO'
+                WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) = TRUNC(SYSDATE) THEN 'HOJE'
+                WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) > TRUNC(SYSDATE) THEN 'FUTURO'
+            END AS status_atendimento,
+            CASE
+                WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO 
+                ELSE c.NOME 
+            END nome_cliente,
+            TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) data_contato,
+            --ce.data_agendada,
+            --ce.data_visita,
+            ce.cod_proposta,
+            upper(cet.DESC_TIPO_EVENTO) tipo_evento,
+            CASE
+                WHEN eu.NOME_COMPLETO IS NOT NULL THEN upper(eu.NOME_COMPLETO)
+                ELSE 
+                    'SEM RESPONSÁVEL'
+            END responsavel,
+            CASE 
+                WHEN ce.cod_modelo IS NOT NULL THEN pm.descricao_modelo
+                ELSE
+                    'VEÍCULO NAO DEFINIDO'
+            END VEICULO,
+            (SELECT count(*) FROM CAIUAS_CRM_RETORNO ccr
+            WHERE 1=1
+                AND ccr.COD_EMPRESA = ce.COD_EMPRESA 
+                AND ccr.COD_EVENTO = ce.COD_EVENTO 
+            ) qtd_retornos,
+            CASE
+                WHEN (SELECT count(*) FROM caiuas_crm_test_drive cctd WHERE cctd.COD_EMPRESA = ce.COD_EMPRESA AND cctd.COD_EVENTO = ce.COD_EVENTO ) > 0 THEN 'TEM'
+                ELSE 'NÃO'
+            END TEM_TEST_DRIVE,
+            ce.data_criacao,
+            ce.COD_TIPO_EVENTO,
+            TRUNC(cel.data_criacao) data_lead,
+            CASE
+                WHEN eu_lead.NOME_COMPLETO IS NOT NULL THEN upper(eu_lead.NOME_COMPLETO)
+                ELSE 'SEM RESPONSÁVEL'
+            END responsavel_lead,
+            TRUNC(cel.data_agendada) data_agendada_lead,
+            vp.STATUS_PROPOSTA,
+            TRIM(TO_CHAR(ce.COD_EMPRESA_ANTERIOR)) || TRIM(TO_CHAR(ce.COD_EVENTO_ANTERIOR)) cod_evento_anterior
+            FROM crm_eventos ce
+            LEFT JOIN CRM_ANDAMENTO ca ON 1=1
+                AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO 
+            LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+                AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO 
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = ce.RESPONSAVEL_PELO_EVENTO 
+            LEFT JOIN PRODUTOS_MODELOS pm ON 1=1
+                AND pm.COD_MODELO = ce.COD_MODELO 
+            LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
+            LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
+            LEFT JOIN crm_eventos cel ON 1=1
+                AND ce.COD_EVENTO_ANTERIOR = cel.COD_EVENTO
+                AND ce.COD_EMPRESA_ANTERIOR = cel.COD_EMPRESA
+            LEFT JOIN EMPRESAS_USUARIOS eu_lead ON 1=1
+                AND eu_lead.NOME = cel.RESPONSAVEL_PELO_EVENTO
+            LEFT JOIN VEICULOS_PROPOSTAS vp ON 1=1
+                AND vp.COD_PROPOSTA = ce.COD_PROPOSTA
+            WHERE 1=1
+                AND ce.COD_TIPO_EVENTO IN (819,821,815,817,810,812)
+                AND ce.status <> 'D'
+                AND TRUNC(ce.DATA_VISITA) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_VISITA) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
+        """
+        cur.execute(query)
+        results = cur.fetchall()
+        df_visitas = pd.DataFrame(results, columns=[desc[0] for desc in cur.description], dtype=str)
+        # concatena df e df_visitas
+        df = pd.concat([df, df_visitas], ignore_index=True)
+        
+        
         # remova o .0 do cod_proposta ele é SRT
         df['COD_PROPOSTA'] = df['COD_PROPOSTA'].str.replace('.0', '', regex=False)
         
@@ -966,7 +1056,7 @@ else:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
-        empresa_selecionada = st.sidebar.selectbox("Filtrar por empresa", ["Todas", 11, 33])
+        empresa_selecionada = st.sidebar.selectbox("Filtrar por empresa", ["Todas", '11', '33'])
         if empresa_selecionada != "Todas":
             df = df[df['COD_EMPRESA'] == empresa_selecionada]
 
@@ -1115,7 +1205,7 @@ else:
 
         # Tabela: Passagens Varejo - CRIS (apenas tipo 785)
         st.subheader("Passagens Varejo - CRIS")
-        df_varejo_cris = df[df['COD_TIPO_EVENTO'] == '785']
+        df_varejo_cris = df[df['COD_TIPO_EVENTO'].isin(['785','815','810'])]
         varejo_cris_por_modelo = (
             df_varejo_cris.groupby('VEICULO')['COD_EVENTO']
             .count()
