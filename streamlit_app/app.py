@@ -135,8 +135,10 @@ if url_token:
 # --- INTERFACE ---
 
 if not st.session_state.get("authenticated"):
-    st.image("https://caiuas.com.br/wp-content/uploads/2021/05/logo-caiuas.png")
-    st.title("Acesso ao Sistema")
+    col_logo_l, col_logo_c, col_logo_r = st.columns([2, 1, 2])
+    with col_logo_c:
+        st.image("logo.png", width=200)
+    st.markdown("<h1 style='text-align: center;'>Acesso ao Sistema</h1>", unsafe_allow_html=True)
     
     
     with st.form("login_form"):
@@ -187,6 +189,7 @@ else:
             st.rerun()
         st.stop()
 
+    st.sidebar.image("logo.png", use_container_width=True)
     menu = st.sidebar.radio(
         "Menu",
         menus_disponiveis
@@ -1081,17 +1084,56 @@ else:
         if status_evento_selecionado != "Todos":
             df = df[df['STATUS'] == status_evento_selecionado]
         
+        # Buscar feriados no período para cálculo de média
+        con_fer, cur_fer = oracle()
+        cur_fer.execute(f"""
+            SELECT TRUNC(DATA) AS DATA
+            FROM FERIADO
+            WHERE TRUNC(DATA) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD')
+              AND TRUNC(DATA) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
+            GROUP BY TRUNC(DATA)
+        """)
+        feriados_resultado = cur_fer.fetchall()
+        cur_fer.close()
+        con_fer.close()
+        datas_feriados = set()
+        for row in feriados_resultado:
+            v = row[0]
+            if hasattr(v, 'date'):
+                datas_feriados.add(v.date())
+            elif v is not None:
+                import datetime as _dt
+                try:
+                    datas_feriados.add(_dt.date.fromisoformat(str(v)[:10]))
+                except Exception:
+                    pass
+
+        # Calcular dias úteis (Seg-Sáb) no período excluindo feriados
+        todas_datas = pd.date_range(data_inicial, data_final, freq='D')
+        dias_uteis = [d for d in todas_datas if d.weekday() < 6 and d.date() not in datas_feriados]
+        num_dias_uteis = len(dias_uteis)
+
         # Gráfico: Total de Primeiras Passagens vs Retornos
         total_primeiras = len(df)
         total_retornos = len(df_retorno)
+        media_por_dia = round(total_primeiras / num_dias_uteis, 1) if num_dias_uteis > 0 else 0
         df_comparativo = pd.DataFrame({
             "Tipo": ["Primeiras Passagens", "Retornos"],
             "Total": [total_primeiras, total_retornos]
         })
         col_chart1, col_chart2, col_chart3 = st.columns([1, 2, 2])
         with col_chart1:
-            st.metric("Primeiras Passagens", total_primeiras)
-            st.metric("Retornos", total_retornos)
+            st.markdown(f"""
+            <div style="text-align: center;">
+                <p style="font-size: 14px; color: gray; margin-bottom: 0;">Primeiras Passagens</p>
+                <p style="font-size: 2rem; font-weight: bold; margin: 0 0 16px 0;">{total_primeiras}</p>
+                <p style="font-size: 14px; color: gray; margin-bottom: 0;">Retornos</p>
+                <p style="font-size: 2rem; font-weight: bold; margin: 0 0 16px 0;">{total_retornos}</p>
+                <p style="font-size: 14px; color: gray; margin-bottom: 0;">Média/dia <span style="font-size: 12px;">(Seg-Sáb s/ feriados)</span></p>
+                <p style="font-size: 2rem; font-weight: bold; margin: 0;">{media_por_dia}</p>
+                <p style="font-size: 12px; color: gray; margin-top: 2px;">{num_dias_uteis} dias úteis no período</p>
+            </div>
+            """, unsafe_allow_html=True)
         with col_chart2:
             fig_comparativo = px.bar(
                 df_comparativo,
@@ -1153,6 +1195,7 @@ else:
             )
             fig_responsavel.update_layout(
                 showlegend=False,
+                coloraxis_showscale=False,
                 yaxis={'categoryorder': 'total ascending'},
                 height=400
             )
@@ -1175,20 +1218,21 @@ else:
             )
             fig_veiculo.update_layout(
                 showlegend=False,
+                coloraxis_showscale=False,
                 yaxis={'categoryorder': 'total ascending'},
                 height=400
             )
             st.plotly_chart(fig_veiculo, use_container_width=True)
         # divisor para mais tre colunas
-        st.markdown("---")
-        col4, col5, col6 = st.columns(3)
-        with col4:
-            # nada
-            st.empty()
-        with col5:
-            st.empty()
-        with col6:
-            st.empty()
+        # st.markdown("---")
+        # col4, col5, col6 = st.columns(3)
+        # with col4:
+        #     # nada
+        #     st.empty()
+        # with col5:
+        #     st.empty()
+        # with col6:
+        #     st.empty()
             
         
         
@@ -1315,6 +1359,7 @@ else:
         data_final = st.sidebar.date_input("Data Final", datetime.now())
         query = f"""
             SELECT 
+                eu.COD_EMPRESA,
                 concat(ce.COD_EMPRESA, ce.COD_EVENTO) cod_evento,
                 CASE
                     WHEN ca.andamento IS NULL THEN 'Não informado'
@@ -1374,13 +1419,84 @@ else:
                 LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
                 LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
                 WHERE 1=1
-                    AND ce.COD_TIPO_EVENTO IN (819,821,825,785,807,827,815,817,823,810,812)
+                    and ce.status <> 'D'
+                    AND ce.COD_TIPO_EVENTO IN (785,807,810,812)
                     AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
         """
         con, cur = oracle()
         cur.execute(query)
         results = cur.fetchall()
         df = pd.DataFrame(results, columns=[desc[0] for desc in cur.description])
+        query = f"""
+            SELECT 
+                eu.COD_EMPRESA,
+                concat(ce.COD_EMPRESA, ce.COD_EVENTO) cod_evento,
+                CASE
+                    WHEN ca.andamento IS NULL THEN 'Não informado'
+                    ELSE ca.andamento
+                END andamento,
+                CASE
+                    WHEN ce.status = 'P' THEN 'Pendente'
+                    WHEN ce.status = 'E' THEN 'Encerrado'
+                    WHEN ce.status = 'D' THEN 'Descartado'
+                    WHEN ce.status = 'V' THEN 'Pendente'
+                    WHEN ce.status = 'R' THEN 'Pendente'
+                    WHEN ce.status = 'A' THEN 'Pendente'
+                    ELSE 'Não informado'
+                END status,
+                CASE
+                    WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) < TRUNC(SYSDATE) THEN 'ATRASADO'
+                    WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) = TRUNC(SYSDATE) THEN 'HOJE'
+                    WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) > TRUNC(SYSDATE) THEN 'FUTURO'
+                END AS status_atendimento,
+                CASE
+                    WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO 
+                    ELSE c.NOME 
+                END nome_cliente,
+                TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) data_contato,
+                ce.data_agendada,
+                ce.data_visita,
+                upper(cet.DESC_TIPO_EVENTO) tipo_evento,
+                CASE
+                    WHEN eu.NOME_COMPLETO IS NOT NULL THEN upper(eu.NOME_COMPLETO)
+                    ELSE 
+                        'SEM RESPONSÁVEL'
+                END responsavel,
+                CASE 
+                    WHEN ce.cod_modelo IS NOT NULL THEN pm.descricao_modelo
+                    ELSE
+                        'VEÍCULO NAO DEFINIDO'
+                END VEICULO,
+                (SELECT count(*) FROM CAIUAS_CRM_RETORNO ccr
+                WHERE 1=1
+                    AND ccr.COD_EMPRESA = ce.COD_EMPRESA 
+                    AND ccr.COD_EVENTO = ce.COD_EVENTO 
+                ) qtd_retornos,
+                CASE
+                    WHEN (SELECT count(*) FROM caiuas_crm_test_drive cctd WHERE cctd.COD_EMPRESA = ce.COD_EMPRESA AND cctd.COD_EVENTO = ce.COD_EVENTO ) > 0 THEN 'TEM'
+                    ELSE 'NÃO'
+                END TEM_TEST_DRIVE,
+                ce.data_criacao
+                FROM crm_eventos ce
+                LEFT JOIN CRM_ANDAMENTO ca ON 1=1
+                    AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO 
+                LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+                    AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO 
+                LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                    AND eu.NOME = ce.RESPONSAVEL_PELO_EVENTO 
+                LEFT JOIN PRODUTOS_MODELOS pm ON 1=1
+                    AND pm.COD_MODELO = ce.COD_MODELO 
+                LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
+                LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
+                WHERE 1=1
+                    and ce.status <> 'D'
+                    AND ce.COD_TIPO_EVENTO IN (819,821,825,785,807,827,815,817,823,810,812,829,831,795,793,797,799)
+                    AND TRUNC(ce.DATA_VISITA) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_VISITA) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
+        """
+        cur.execute(query)
+        results = cur.fetchall()
+        df_retorno = pd.DataFrame(results, columns=[desc[0] for desc in cur.description])
+        df = pd.concat([df, df_retorno], ignore_index=True)
         cur.close()
         con.close()
         
@@ -1398,6 +1514,10 @@ else:
         df = df.fillna('-')
         # link é conct https://app.caiuas.com.br/crm/eventos/ + cod_evento
         df['LINK'] = df['COD_EVENTO'].apply(lambda x: f"https://app.caiuas.com.br/crm/eventos/{x}")
+        
+        empresa_selecionada = st.sidebar.selectbox("Filtrar por empresa", ["Todas", '11', '33'])
+        if empresa_selecionada != "Todas":
+            df = df[df['COD_EMPRESA'].astype(str) == empresa_selecionada]
         
         responsaveis = df['RESPONSAVEL'].unique()
         responsavel_selecionado = st.sidebar.selectbox("Filtrar por responsável", ["Todos"] + list(responsaveis))
