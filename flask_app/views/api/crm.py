@@ -1014,7 +1014,7 @@ def descartar_evento(id_evento):
         cur_oracle.execute(query)
         
         query = f"""
-            update crm_eventos set status = 'D', cod_andamento = 111, cod_descarte = {cod_descarte}, cod_tipo_fechamento = 3
+            update crm_eventos set status = 'D', cod_andamento = 111, cod_descarte = {cod_descarte}, cod_tipo_fechamento = 3, ce.data_encerramento = SYSDATE
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
