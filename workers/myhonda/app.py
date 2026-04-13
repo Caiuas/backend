@@ -39,9 +39,10 @@ def process_leads():
         return
 
     query = """
-        select * from leads_myhonda
-        where upper(status) = 'PENDENTE'
-        order by id_evento
+        select evento_id, nome_completo, tipo, modelo_interesse, cpf, cnpj, origem, celular, email, concessionaria, created_at from leads_myhonda
+        where status_integracao = 'dados_completados'
+        order by created_at desc
+        limit 1
     """
     try:
         cur.execute(query)
@@ -56,18 +57,25 @@ def process_leads():
         # replace "'"" with "" in all string fields
         row = [str(field).replace("'", "") if isinstance(field, str) else field for field in row]
         observacao = f"""
-            Lead ID: {row[1]}
-            nome_completo: {row[2][:100]}
-            tipo: {row[3]}
-            modelo_interesse: {row[4]}
-            cpf: {row[5]}
-            cnpj: {row[6]}
-            origem: {row[7]}
-            celular: {row[8]}
-            email: {row[9]}
-            concessionaria: {str(row[10]).strip()}
+            Lead ID: {row[0]}
+            nome_completo: {row[1][:100]}
+            tipo: {row[2]}
+            modelo_interesse: {row[3]}
+            cpf: {row[4]}
+            cnpj: {row[5]}
+            origem: {row[6]}
+            celular: {row[7]}
+            email: {row[8]}
+            concessionaria: {str(row[9]).strip()}
         """
         cod_tipo_evento = 799
+
+        created_at_val = row[10]
+        if hasattr(created_at_val, 'strftime'):
+            created_at_str = created_at_val.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            created_at_str = str(created_at_val)[:19]
+
         if row[3] == 'HAB - Automóveis Novos':
             cod_tipo_evento = 795
         elif row[3] == 'CS - Serviços e Peças':
@@ -105,12 +113,12 @@ def process_leads():
                                 seq_crm_COD_EVENTO.nextval,
                                 {cod_tipo_evento},
                                 2,
-                                '{row[2][:100]}',
-                                '{row[8]}',  
+                                '{row[1][:100]}',
+                                '{row[7]}',  
                                 18,
-                                SYSDATE,
+                                TO_DATE('{created_at_str}', 'YYYY-MM-DD HH24:MI:SS'),
                                 seq_cod_cliente_honda.nextval,
-                                'Evento criado via integração MyHonda - Lead ID {row[1]}',
+                                'Evento criado via integração MyHonda - Lead ID {row[0]}',
                                 'NBS',
                                 SYSDATE,
                                 '{observacao}',
@@ -127,28 +135,36 @@ def process_leads():
         query_oracle = query_oracle.replace("'None'", 'null')
         query_oracle = query_oracle.replace("'null'", 'null')
         # print(query_oracle)
+        oracle_ok = False
         try:
             conn_oracle, cur_oracle = oracle()
             cur_oracle.execute(query_oracle)
             conn_oracle.commit()
             cur_oracle.close()
             conn_oracle.close()
-            print(f"[{datetime.now()}] Lead ID {row[1]} inserido com sucesso.")
-            
-            query_update = f"""
-                update leads_myhonda set status = 'Integrado'
-                where id_evento = {row[0]}
-            """
-            print(query_update)
-            cur.execute(query_update)
-            conn.commit()
+            oracle_ok = True
+            print(f"[{datetime.now()}] Lead ID {row[1]} inserido com sucesso no Oracle.")
         except Exception as e:
-            print(f"[{datetime.now()}] Erro ao inserir Lead ID {row[1]}: {e}")
+            print(f"[{datetime.now()}] Erro ao inserir Lead ID {row[1]} no Oracle: {e}")
             try:
                 cur_oracle.close()
                 conn_oracle.close()
             except:
                 pass
+
+        if oracle_ok:
+            try:
+                query_update = f"""
+                    UPDATE leads_myhonda SET status_integracao = 'integrado_nbs'
+                    WHERE evento_id = '{row[0]}'
+                """
+                print(query_update)
+                cur.execute(query_update)
+                conn.commit()
+                print(f"[{datetime.now()}] Lead ID {row[1]} marcado como integrado_nbs no Postgres.")
+            except Exception as e:
+                print(f"[{datetime.now()}] Erro ao atualizar status do Lead ID {row[1]} no Postgres: {e}")
+                conn.rollback()
 
     cur.close()
     conn.close()
@@ -159,4 +175,4 @@ if __name__ == "__main__":
             process_leads()
         except Exception as e:
             print(f"[{datetime.now()}] Erro inesperado: {e}")
-        sleep(60)
+            sleep(60)
