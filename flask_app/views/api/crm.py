@@ -11,7 +11,7 @@ crm_bp = Blueprint('crm', __name__)
 # Usuários com permissão para alterar data_visita em eventos showroom
 ALLOWED_DATA_VISITA_EMAILS = [
     'pablo.ti@caiuas.com.br',
-    'rodrigo.hamada@caiuas.com.br',
+    'cristiane.aguilar@caiuas.com.br',
     'mirela.novaga@caiuas.com.br',
     'isadora.fraga@caiuas.com.br'
 ]
@@ -277,8 +277,8 @@ def list_crm_eventos():
                 datetime.strptime(created_at_min, '%Y-%m-%d')
                 datetime.strptime(created_at_max, '%Y-%m-%d')
                 # se data de periodo for maior que um mês retorne erro
-                if (datetime.strptime(created_at_max, '%Y-%m-%d') - datetime.strptime(created_at_min, '%Y-%m-%d')).days > 31:
-                    return jsonify({'status': 'error', 'message': 'O período de criação não pode ser maior que 31 dias'}), 400
+                # if (datetime.strptime(created_at_max, '%Y-%m-%d') - datetime.strptime(created_at_min, '%Y-%m-%d')).days > 31:
+                #     return jsonify({'status': 'error', 'message': 'O período de criação não pode ser maior que 31 dias'}), 400
                 filter_created_at = f" AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{created_at_min}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{created_at_max}', 'YYYY-MM-DD') "
                 
             except ValueError:
@@ -436,8 +436,8 @@ def list_crm_eventos():
                     {filter_responsavel}
                     {filter_status}
                     {filter_search if search else ''}
-                    {filter_initial_date}
-                    {filter_final_date}
+                    --{filter_initial_date}
+                    --{filter_final_date}
                     {filter_tipo_evento}
                     {filter_created_at}
                     {filter_empresa}
@@ -1014,7 +1014,7 @@ def descartar_evento(id_evento):
         cur_oracle.execute(query)
         
         query = f"""
-            update crm_eventos set status = 'D', cod_andamento = 111, cod_descarte = {cod_descarte}, cod_tipo_fechamento = 3, ce.data_encerramento = SYSDATE
+            update crm_eventos set status = 'D', cod_andamento = 111, cod_descarte = {cod_descarte}, cod_tipo_fechamento = 3, data_encerramento = SYSDATE
             where 1=1
                 and cod_empresa = {cod_empresa}
                 and cod_evento = {cod_evento}
@@ -1046,7 +1046,7 @@ def descartar_evento(id_evento):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 ALLOWED_REMOVER_DESCARTE_EMAILS = [
-    'rodrigo.hamada@caiuas.com.br',
+    'cristiane.aguilar@caiuas.com.br',
     'pablo.ti@caiuas.com.br'
 ]
 
@@ -1264,6 +1264,9 @@ def encerrar_evento(id_evento):
     try:
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
+        lista_permitidos = ['pablo.ti@caiuas.com.br']
+        if email not in lista_permitidos:
+            return jsonify({'status': 'error', 'message': 'Sem permissão para encerrar evento'}), 403
         cod_empresa = str(id_evento)[:2]
         if cod_empresa not in ['11', '33']:
             return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
@@ -4413,7 +4416,7 @@ def muda_proposta_evento(id_evento):
             return jsonify({'status': 'error', 'message': 'Proposta não encontrada'}), 404
 
         vendedor_email = rows[0][1]
-        emails_permitidos = {'pablo.ti@caiuas.com.br', 'rodrigo.hamada@caiuas.com.br'}
+        emails_permitidos = {'pablo.ti@caiuas.com.br', 'cristiane.aguilar@caiuas.com.br'}
         if vendedor_email and str(vendedor_email).strip().lower() != email and email not in emails_permitidos:
             cur_oracle.close()
             conn_oracle.close()
