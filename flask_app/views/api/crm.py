@@ -918,6 +918,44 @@ def get_motivos_descarte():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@crm_bp.route('/api/crm/motivo_perda', methods=['GET'])
+@token_required
+def get_motivos_perda():
+    conn_oracle = None
+    cur_oracle = None
+    try:
+        query = """
+            SELECT cmp.COD_MOTIVO_PERDA, upper(cmp.desc_motivo)
+            FROM CRM_MOTIVO_PERDAS cmp
+            WHERE ativo = 'S'
+            ORDER BY desc_motivo
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            return jsonify({'status': 'error', 'message': 'Não tem motivos de perda cadastrados'}), 404
+        retorno = {'motivos_perda': []}
+        for row in rows:
+            retorno['motivos_perda'].append({
+                'cod_motivo_perda': row[0],
+                'desc_motivo': row[1]
+            })
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        if cur_oracle:
+            try:
+                cur_oracle.close()
+            except Exception:
+                pass
+        if conn_oracle:
+            try:
+                conn_oracle.close()
+            except Exception:
+                pass
+
 @crm_bp.route('/api/crm/eventos/descartar_evento/<int:id_evento>', methods=['PUT'])
 @token_required
 def descartar_evento(id_evento):
