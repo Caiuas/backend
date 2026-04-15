@@ -56,6 +56,12 @@ def process_leads():
     for row in rows:
         # replace "'"" with "" in all string fields
         row = [str(field).replace("'", "") if isinstance(field, str) else field for field in row]
+        # remove prefixo 55 do celular
+        celular = str(row[7])
+        if celular.startswith("55"):
+            celular = celular[2:]
+        row = list(row)
+        row[7] = celular
         observacao = f"""
             Lead ID: {row[0]}
             nome_completo: {row[1][:100]}
