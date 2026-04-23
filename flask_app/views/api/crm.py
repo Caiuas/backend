@@ -4806,7 +4806,7 @@ def muda_proposta_evento(id_evento):
 
         # Verificar se proposta existe e buscar vendedor
         query = f"""
-            SELECT vp.VENDEDOR, lower(eu.EMAIL)
+            SELECT vp.VENDEDOR, lower(eu.EMAIL), vp.cod_cliente
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
                 AND eu.NOME = vp.VENDEDOR
@@ -4822,16 +4822,18 @@ def muda_proposta_evento(id_evento):
             return jsonify({'status': 'error', 'message': 'Proposta não encontrada'}), 404
 
         vendedor_email = rows[0][1]
+        cod_cliente_proposta = rows[0][2]
         emails_permitidos = {'pablo.ti@caiuas.com.br', 'cristiane.aguilar@caiuas.com.br'}
         if vendedor_email and str(vendedor_email).strip().lower() != email and email not in emails_permitidos:
             cur_oracle.close()
             conn_oracle.close()
             return jsonify({'status': 'error', 'message': 'Apenas o vendedor da proposta pode vinculá-la'}), 403
 
-        # Atualizar cod_proposta no evento
+        # Atualizar cod_proposta e cod_cliente no evento
         query = f"""
             UPDATE crm_eventos
-            SET cod_proposta = '{cod_proposta}'
+            SET cod_proposta = '{cod_proposta}',
+                cod_cliente = {cod_cliente_proposta}
             WHERE cod_empresa = {cod_empresa}
                 AND cod_evento = {cod_evento}
         """
