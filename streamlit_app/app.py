@@ -184,7 +184,7 @@ else:
     if tem_acesso(email_usuario, EMAILS_HAMADA):
         menus_disponiveis.append("Leads")
     if tem_acesso(email_usuario, EMAILS_CHAT):
-        menus_disponiveis.append("Chat")
+        menus_disponiveis.append("Leads Agência")
     if tem_acesso(email_usuario, EMAILS_ACOMPANHAMENTO_CHAT):
         menus_disponiveis.append("Acompanhamento Chat")
     if tem_acesso(email_usuario, EMAILS_POS_VENDAS):
@@ -2393,7 +2393,7 @@ else:
             }
         )
 
-    if menu == "Chat":
+    if menu == "Leads Agência":
         st.title("Acompanhamento - Campanhas (Chatwoot)")
         data_inicial_chat = st.sidebar.date_input("Data Inicial", datetime.now().date(), key="chat_data_inicial")
         data_final_chat = st.sidebar.date_input("Data Final", datetime.now().date(), key="chat_data_final")
@@ -2450,6 +2450,7 @@ else:
             st.info("Nenhum dado encontrado para o período.")
         else:
             pivot_vendedor = pd.pivot_table(df_chatwoot, index='responsavel', values='conversation_id', aggfunc='count').reset_index().rename(columns={'conversation_id': 'total_chats'})
+           
             total_row_chats = pd.DataFrame({'responsavel': ['Total'], 'total_chats': [pivot_vendedor['total_chats'].sum()]})
             pivot_vendedor_total = pd.concat([pivot_vendedor, total_row_chats], ignore_index=True)
             styled_chats = pivot_vendedor_total.style.apply(
@@ -2457,7 +2458,40 @@ else:
             )
             st.dataframe(styled_chats, hide_index=True, use_container_width=True)
 
-        df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','source_id','link_crm']].copy()
+        df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','source_id','link_crm','link_chat']].copy()
+        df_chatwoot_excel['evento'] = df_chatwoot_excel['link_crm'].apply(lambda x: x.split('?')[0] if x.strip() != '' else '')
+        df_chatwoot_excel['evento'] = df_chatwoot_excel['evento'].apply(lambda x: x.split('/')[-1] if x.strip() != '' else '')
+
+        lista_eventos_oracle = [e for e in df_chatwoot_excel['evento'].unique() if e.strip() != '']
+        if lista_eventos_oracle:
+            in_clause = ','.join([f"'{e}'" for e in lista_eventos_oracle])
+            query_oracle_eventos = f"""
+            SELECT 
+                concat(ce.COD_EMPRESA, ce.COD_EVENTO) AS evento,
+                eu.NOME_COMPLETO AS responsavel_oracle,
+                ca.ANDAMENTO AS andamento_atendimento,
+                TO_CHAR(ce.TERMOMETRO) AS termometro,
+                ce.COD_PROPOSTA
+            FROM crm_eventos ce
+            LEFT JOIN empresas_usuarios eu ON 1=1
+                AND eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+            LEFT JOIN CRM_ANDAMENTO ca ON 1=1
+                AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+            WHERE concat(ce.COD_EMPRESA, ce.COD_EVENTO) IN ({in_clause})
+            """
+            conn_oracle_chat, cur_oracle_chat = oracle()
+            cur_oracle_chat.execute(query_oracle_eventos)
+            result_oracle_chat = cur_oracle_chat.fetchall()
+            columns_oracle_chat = [desc[0].lower() for desc in cur_oracle_chat.description]
+            cur_oracle_chat.close()
+            conn_oracle_chat.close()
+            df_oracle_eventos = pd.DataFrame(result_oracle_chat, columns=columns_oracle_chat, dtype=str).fillna('')
+            df_chatwoot_excel = df_chatwoot_excel.merge(df_oracle_eventos[['evento', 'andamento_atendimento', 'termometro','cod_proposta']], on='evento', how='left')
+            df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].fillna('')
+            df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('').map(
+                lambda v: {'1': 'Frio', '2': 'Morno', '3': 'Quente'}.get(str(v).strip(), 'Não classificado')
+            )
+
         st.subheader("Campanhas (Chatwoot)")
         total_linhas_chatwoot = len(df_chatwoot)
         excel_buffer_chatwoot = io.BytesIO()
