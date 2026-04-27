@@ -33,7 +33,7 @@ from views.acompanhamento_chat import EMAILS_ACOMPANHAMENTO_CHAT
 from views.acompanhamento_pos_vendas import EMAILS_POS_VENDAS
 from views.acompanhamento_diario import EMAILS_ACOMPANHAMENTO_DIARIO
 from views.propostas import EMAILS_PRPOSTAS
-from utils.auth import *
+from utils.auth import realizar_login, validar_token, check_authentication
 from views import inicio
 from views import estoque_de_pecas
 from views import obsolescencia_de_estoque
