@@ -33,7 +33,7 @@ def render():
             vp.EMISSAO data_proposta, 
             eu.NOME_COMPLETO nome_vendedor, 
             pm.DESCRICAO_MODELO modelo, 
-            ce.DESCRICAO cor, 
+            COALESCE(ce_veic.DESCRICAO, ce_ped.DESCRICAO, ce_fic.DESCRICAO) AS cor, 
             v.CHASSI_COMPLETO, 
             c.NOME nome_cliente,
             CASE 
@@ -62,10 +62,14 @@ def render():
             AND pm.COD_MODELO = vp.COD_MODELO 
         LEFT JOIN VEICULOS v ON 1=1
             AND vp.CHASSI_RESUMIDO = v.CHASSI_RESUMIDO
-            AND vp.COD_PRODUTO = v.COD_PRODUTO      -- Chave adicionada (baseada na query 2)
-            AND vp.COD_MODELO = v.COD_MODELO        -- Chave adicionada (baseada na query 2)
-            AND vp.cod_empresa = v.cod_empresa      -- Chave adicionada (baseada na query 2)
-            AND v.status = 'E'                      -- Condição movida do WHERE para o ON (Resolve o problema)
+            AND vp.COD_PRODUTO = v.COD_PRODUTO      
+            AND vp.COD_MODELO = v.COD_MODELO        
+            AND vp.cod_empresa = v.cod_empresa      
+            AND v.status = 'E' 
+        LEFT JOIN VEICULOS_PEDIDOS vped ON 1=1
+            AND vp.COD_PEDIDO = vped.COD_PEDIDO
+        LEFT JOIN PROP_FICTICIA_DADOS pfd ON 1=1
+            AND vp.COD_FICTICIO = pfd.COD_FICTICIO
         LEFT JOIN clientes c ON c.COD_CLIENTE = vp.COD_CLIENTE 
         LEFT JOIN patio p ON 1=1
             AND p.COD_PATIO = v.COD_PATIO
@@ -84,10 +88,14 @@ def render():
         LEFT JOIN cidades cid_cob ON 1=1
             AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
             AND cid_cob.uf = c.UF_COBRANCA
-        LEFT JOIN CORES_EXTERNAS ce ON 1=1
-            AND ce.COR_EXTERNA = v.COR_EXTERNA
-        LEFT JOIN crm_eventos cev ON 1=1            -- Alias alterado de ce para cev
-            AND cev.COD_PROPOSTA = v.COD_PROPOSTA
+        LEFT JOIN CORES_EXTERNAS ce_veic ON 1=1          
+            AND ce_veic.COR_EXTERNA = v.COR_EXTERNA
+        LEFT JOIN CORES_EXTERNAS ce_ped ON 1=1         
+            AND ce_ped.COR_EXTERNA = vped.COR_EXTERNA
+        LEFT JOIN CORES_EXTERNAS ce_fic ON 1=1         
+            AND ce_fic.COR_EXTERNA = pfd.COR_EXTERNA
+        LEFT JOIN crm_eventos cev ON 1=1            
+            AND cev.COD_PROPOSTA = vp.COD_PROPOSTA
             AND cev.status <> 'D'
             AND cev.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
         WHERE 1=1
