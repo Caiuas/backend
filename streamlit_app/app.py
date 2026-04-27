@@ -2561,11 +2561,12 @@ else:
         CROSS JOIN LATERAL jsonb_array_elements(wrp.payload->'entry') AS entry
         LEFT JOIN conversations c ON c.id = m.conversation_id
         LEFT JOIN users u ON u.id = c.assignee_id
-        WHERE (
-            entry->'changes'->0->'value'->'messages'->0->'referral' IS NOT NULL
-            OR
-            c.additional_attributes::text LIKE '%link_campanha%'
-        )
+        WHERE 1=1
+            AND (
+                entry->'changes'->0->'value'->'messages'->0->'referral' IS NOT NULL
+                OR
+                c.custom_attributes->>'link_campanha' IS NOT NULL
+            )
             AND c.created_at::date >= DATE '{data_inicial_query}'
             AND c.created_at::date <= DATE '{data_final_chat}'
         ORDER BY m.conversation_id, c.created_at
@@ -2768,12 +2769,19 @@ else:
             file_name=f"campanhas_chatwoot_{total_linhas_chatwoot}_linhas.xlsx",
             key="download_chatwoot_escalera"
         )
+        if 'andamento_atendimento' not in df_chatwoot_excel.columns:
+            df_chatwoot_excel['andamento_atendimento'] = ''
+        if 'termometro' not in df_chatwoot_excel.columns:
+            df_chatwoot_excel['termometro'] = ''
+            
         st.dataframe(
-            df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha']],
+            df_chatwoot_excel[['conversation_id','responsavel', 'created_at', 'link_campanha', 'andamento_atendimento', 'termometro']],
             hide_index=True,
             use_container_width=True,
             column_config={
-                "link_campanha": st.column_config.LinkColumn("Link Campanha", display_text="Abrir")
+                "link_campanha": st.column_config.LinkColumn("Link Campanha", display_text="Abrir"),
+                "andamento_atendimento": "Andamento Atendimento",
+                "termometro": "Termômetro"
             }
         )
 
