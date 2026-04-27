@@ -27,20 +27,19 @@ def validar_token(token):
         pass
     return None
 
-# --- LÓGICA DE PERSISTÊNCIA VIA URL (INSTANTÂNEA) ---
+def check_authentication():
+    # Tenta pegar o token da URL
+    url_token = st.query_params.get("token")
 
-# Tenta pegar o token da URL
-url_token = st.query_params.get("token")
-
-if url_token:
-    dados_usuario = validar_token(url_token)
-    if dados_usuario:
-        st.session_state.authenticated = True
-        st.session_state.user_name = dados_usuario.get("name", "Usuário")
-        st.session_state.user_email = dados_usuario.get("email", "")
-        st.session_state.token = url_token
-    else:
-        # Se o token na URL expirou, limpa a URL
-        st.query_params.clear()
-        st.session_state.authenticated = False
+    if url_token:
+        dados_usuario = validar_token(url_token)
+        if dados_usuario:
+            st.session_state.authenticated = True
+            st.session_state.user_name = dados_usuario.get("name", "Usuário")
+            st.session_state.user_email = dados_usuario.get("email", "")
+            st.session_state.token = url_token
+        else:
+            # Se o token na URL expirou, limpa a URL
+            st.query_params.clear()
+            st.session_state.authenticated = False
 

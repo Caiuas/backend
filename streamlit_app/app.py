@@ -59,6 +59,7 @@ st.set_page_config(page_title="Caiuás - Acesso Rápido",layout="wide")
 # Para liberar outros usuários, adicione o e-mail na lista correspondente.
 # ---------------------------------------------------------------------------
 # --- INTERFACE ---
+check_authentication()
 
 if not st.session_state.get("authenticated"):
     col_logo_l, col_logo_c, col_logo_r = st.columns([2, 1, 2])
