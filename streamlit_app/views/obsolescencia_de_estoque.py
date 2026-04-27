@@ -219,6 +219,8 @@ def render():
     """
     cur_oracle.execute(query)
     result_oracle = cur_oracle.fetchall()
+    cur_oracle.close()
+    conn_oracle.close()
     estoque = pd.DataFrame(result_oracle, columns=["Empresa", "Grupo Interno","cod_item", "quantidade_estoque", "Custo Contabil"], dtype=str)
     estoque["quantidade_estoque"] = estoque["quantidade_estoque"].astype(float)
     estoque["Custo Contabil"] = estoque["Custo Contabil"].astype(float)
