@@ -1669,8 +1669,8 @@ def encerrar_evento(id_evento):
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
         lista_permitidos = ['pablo.ti@caiuas.com.br']
-        if email not in lista_permitidos:
-            return jsonify({'status': 'error', 'message': 'Sem permissão para encerrar evento'}), 403
+        # if email not in lista_permitidos:
+        #     return jsonify({'status': 'error', 'message': 'Sem permissão para encerrar evento'}), 403
         cod_empresa = str(id_evento)[:2]
         if cod_empresa not in ['11', '33']:
             return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
