@@ -92,6 +92,7 @@ def render():
         WHERE v.status = 'E'
             AND v.cod_proposta <> 0
             AND v.cod_proposta IS NOT NULL
+            AND TRUNC(vp.EMISSAO) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
         ORDER BY pm.DESCRICAO_MODELO
     """
     cur.execute(query)
