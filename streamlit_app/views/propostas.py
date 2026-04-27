@@ -228,6 +228,7 @@ def render():
     WHERE 1=1
     AND vp.STATUS_PROPOSTA = 'A'          
     AND vp.COD_EMPRESA IN (11, 33, 111)
+    AND TRUNC(vp.EMISSAO) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
     AND vp.COD_PEDIDO IN (SELECT COD_PEDIDO FROM VEICULOS_PEDIDOS WHERE STATUS = 'E')
     """
     
@@ -286,6 +287,7 @@ def render():
         and nvl(vp.internet,'N')  <> 'I'
         and nvl(vp.internet,'N')  <> 'F'
         and nvl(vp.tipo_montada,'F')  = 'F'
+        AND TRUNC(vp.EMISSAO) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
     """
     cur.execute(query)
     result = cur.fetchall()
@@ -339,6 +341,7 @@ def render():
             AND ev.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
         WHERE 1=1
             AND vp.STATUS_PROPOSTA = 'A'
+            AND TRUNC(vp.EMISSAO) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
             AND vp.COD_EMPRESA IN (11,33)
             AND vp.VENDEDOR IN (
                 SELECT a.nome
@@ -409,6 +412,7 @@ def render():
         WHERE 1=1
             AND vp.STATUS_PROPOSTA = 'A'
             AND vp.INTERNET = 'F'
+            AND TRUNC(vp.EMISSAO) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
     """
     cur.execute(query)
     result = cur.fetchall()
