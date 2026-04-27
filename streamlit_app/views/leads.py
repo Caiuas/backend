@@ -31,6 +31,7 @@ def render():
     SELECT 
         ce.COD_EMPRESA, 
         ce.COD_EVENTO,
+        to_char(ce.cod_proposta) as cod_proposta,
         eu2.NOME_COMPLETO quem_criou,
         eu.NOME_COMPLETO resp_atual,
         case
@@ -72,7 +73,7 @@ def render():
       AND ca_resp.TIPO_ACAO = 12
       AND ca_resp.OBSERVACAO LIKE 'Agendamento marcado%'
     ) resp_prim_agendamento,
-        to_date(cev.DATA_CRIACAO ) data_visita,
+        to_date(ce.data_visita ) data_visita,
         ce.COD_EMPRESA_ANTERIOR, 
         ce.COD_EVENTO_ANTERIOR
     FROM CRM_EVENTOS ce
