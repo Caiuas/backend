@@ -77,7 +77,11 @@ EMAILS_HAMADA = [
 EMAILS_CHAT = [
     "pablo.ti@caiuas.com.br",
     "cristiane.aguilar@caiuas.com.br",
-    "marcelotcf@caiuas.com.br",
+    "marcelotcf@caiuas.com.br"
+]
+
+EMAILS_ESCALERA = [
+    "pablo.ti@caiuas.com.br",
     "rafael@escaleraconsultoria.com.br"
 ]
 
@@ -2527,6 +2531,8 @@ else:
         st.title("Leads Escalera")
         data_inicial_chat = st.sidebar.date_input("Data Inicial", datetime.now().date(), key="escalera_data_inicial")
         data_final_chat = st.sidebar.date_input("Data Final", datetime.now().date(), key="escalera_data_final")
+        
+        data_inicial_query = data_inicial_chat - timedelta(days=7)
 
         query_chatwoot = f"""
         SELECT DISTINCT ON (m.conversation_id)
@@ -2553,7 +2559,7 @@ else:
             OR
             c.additional_attributes::text LIKE '%link_campanha%'
         )
-            AND c.created_at::date >= DATE '{data_inicial_chat}'
+            AND c.created_at::date >= DATE '{data_inicial_query}'
             AND c.created_at::date <= DATE '{data_final_chat}'
         ORDER BY m.conversation_id, c.created_at
         """
@@ -2566,6 +2572,20 @@ else:
         cur_chatwoot.close()
         conn_chatwoot.close()
 
+        df_chatwoot_full = df_chatwoot.copy()
+        
+        if not df_chatwoot_full.empty:
+            df_chatwoot_full['created_at_dt'] = pd.to_datetime(df_chatwoot_full['created_at'], errors='coerce')
+            df_chatwoot_full['date_only'] = df_chatwoot_full['created_at_dt'].dt.date
+            
+            mask_current = (df_chatwoot_full['date_only'] >= data_inicial_chat) & (df_chatwoot_full['date_only'] <= data_final_chat)
+            mask_past = (df_chatwoot_full['date_only'] >= (data_inicial_chat - timedelta(days=7))) & (df_chatwoot_full['date_only'] <= (data_final_chat - timedelta(days=7)))
+            
+            df_chatwoot = df_chatwoot_full[mask_current].copy()
+            df_past = df_chatwoot_full[mask_past].copy()
+        else:
+            df_past = pd.DataFrame()
+
         df_chatwoot = df_chatwoot.fillna('')
         df_chatwoot = df_chatwoot.replace('None', '')
         df_chatwoot['link_chat'] = df_chatwoot.apply(
@@ -2575,18 +2595,76 @@ else:
             axis=1
         )
 
-        st.subheader("Chats por responsável")
-        if df_chatwoot.empty or df_chatwoot['responsavel'].str.strip().eq('').all():
-            st.info("Nenhum dado encontrado para o período.")
-        else:
-            pivot_vendedor = pd.pivot_table(df_chatwoot, index='responsavel', values='conversation_id', aggfunc='count').reset_index().rename(columns={'conversation_id': 'total_chats'})
-           
-            total_row_chats = pd.DataFrame({'responsavel': ['Total'], 'total_chats': [pivot_vendedor['total_chats'].sum()]})
-            pivot_vendedor_total = pd.concat([pivot_vendedor, total_row_chats], ignore_index=True)
-            styled_chats = pivot_vendedor_total.style.apply(
-                lambda x: ['font-weight: bold' if x.name == len(pivot_vendedor_total) - 1 else '' for _ in x], axis=1
-            )
-            st.dataframe(styled_chats, hide_index=True, use_container_width=True)
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.subheader("Chats por responsável")
+            if df_chatwoot.empty or df_chatwoot['responsavel'].str.strip().eq('').all():
+                st.info("Nenhum dado encontrado para o período.")
+            else:
+                pivot_vendedor = pd.pivot_table(df_chatwoot, index='responsavel', values='conversation_id', aggfunc='count').reset_index().rename(columns={'conversation_id': 'total_chats'})
+               
+                total_row_chats = pd.DataFrame({'responsavel': ['Total'], 'total_chats': [pivot_vendedor['total_chats'].sum()]})
+                pivot_vendedor_total = pd.concat([pivot_vendedor, total_row_chats], ignore_index=True)
+                styled_chats = pivot_vendedor_total.style.apply(
+                    lambda x: ['font-weight: bold' if x.name == len(pivot_vendedor_total) - 1 else '' for _ in x], axis=1
+                )
+                st.dataframe(styled_chats, hide_index=True, use_container_width=True)
+
+        with col2:
+            st.subheader("Evolução de Eventos Criados")
+            
+            if data_inicial_chat == data_final_chat:
+                lbl_atual = data_inicial_chat.strftime('%d/%m/%Y')
+                lbl_passada = (data_inicial_chat - timedelta(days=7)).strftime('%d/%m/%Y')
+            else:
+                lbl_atual = f"Atual ({data_inicial_chat.strftime('%d/%m')} a {data_final_chat.strftime('%d/%m')})"
+                data_ini_passada = data_inicial_chat - timedelta(days=7)
+                data_fim_passada = data_final_chat - timedelta(days=7)
+                lbl_passada = f"Semana Passada ({data_ini_passada.strftime('%d/%m')} a {data_fim_passada.strftime('%d/%m')})"
+            
+            chart_data = []
+            if not df_chatwoot.empty:
+                curr_grp = df_chatwoot.groupby('date_only').size().reset_index(name='Qtd')
+                curr_grp['Período'] = lbl_atual
+                curr_grp['Data Alinhada'] = pd.to_datetime(curr_grp['date_only'])
+                chart_data.append(curr_grp)
+            
+            if not df_past.empty:
+                past_grp = df_past.groupby('date_only').size().reset_index(name='Qtd')
+                past_grp['Período'] = lbl_passada
+                aligned = pd.to_datetime(past_grp['date_only']) + pd.Timedelta(days=7)
+                past_grp['Data Alinhada'] = aligned
+                chart_data.append(past_grp)
+            
+            if chart_data:
+                df_chart = pd.concat(chart_data, ignore_index=True)
+                df_chart = df_chart.sort_values('Data Alinhada')
+                fig = px.line(
+                    df_chart, 
+                    x='Data Alinhada', 
+                    y='Qtd', 
+                    color='Período', 
+                    markers=True,
+                    color_discrete_sequence=['#e63946', '#a8dadc'] # Vermelho e Azul claro
+                )
+                fig.update_layout(
+                    xaxis_title="Dia", 
+                    yaxis_title="Quantidade de Eventos", 
+                    legend_title="", 
+                    margin=dict(t=20, b=40),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.2,
+                        xanchor="center",
+                        x=0.5
+                    )
+                )
+                fig.update_xaxes(tickformat="%d/%m")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Nenhum dado para exibir o gráfico no período.")
 
         df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','source_id','link_crm','link_chat']].copy()
         df_chatwoot_excel['evento'] = df_chatwoot_excel['link_crm'].apply(lambda x: x.split('?')[0] if x.strip() != '' else '')
@@ -2609,23 +2687,73 @@ else:
                 AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
             WHERE concat(ce.COD_EMPRESA, ce.COD_EVENTO) IN ({in_clause})
             """
-            conn_oracle_chat, cur_oracle_chat = oracle()
-            cur_oracle_chat.execute(query_oracle_eventos)
-            result_oracle_chat = cur_oracle_chat.fetchall()
-            columns_oracle_chat = [desc[0].lower() for desc in cur_oracle_chat.description]
-            cur_oracle_chat.close()
-            conn_oracle_chat.close()
-            df_oracle_eventos = pd.DataFrame(result_oracle_chat, columns=columns_oracle_chat, dtype=str).fillna('')
-            df_chatwoot_excel = df_chatwoot_excel.merge(df_oracle_eventos[['evento', 'andamento_atendimento', 'termometro','cod_proposta']], on='evento', how='left')
-            df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].fillna('')
-            df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('').map(
-                lambda v: {'1': 'Frio', '2': 'Morno', '3': 'Quente'}.get(str(v).strip(), 'Não classificado')
-            )
+            try:
+                conn_oracle_chat, cur_oracle_chat = oracle()
+                cur_oracle_chat.execute(query_oracle_eventos)
+                result_oracle_chat = cur_oracle_chat.fetchall()
+                columns_oracle_chat = [desc[0].lower() for desc in cur_oracle_chat.description]
+                cur_oracle_chat.close()
+                conn_oracle_chat.close()
+                df_oracle_eventos = pd.DataFrame(result_oracle_chat, columns=columns_oracle_chat, dtype=str).fillna('')
+                df_chatwoot_excel = df_chatwoot_excel.merge(df_oracle_eventos[['evento', 'andamento_atendimento', 'termometro','cod_proposta']], on='evento', how='left')
+                df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].fillna('')
+                df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('').map(
+                    lambda v: {'1': 'Frio', '2': 'Morno', '3': 'Quente'}.get(str(v).strip(), 'Não classificado')
+                )
+            except Exception as e:
+                st.error("Ops falha ao se comunicar com o NBS, tente aperta R no seu teclado ou recarregar a página")
 
         st.subheader("Campanhas (Chatwoot)")
         total_linhas_chatwoot = len(df_chatwoot)
         excel_buffer_chatwoot = io.BytesIO()
-        df_chatwoot_excel.to_excel(excel_buffer_chatwoot, index=False, sheet_name="Chatwoot")
+        df_export = df_chatwoot_excel.drop(columns=['link_crm', 'link_chat'], errors='ignore').copy()
+        
+        if 'created_at' in df_export.columns:
+            df_export['created_at'] = pd.to_datetime(df_export['created_at'], errors='coerce').dt.tz_localize(None)
+
+        with pd.ExcelWriter(excel_buffer_chatwoot, engine='xlsxwriter') as writer:
+            df_export.to_excel(writer, index=False, sheet_name="Chatwoot", startrow=1)
+            workbook = writer.book
+            worksheet = writer.sheets["Chatwoot"]
+
+            worksheet.set_row(0, 50)
+            try:
+                worksheet.insert_image('A1', 'logo.png', {'x_scale': 0.6, 'y_scale': 0.6, 'x_offset': 5, 'y_offset': 5})
+            except Exception:
+                pass
+
+            title_format = workbook.add_format({
+                'bold': True,
+                'font_size': 32,
+                'align': 'center',
+                'valign': 'vcenter',
+                'font_name': 'Calibri'
+            })
+            
+            max_col_index = len(df_export.columns) - 1
+            if max_col_index >= 1:
+                worksheet.merge_range(0, 1, 0, max_col_index, 'Leads Caiuás', title_format)
+            else:
+                worksheet.write(0, 1, 'Leads Caiuás', title_format)
+
+            datetime_format = workbook.add_format({'num_format': 'dd/mm/yyyy hh:mm'})
+
+            for i, col in enumerate(df_export.columns):
+                max_len = max(df_export[col].astype(str).map(len).max(), len(str(col))) + 2
+                if col == 'created_at':
+                    worksheet.set_column(i, i, max(max_len, 18), datetime_format)
+                else:
+                    worksheet.set_column(i, i, max_len)
+
+            if not df_export.empty:
+                max_row, max_col = df_export.shape
+                column_settings = [{'header': str(col)} for col in df_export.columns]
+                worksheet.add_table(1, 0, max_row + 1, max_col - 1, {
+                    'columns': column_settings,
+                    'name': 'Atendimentos',
+                    'style': 'Table Style Light 1'
+                })
+
         excel_buffer_chatwoot.seek(0)
         st.download_button(
             label=f"📥 Download da tabela Chatwoot ({total_linhas_chatwoot} linhas)",
