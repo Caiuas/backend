@@ -77,7 +77,8 @@ EMAILS_HAMADA = [
 EMAILS_CHAT = [
     "pablo.ti@caiuas.com.br",
     "cristiane.aguilar@caiuas.com.br",
-    "marcelotcf@caiuas.com.br"
+    "marcelotcf@caiuas.com.br",
+    "rafael@escaleraconsultoria.com.br"
 ]
 
 EMAILS_ACOMPANHAMENTO_CHAT = [
