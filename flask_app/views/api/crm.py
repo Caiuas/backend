@@ -2437,7 +2437,7 @@ def get_param_create_crm_eventos():
             FROM PRODUTOS_MODELOS pm
             WHERE 1=1
                 --AND pm.ATIVO = 'S'
---                and pm.internet = 'S'
+                --and pm.internet = 'S'
                 and pm.cod_produto = '110589'
             order by pm.descricao_modelo
         """
@@ -4890,7 +4890,7 @@ def muda_data_criacao_evento(id_evento):
         if not data_criacao:
             return jsonify({'status': 'error', 'message': 'data_criacao é obrigatória'}), 400
 
-        emails_autorizados = {'pablo.ti@caiuas.com.br','mirela.novaga@caiuas.com.br','Isadora.fraga@caiuas.com.br'}
+        emails_autorizados = {'pablo.ti@caiuas.com.br'}
         if email not in emails_autorizados:
             return jsonify({'status': 'error', 'message': 'Você não tem permissão para alterar a data de criação do evento'}), 403
 
