@@ -17,9 +17,11 @@ import pytz
 import plotly.graph_objects as go
 
 EMAILS_ACOMPANHAMENTO_DIARIO = [
+    "welder@caiuas.com.br",
+    "admilson@caiuas.com.br",
+    "cristiane.aguilar@caiuas.com.br",
     "pablo.ti@caiuas.com.br",
-    "marcelotcf@caiuas.com.br",
-    "duda@pantys.com.br"
+    "marcelotcf@caiuas.com.br"
 ]
 
 
@@ -38,6 +40,264 @@ def render():
         conn_oracle, cur_oracle = oracle()
         conn_chat, cur_chat = chatwoot()
         
+        # Acompanhamento de eventos Por responsável
+        query_responsaveis = f"""
+        SELECT
+            NVL(upper(eu.nome_completo), 'SEM RESPONSÁVEL') responsavel,
+            COUNT(CASE 
+                WHEN TRUNC(NVL(ce.data_novo_contato, ce.data_evento)) < TRUNC(SYSDATE) 
+                THEN 1 
+            END) AS ATRASADO,
+            COUNT(CASE 
+                WHEN TRUNC(NVL(ce.data_novo_contato, ce.data_evento)) = TRUNC(SYSDATE) 
+                THEN 1 
+            END) AS HOJE,
+            COUNT(CASE 
+                WHEN TRUNC(NVL(ce.data_novo_contato, ce.data_evento)) > TRUNC(SYSDATE) 
+                THEN 1 
+            END) AS FUTURO
+        FROM
+            CRM_EVENTOS ce
+        LEFT JOIN EMPRESAS_USUARIOS eu ON
+            eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+        LEFT JOIN CRM_ANDAMENTO ca ON
+            ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+        LEFT JOIN MIDIA m ON
+            m.COD_MIDIA = ce.COD_MIDIA 
+        LEFT JOIN clientes c ON
+            ce.COD_CLIENTE = c.COD_CLIENTE
+        LEFT JOIN CRM_EVENTOS_TIPO cet ON 
+            cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+        LEFT JOIN CRM_DESCARTES cd ON 
+            cd.COD_DESCARTE = ce.COD_DESCARTE
+        LEFT JOIN CRM_MOTIVO_PERDAS cmp ON 
+            cmp.cod_motivo_perda = ce.cod_motivo_perda
+        LEFT JOIN produtos_modelos pm ON 
+            pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+        LEFT JOIN caiuas_crm_eventos_descartados ced ON 
+            ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
+        WHERE
+            ce.cod_tipo_evento IN (
+                '829','831','795','793','797','799','819','821','785','807','815','817','810','812'
+            )
+            AND ce.status IN ('P')
+        GROUP BY
+            eu.nome_completo
+        ORDER BY 3 desc
+        """
+        cur_oracle.execute(query_responsaveis)
+        dados_responsaveis = cur_oracle.fetchall()
+        df_responsaveis = pd.DataFrame(dados_responsaveis, columns=[desc[0] for desc in cur_oracle.description])
+        
+        st.subheader("Acompanhamento de eventos Por responsável")
+        st.dataframe(df_responsaveis, hide_index=True)
+        
+        # Acompanhamento de eventos Por Empresa
+        query_empresas = f"""
+        SELECT
+            CASE 
+                WHEN eu.cod_empresa = 11 THEN 'Sorocaba'
+                WHEN eu.cod_empresa = 33 THEN 'Indaiatuba'
+                WHEN eu.cod_empresa = 111 THEN 'LLA'
+                ELSE NVL(to_char(eu.cod_empresa), 'SEM EMPRESA')
+            END AS empresa,
+            COUNT(CASE 
+                WHEN TRUNC(NVL(ce.data_novo_contato, ce.data_evento)) < TRUNC(SYSDATE) 
+                THEN 1 
+            END) AS ATRASADO,
+            COUNT(CASE 
+                WHEN TRUNC(NVL(ce.data_novo_contato, ce.data_evento)) = TRUNC(SYSDATE) 
+                THEN 1 
+            END) AS HOJE,
+            COUNT(CASE 
+                WHEN TRUNC(NVL(ce.data_novo_contato, ce.data_evento)) > TRUNC(SYSDATE) 
+                THEN 1 
+            END) AS FUTURO
+        FROM
+            CRM_EVENTOS ce
+        LEFT JOIN EMPRESAS_USUARIOS eu ON
+            eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+        LEFT JOIN CRM_ANDAMENTO ca ON
+            ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+        LEFT JOIN MIDIA m ON
+            m.COD_MIDIA = ce.COD_MIDIA 
+        LEFT JOIN clientes c ON
+            ce.COD_CLIENTE = c.COD_CLIENTE
+        LEFT JOIN CRM_EVENTOS_TIPO cet ON 
+            cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+        LEFT JOIN CRM_DESCARTES cd ON 
+            cd.COD_DESCARTE = ce.COD_DESCARTE
+        LEFT JOIN CRM_MOTIVO_PERDAS cmp ON 
+            cmp.cod_motivo_perda = ce.cod_motivo_perda
+        LEFT JOIN produtos_modelos pm ON 
+            pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+        LEFT JOIN caiuas_crm_eventos_descartados ced ON 
+            ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
+        WHERE
+            ce.cod_tipo_evento IN (
+                '829','831','795','793','797','799','819','821','785','807','815','817','810','812'
+            )
+            AND ce.status IN ('P')
+        GROUP BY
+            eu.cod_empresa
+        ORDER BY 3 desc
+        """
+        cur_oracle.execute(query_empresas)
+        dados_empresas = cur_oracle.fetchall()
+        df_empresas = pd.DataFrame(dados_empresas, columns=[desc[0] for desc in cur_oracle.description])
+        
+        st.subheader("Acompanhamento de eventos Por Empresa")
+        st.dataframe(df_empresas, hide_index=True)
+        
+        # Detalhamento de Eventos
+        query_lista_eventos = f"""
+        SELECT 
+            concat('https://app.caiuas.com.br/crm/eventos/',concat(ce.cod_empresa, ce.COD_EVENTO)) link_evento,
+            concat(ce.cod_empresa, ce.COD_EVENTO) evento,
+            ce.NOME_CLIENTE_AVULSO ,
+            TO_CHAR(
+                CASE
+                    WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+                    ELSE ce.data_novo_contato
+                END, 'YYYY-MM-DD'
+            ) AS data_contato,
+            ce.STATUS,
+            cet.DESC_TIPO_EVENTO,
+            eu.NOME_COMPLETO responsavel,
+            ca.ANDAMENTO andamento_atendimento,
+            ce.TERMOMETRO ,
+            ce.COD_PROPOSTA
+        FROM crm_eventos ce
+        LEFT JOIN empresas_usuarios eu ON 1=1
+            AND eu.nome = ce.RESPONSAVEL_PELO_EVENTO 
+        LEFT JOIN CRM_ANDAMENTO ca ON 1=1
+            AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO 
+        LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+            AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO 
+        LEFT JOIN clientes c ON 1=1
+            AND c.COD_CLIENTE = ce.COD_CLIENTE 
+        WHERE 1=1
+            AND ce.cod_tipo_evento IN (
+            '829','831','795','793','797','799','819','821','785','807','815','817','810','812'
+            )
+            AND ce.status IN ('P')
+        ORDER BY 4
+        """
+        cur_oracle.execute(query_lista_eventos)
+        dados_lista_eventos = cur_oracle.fetchall()
+        df_lista_eventos = pd.DataFrame(dados_lista_eventos, columns=[desc[0] for desc in cur_oracle.description])
+        df_lista_eventos.columns = df_lista_eventos.columns.str.lower()
+        
+        df_lista_eventos['responsavel'] = df_lista_eventos['responsavel'].fillna('SEM RESPONSÁVEL')
+        
+        st.subheader("Lista de Eventos")
+        
+        opcoes_resp_evento = ['Todos'] + sorted(df_lista_eventos['responsavel'].unique().tolist())
+        filtro_resp_evento = st.selectbox("Filtrar por responsável", opcoes_resp_evento, key="ad_filtro_resp_evento")
+        
+        df_lista_eventos_filtrado = df_lista_eventos.copy()
+        if filtro_resp_evento != 'Todos':
+            df_lista_eventos_filtrado = df_lista_eventos_filtrado[df_lista_eventos_filtrado['responsavel'] == filtro_resp_evento]
+        cols = [c for c in df_lista_eventos_filtrado.columns if c not in ['link_evento', 'status']] + ['link_evento']
+        
+        st.caption(f"{len(df_lista_eventos_filtrado)} evento(s)")
+        st.dataframe(
+            df_lista_eventos_filtrado[cols],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "link_evento": st.column_config.LinkColumn("Link", display_text="Abrir Evento")
+            }
+        )
+        
+        # Tabela detalhada
+        try:
+            query_detalhe = """
+            SELECT
+                c.id AS conversation_id,
+                c.account_id,
+                COALESCE(u.name, 'Sem Responsável (Fila)') AS responsavel,
+                c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo' AS data_inicio,
+                EXTRACT(EPOCH FROM (NOW() - c.created_at AT TIME ZONE 'UTC')) / 60 AS minutos_aberto,
+                c.status,
+                (
+                    SELECT m.message_type
+                    FROM messages m
+                    WHERE m.conversation_id = c.id
+                    ORDER BY m.created_at DESC
+                    LIMIT 1
+                ) AS ultimo_tipo_mensagem
+            FROM conversations c
+            LEFT JOIN users u ON c.assignee_id = u.id
+            WHERE c.status IN (0, 2, 3)
+            ORDER BY c.created_at ASC
+            """
+            conn_det, cur_det = chatwoot()
+            cur_det.execute(query_detalhe)
+            result_det = cur_det.fetchall()
+            columns_det = [desc[0] for desc in cur_det.description]
+            df_det = pd.DataFrame(result_det, columns=columns_det)
+            cur_det.close()
+            conn_det.close()
+        
+            df_det['link_chat'] = df_det.apply(
+                lambda row: f"https://chat.caiuas.com.br/app/accounts/{row['account_id']}/conversations/{row['conversation_id']}"
+                if str(row.get('account_id', '')).strip() != ''
+                else '',
+                axis=1
+            )
+        
+            def fmt_tempo(minutos):
+                if minutos is None:
+                    return ''
+                h = int(minutos) // 60
+                m = int(minutos) % 60
+                return f"{h}h {m:02d}min"
+        
+            df_det['tempo_atendimento'] = df_det['minutos_aberto'].apply(fmt_tempo)
+        
+            status_map = {0: 'Aberto', 2: 'Pendente', 3: 'Adiado'}
+            df_det['status_label'] = df_det['status'].map(status_map).fillna(df_det['status'].astype(str))
+        
+            # 1 = outgoing (agente), 0 = incoming (cliente)
+            df_det['respondida'] = df_det['ultimo_tipo_mensagem'].apply(
+                lambda v: '🟢' if v == 1 else '🔴'
+            )
+        
+            st.subheader("Detalhamento das conversas")
+            fcol_det1, fcol_det2 = st.columns(2)
+            with fcol_det1:
+                opcoes_resp_det = ['Todos'] + sorted(df_det['responsavel'].unique().tolist())
+                filtro_resp_det = st.selectbox("Filtrar por responsável", opcoes_resp_det, key="ad_filtro_resp_chat")
+            with fcol_det2:
+                filtro_status_det = st.selectbox("Filtrar por status", ['Todos', 'Aberto', 'Pendente', 'Adiado'], key="ad_filtro_status_chat")
+        
+            df_det_filtrado = df_det.copy()
+            if filtro_resp_det != 'Todos':
+                df_det_filtrado = df_det_filtrado[df_det_filtrado['responsavel'] == filtro_resp_det]
+            if filtro_status_det != 'Todos':
+                df_det_filtrado = df_det_filtrado[df_det_filtrado['status_label'] == filtro_status_det]
+        
+            st.caption(f"{len(df_det_filtrado)} conversa(s)")
+            st.dataframe(
+                df_det_filtrado[['respondida', 'responsavel', 'status_label', 'data_inicio', 'tempo_atendimento', 'link_chat']].rename(columns={
+                    'respondida': 'Resp.',
+                    'responsavel': 'Responsável',
+                    'status_label': 'Status',
+                    'data_inicio': 'Início',
+                    'tempo_atendimento': 'Tempo Aberto',
+                    'link_chat': 'Link',
+                }),
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Link": st.column_config.LinkColumn("Link", display_text="Abrir"),
+                    "Início": st.column_config.DatetimeColumn("Início", format="DD/MM/YYYY HH:mm"),
+                }
+            )
+        except Exception as e:
+            st.error(f"Erro ao carregar detalhamento: {e}")
+            
         # Conversões Marketing - CHAT
         query = f"""
             SELECT DISTINCT ON (m.conversation_id)
