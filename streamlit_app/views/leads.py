@@ -45,6 +45,7 @@ def render():
         m.DESCRICAO midia,
         ca.ANDAMENTO, 
         cd.DESCRICAO_DESCARTE, 
+        cmp.desc_motivo as motivo_contato_perdido,
         cct.tag, 
         ce.OBS_MEMO,
         to_date(ce.data_criacao) data_criacao,
@@ -105,7 +106,7 @@ def render():
     	AND cev.COD_EVENTO = ce.COD_EVENTO_ANTERIOR 
     	AND cev.COD_EMPRESA = ce.COD_EMPRESA_ANTERIOR 
     WHERE 1=1
-        AND ce.cod_tipo_evento in (829,819,821,815,817,831)
+        AND ce.cod_tipo_evento in ('829','831','795','793','797','799','819','821','785','807','815','817','810','812')
         AND trunc(ce.DATA_CRIACAO) >= TO_DATE('{data_inicial_hamada}', 'YYYY-MM-DD')
         AND trunc(ce.DATA_CRIACAO) <= TO_DATE('{data_final_hamada}', 'YYYY-MM-DD')
         
@@ -180,6 +181,46 @@ def render():
     cur_chatwoot.close()
     conn_chatwoot.close()
     
+    total_eventos = len(df)
+    total_agendados = len(df[df['DATA_AGENDADA'] != ''])
+    total_visitas = len(df[df['DATA_VISITA'] != ''])
+    total_pre_atendimento = len(df[df['RESP_ATUAL'].isin(['Stefany Cristine de Oliveira Araujo','EVELLYN KAYLANY SILVA','FRANCIELY MARCIAL DORNELAS'])])
+    total_propostas = len(df[df['COD_PROPOSTA'] != ''])
+
+    st.subheader("Indicadores Gerais")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Total de Eventos", total_eventos)
+    col2.metric("Total de Eventos Agendados", total_agendados)
+    col3.metric("Visitas", total_visitas)
+    col4.metric("Pré-atendimento", total_pre_atendimento)
+    col5.metric("Propostas", total_propostas)
+    st.divider()
+
+    st.subheader("Análise de Descartes e Contato Perdido")
+    fcol1_desc, fcol2_desc = st.columns(2)
+    
+    with fcol1_desc:
+        st.markdown("**Descarte**")
+        df_descarte = df[df['DESCRICAO_DESCARTE'] != '']
+        if not df_descarte.empty:
+            pivot_descarte = pd.pivot_table(df_descarte, index='DESCRICAO_DESCARTE', values='COD_EVENTO', aggfunc='count').reset_index()
+            pivot_descarte.columns = ['Motivo de descarte', 'Quantidade']
+            pivot_descarte = pivot_descarte.sort_values(by='Quantidade', ascending=False)
+            st.dataframe(pivot_descarte, hide_index=True, use_container_width=True)
+        else:
+            st.info("Nenhum descarte encontrado no período.")
+            
+    with fcol2_desc:
+        st.markdown("**Contato Perdido**")
+        df_contato_perdido = df[df['MOTIVO_CONTATO_PERDIDO'] != '']
+        if not df_contato_perdido.empty:
+            pivot_contato_perdido = pd.pivot_table(df_contato_perdido, index='MOTIVO_CONTATO_PERDIDO', values='COD_EVENTO', aggfunc='count').reset_index()
+            pivot_contato_perdido.columns = ['Motivo de contato perdido', 'Quantidade']
+            pivot_contato_perdido = pivot_contato_perdido.sort_values(by='Quantidade', ascending=False)
+            st.dataframe(pivot_contato_perdido, hide_index=True, use_container_width=True)
+        else:
+            st.info("Nenhum motivo de contato perdido encontrado.")
+
     st.subheader("Eventos por responsável")
     df_eventos_filtrado = df[df['QUEM_CRIOU'].isin(['Stefany Cristine de Oliveira Araujo','EVELLYN KAYLANY SILVA','FRANCIELY MARCIAL DORNELAS'])]
     if df_eventos_filtrado.empty:
