@@ -254,9 +254,10 @@ def render():
                 for cell in row:
                     cell.number_format = 'DD/MM/YYYY'
         from openpyxl.worksheet.table import Table, TableStyleInfo
+        from openpyxl.utils import get_column_letter
         tab = Table(
             displayName="TabelaHamada",
-            ref=f"A1:{chr(64 + len(df.columns))}{len(df) + 1}"
+            ref=f"A1:{get_column_letter(len(df.columns))}{len(df) + 1}"
         )
         tab.tableStyleInfo = TableStyleInfo(
             name="TableStyleMedium9",
@@ -285,7 +286,7 @@ def render():
     # )
     # st.bar_chart(contagem_tipo.set_index('Tipo de Evento')['Quantidade'])
     
-    st.subheader("Filtrar tabela de eventos")
+    st.subheader("Detalhamento de eventos")
     fcol1, fcol2, fcol3, fcol4 = st.columns(4)
     with fcol1:
         opcoes_empresa = sorted([v for v in df['COD_EMPRESA'].unique() if v != ''])
