@@ -222,6 +222,7 @@ def render():
             st.info("Nenhum motivo de contato perdido encontrado.")
 
     st.subheader("Eventos por responsável")
+    st.caption("Criados por Stefany, Evellyn ou Franciely")
     df_eventos_filtrado = df[df['QUEM_CRIOU'].isin(['Stefany Cristine de Oliveira Araujo','EVELLYN KAYLANY SILVA','FRANCIELY MARCIAL DORNELAS'])]
     if df_eventos_filtrado.empty:
         st.info("Nenhum dado encontrado para o período.")
