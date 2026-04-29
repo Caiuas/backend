@@ -53,6 +53,13 @@ from views import fechamento_mes
 
 # 1. Configuração da página
 st.set_page_config(page_title="Caiuás - Acesso Rápido",layout="wide")
+
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
 # ---------------------------------------------------------------------------
 # 2. Controle de acesso por menu
 # pablo.ti@caiuas.com.br tem acesso a tudo automaticamente.
