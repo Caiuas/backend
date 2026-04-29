@@ -327,6 +327,12 @@ def render():
         Faturados=('IS_FATURADO', 'sum'),
     ).reset_index().rename(columns={'RESP_ATUAL': 'Responsável', 'EMPRESA': 'Empresa'})
 
+    # Adicionando a nova coluna "Percentual sucesso" com formatação em % e proteção contra divisão por zero
+    resumo_vend['Percentual sucesso'] = resumo_vend.apply(
+        lambda row: f"{(row['Faturados'] / row['Visitas'] * 100):.2f}%" if row['Visitas'] > 0 else "0.00%", 
+        axis=1
+    )
+
     resumo_vend = resumo_vend.sort_values('Leads', ascending=False)
 
     st.dataframe(resumo_vend, hide_index=True, use_container_width=True)
