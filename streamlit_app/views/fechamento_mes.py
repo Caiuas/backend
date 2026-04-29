@@ -10,7 +10,11 @@ EMAILS_FECHAMENTO_MES = [
     "cristiane.aguilar@caiuas.com.br"
 ]
 
-def get_dados_propostas(primeiro_dia, ultimo_dia):
+def get_dados_propostas(primeiro_dia, ultimo_dia, cod_empresa=None):
+    # Filtro de empresa na proposta usa a empresa da unidade (loja)
+    filtro_vp_empresa = f"AND vp.cod_empresa = '{cod_empresa}'" if cod_empresa else ""
+    filtro_a_empresa = f"AND a.COD_EMPRESA_vendedora = '{cod_empresa}'" if cod_empresa else ""
+    
     query_abertos = f"""
         SELECT 
             to_char(vp.COD_PROPOSTA) COD_PROPOSTA
@@ -24,6 +28,7 @@ def get_dados_propostas(primeiro_dia, ultimo_dia):
         WHERE 1=1
             AND vp.status_proposta = 'A'
             AND TRUNC(vp.EMISSAO) BETWEEN TO_DATE('{primeiro_dia}', 'YYYY-MM-DD') AND TO_DATE('{ultimo_dia}', 'YYYY-MM-DD')
+            {filtro_vp_empresa}
     """
     
     query_faturados = f"""
@@ -39,6 +44,7 @@ def get_dados_propostas(primeiro_dia, ultimo_dia):
            and a.cod_modelo   = pm.cod_modelo
            and a.data_venda >= TO_DATE('{primeiro_dia}', 'YYYY-MM-DD')
            and a.data_venda <= TO_DATE('{ultimo_dia}', 'YYYY-MM-DD')
+           {filtro_a_empresa}
          AND a.COD_EMPRESA_vendedora  in (                  
                           SELECT DISTINCT UE1.COD_EMPRESA   
            FROM CRUZAMENTO_USUARIO_EMPRESAS UE1             
@@ -65,6 +71,7 @@ def get_dados_propostas(primeiro_dia, ultimo_dia):
             to_char(vp.COD_PROPOSTA) COD_PROPOSTA
         FROM VEICULOS_PROPOSTAS vp 
         WHERE TRUNC(vp.EMISSAO) BETWEEN TO_DATE('{primeiro_dia}', 'YYYY-MM-DD') AND TO_DATE('{ultimo_dia}', 'YYYY-MM-DD')
+        {filtro_vp_empresa}
     """
 
     conn_oracle, cur_oracle = oracle()
@@ -109,7 +116,7 @@ def get_propostas_faturadas(primeiro_dia, ultimo_dia):
 def get_dados_mes(primeiro_dia, ultimo_dia):
     query = f"""
     SELECT 
-        ce.COD_EMPRESA, 
+        to_char(ce.COD_EMPRESA) COD_EMPRESA, 
         ce.COD_EVENTO,
         to_char(ce.cod_proposta) as cod_proposta,
         eu2.NOME_COMPLETO quem_criou,
@@ -131,61 +138,17 @@ def get_dados_mes(primeiro_dia, ultimo_dia):
         ce.OBS_MEMO,
         to_date(ce.data_criacao) data_criacao,
         to_date(ce.data_encerramento) data_encerramento,
-        (
-        	SELECT to_DATE(max(ca.DATA)) FROM CRM_ACOES ca 
-    			WHERE 1=1
-        	AND ca.COD_EVENTO = ce.COD_EVENTO 
-        	AND ca.cod_empresa = ce.cod_empresa
-        	AND observacao LIKE ('Responsável pelo evento alterado para%')
-        	) data_transferencia,
         to_date(ce.DATA_AGENDADA ) data_agendada,
-        (
-    SELECT MAX(ca_resp.RESPONSAVEL) KEEP (DENSE_RANK LAST ORDER BY ca_resp.DATA)
-    FROM CRM_ACOES ca_resp
-    WHERE ca_resp.COD_EVENTO = ce.COD_EVENTO
-      AND ca_resp.COD_EMPRESA = ce.COD_EMPRESA
-      AND ca_resp.TIPO_ACAO = 12
-      AND ca_resp.OBSERVACAO LIKE 'Agendamento marcado%'
-    ) responsavel_agendamento,
-    (
-    SELECT MIN(ca_resp.RESPONSAVEL) KEEP (DENSE_RANK LAST ORDER BY ca_resp.DATA desc)
-    FROM CRM_ACOES ca_resp
-    WHERE ca_resp.COD_EVENTO = ce.COD_EVENTO
-      AND ca_resp.COD_EMPRESA = ce.COD_EMPRESA
-      AND ca_resp.TIPO_ACAO = 12
-      AND ca_resp.OBSERVACAO LIKE 'Agendamento marcado%'
-    ) resp_prim_agendamento,
-        to_date(ce.data_visita ) data_visita,
-        ce.COD_EMPRESA_ANTERIOR, 
-        ce.COD_EVENTO_ANTERIOR
+        to_date(ce.data_visita ) data_visita
     FROM CRM_EVENTOS ce
-    LEFT JOIN EMPRESAS_USUARIOS eu ON
-        1 = 1
-        AND eu.nome = ce.RESPONSAVEL_PELO_EVENTO
-    LEFT JOIN empresas_usuarios eu2 ON 1=1
-    	AND eu2.nome = ce.criou_o_evento
-    LEFT JOIN CRM_ANDAMENTO ca ON
-        1 = 1
-        AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
-    LEFT JOIN MIDIA m ON
-        1=1
-        AND m.COD_MIDIA = ce.COD_MIDIA 
-    LEFT JOIN clientes c ON
-        1 = 1
-        AND ce.COD_CLIENTE = c.COD_CLIENTE
-    LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
-        AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
-    LEFT JOIN CRM_DESCARTES cd on 1=1
-        and cd.COD_DESCARTE = ce.COD_DESCARTE
-    LEFT JOIN CRM_MOTIVO_PERDAS cmp ON 1=1
-        AND cmp.cod_motivo_perda = ce.cod_motivo_perda
-    LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
-    LEFT JOIN caiuas_crm_tags cct ON 1=1
-        AND cct.cod_empresa = ce.COD_EMPRESA 
-        AND cct.cod_evento = ce.cod_evento
-    LEFT JOIN crm_eventos cev ON 1=1
-    	AND cev.COD_EVENTO = ce.COD_EVENTO_ANTERIOR 
-    	AND cev.COD_EMPRESA = ce.COD_EMPRESA_ANTERIOR 
+    LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+    LEFT JOIN empresas_usuarios eu2 ON eu2.nome = ce.criou_o_evento
+    LEFT JOIN CRM_ANDAMENTO ca ON ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+    LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
+    LEFT JOIN CRM_EVENTOS_TIPO cet ON cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+    LEFT JOIN CRM_DESCARTES cd on cd.COD_DESCARTE = ce.COD_DESCARTE
+    LEFT JOIN CRM_MOTIVO_PERDAS cmp ON cmp.cod_motivo_perda = ce.cod_motivo_perda
+    LEFT JOIN caiuas_crm_tags cct ON cct.cod_empresa = ce.COD_EMPRESA AND cct.cod_evento = ce.cod_evento
     WHERE 1=1
         AND ce.cod_tipo_evento in ('829','831','795','793','797','799','819','821','785','807','815','817','810','812')
         AND trunc(ce.DATA_CRIACAO) >= TO_DATE('{primeiro_dia}', 'YYYY-MM-DD')
@@ -202,139 +165,95 @@ def get_dados_mes(primeiro_dia, ultimo_dia):
     return df
 
 def get_arrow(val_ant, val_atual):
-    if val_atual > val_ant:
-        return "↑"
-    elif val_atual < val_ant:
-        return "↓"
-    else:
-        return "="
+    if val_atual > val_ant: return "↑"
+    elif val_atual < val_ant: return "↓"
+    return "="
 
 def render():
     st.title("Fechamento por Mês")
     
-    # Month/Year selectors
-    col_ano, col_mes = st.columns(2)
+    col_ano, col_mes, col_emp = st.columns(3)
     anos = [2023, 2024, 2025, 2026, 2027]
-    meses = {
-        1: 'Janeiro', 2: 'Fevereiro', 3: 'Março', 4: 'Abril', 
-        5: 'Maio', 6: 'Junho', 7: 'Julho', 8: 'Agosto', 
-        9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro'
-    }
+    meses = {1: 'Janeiro', 2: 'Fevereiro', 3: 'Março', 4: 'Abril', 5: 'Maio', 6: 'Junho', 
+             7: 'Julho', 8: 'Agosto', 9: 'Setembro', 10: 'Outubro', 11: 'Novembro', 12: 'Dezembro'}
     
     with col_ano:
         ano_selecionado = st.selectbox("Ano", anos, index=anos.index(datetime.now().year) if datetime.now().year in anos else len(anos)-1)
-    
     with col_mes:
-        mes_atual = datetime.now().month
-        mes_selecionado_nome = st.selectbox("Mês", list(meses.values()), index=mes_atual - 1)
+        mes_selecionado_nome = st.selectbox("Mês", list(meses.values()), index=datetime.now().month - 1)
         mes_selecionado = [k for k, v in meses.items() if v == mes_selecionado_nome][0]
-    
-    # Calculate initial and final date
-    primeiro_dia = datetime(ano_selecionado, mes_selecionado, 1).strftime('%Y-%m-%d')
-    ultimo_dia_mes = calendar.monthrange(ano_selecionado, mes_selecionado)[1]
-    ultimo_dia = datetime(ano_selecionado, mes_selecionado, ultimo_dia_mes).strftime('%Y-%m-%d')
-    
-    # Mês anterior
-    if mes_selecionado == 1:
-        mes_ant = 12
-        ano_ant = ano_selecionado - 1
-    else:
-        mes_ant = mes_selecionado - 1
-        ano_ant = ano_selecionado
+    with col_emp:
+        empresas_opcoes = ['Todas', 'Sorocaba', 'Indaiatuba', 'LLA']
+        empresa_selecionada = st.selectbox("Empresa", empresas_opcoes)
         
-    mes_ant_nome = meses[mes_ant]
-    primeiro_dia_ant = datetime(ano_ant, mes_ant, 1).strftime('%Y-%m-%d')
-    ultimo_dia_mes_ant = calendar.monthrange(ano_ant, mes_ant)[1]
-    ultimo_dia_ant = datetime(ano_ant, mes_ant, ultimo_dia_mes_ant).strftime('%Y-%m-%d')
+    mapa_cod_empresa = {'Sorocaba': '11', 'Indaiatuba': '33', 'LLA': '111'}
+    cod_emp_filtro = mapa_cod_empresa.get(empresa_selecionada)
     
-    with st.spinner("Carregando dados do banco de dados..."):
+    # Datas
+    primeiro_dia = datetime(ano_selecionado, mes_selecionado, 1).strftime('%Y-%m-%d')
+    ultimo_dia = datetime(ano_selecionado, mes_selecionado, calendar.monthrange(ano_selecionado, mes_selecionado)[1]).strftime('%Y-%m-%d')
+    
+    # Mês anterior para comparação
+    data_ant = datetime(ano_selecionado, mes_selecionado, 1) - pd.DateOffset(months=1)
+    primeiro_dia_ant = data_ant.strftime('%Y-%m-%d')
+    ultimo_dia_ant = (data_ant + pd.DateOffset(days=calendar.monthrange(data_ant.year, data_ant.month)[1]-1)).strftime('%Y-%m-%d')
+
+    with st.spinner("Buscando dados..."):
         df_atual = get_dados_mes(primeiro_dia, ultimo_dia)
         df_ant = get_dados_mes(primeiro_dia_ant, ultimo_dia_ant)
+        
+        # Filtro de Leads por Empresa da Unidade (COD_EMPRESA)
+        if cod_emp_filtro:
+            df_atual = df_atual[df_atual['COD_EMPRESA'] == cod_emp_filtro]
+            df_ant = df_ant[df_ant['COD_EMPRESA'] == cod_emp_filtro]
 
-        # Propostas
-        tot_prop_atual, fat_atual, a_fat_atual = get_dados_propostas(primeiro_dia, ultimo_dia)
-        tot_prop_ant, fat_ant, a_fat_ant = get_dados_propostas(primeiro_dia_ant, ultimo_dia_ant)
-
+        tot_prop_atual, fat_atual, a_fat_atual = get_dados_propostas(primeiro_dia, ultimo_dia, cod_emp_filtro)
+        tot_prop_ant, fat_ant, a_fat_ant = get_dados_propostas(primeiro_dia_ant, ultimo_dia_ant, cod_emp_filtro)
         propostas_faturadas = get_propostas_faturadas(primeiro_dia, ultimo_dia)
 
-    # Calculos Mes Atual
+    # Métricas
     total_leads_atual = len(df_atual)
     agendados_atual = len(df_atual[df_atual['DATA_AGENDADA'] != ''])
     compareceram_atual = len(df_atual[df_atual['DATA_VISITA'] != ''])
-    nao_compareceram_atual = agendados_atual - compareceram_atual
     
-    # Calculos Mes Anterior
     total_leads_ant = len(df_ant)
     agendados_ant = len(df_ant[df_ant['DATA_AGENDADA'] != ''])
     compareceram_ant = len(df_ant[df_ant['DATA_VISITA'] != ''])
-    nao_compareceram_ant = agendados_ant - compareceram_ant
 
-    st.subheader(f"Performance Geral - {mes_selecionado_nome.upper()}")
+    st.subheader(f"Performance Geral - {empresa_selecionada}")
     
-    col_ant = mes_ant_nome[:3].upper()
-    col_atual = mes_selecionado_nome[:3].upper()
-    
-    # Create the dataframe for display
+    c1, c2 = meses[data_ant.month][:3].upper(), mes_selecionado_nome[:3].upper()
     data_tabela = [
-        {"Indicador": "Total leads do mês", col_ant: total_leads_ant, col_atual: total_leads_atual, "Evolução": get_arrow(total_leads_ant, total_leads_atual)},
-        {"Indicador": "Agendados", col_ant: agendados_ant, col_atual: agendados_atual, "Evolução": get_arrow(agendados_ant, agendados_atual)},
-        {"Indicador": "Compareceram", col_ant: compareceram_ant, col_atual: compareceram_atual, "Evolução": get_arrow(compareceram_ant, compareceram_atual)},
-        {"Indicador": "Não compareceram", col_ant: nao_compareceram_ant, col_atual: nao_compareceram_atual, "Evolução": get_arrow(nao_compareceram_ant, nao_compareceram_atual)},
-        {"Indicador": "Total propostas do mês", col_ant: tot_prop_ant, col_atual: tot_prop_atual, "Evolução": get_arrow(tot_prop_ant, tot_prop_atual)},
-        {"Indicador": "Faturados do mês", col_ant: fat_ant, col_atual: fat_atual, "Evolução": get_arrow(fat_ant, fat_atual)},
-        {"Indicador": "Faturados do mês anterior", col_ant: 0, col_atual: fat_ant, "Evolução": get_arrow(0, fat_ant)},
-        {"Indicador": "A faturar", col_ant: a_fat_ant, col_atual: a_fat_atual, "Evolução": get_arrow(a_fat_ant, a_fat_atual)},
+        {"Indicador": "Total leads do mês", c1: total_leads_ant, c2: total_leads_atual, "Evolução": get_arrow(total_leads_ant, total_leads_atual)},
+        {"Indicador": "Agendados", c1: agendados_ant, c2: agendados_atual, "Evolução": get_arrow(agendados_ant, agendados_atual)},
+        {"Indicador": "Compareceram", c1: compareceram_ant, c2: compareceram_atual, "Evolução": get_arrow(compareceram_ant, compareceram_atual)},
+        {"Indicador": "Total propostas", c1: tot_prop_ant, c2: tot_prop_atual, "Evolução": get_arrow(tot_prop_ant, tot_prop_atual)},
+        {"Indicador": "Faturados", c1: fat_ant, c2: fat_atual, "Evolução": get_arrow(fat_ant, fat_atual)},
+        {"Indicador": "A faturar", c1: a_fat_ant, c2: a_fat_atual, "Evolução": get_arrow(a_fat_ant, a_fat_atual)},
     ]
-    
-    df_indicadores = pd.DataFrame(data_tabela)
-    
-    # Make a bold style for the "Total leads do mês" and colors for arrows
-    def style_dataframe(row):
-        styles = [''] * len(row)
-        if row.name == 0:
-            styles = ['color: red; font-weight: bold'] * len(row)
-            
-        # Overwrite color for Evolução column
-        evolucao_idx = row.index.get_loc('Evolução')
-        val = row['Evolução']
-        if val == '↑':
-            styles[evolucao_idx] = 'color: green; font-weight: bold; font-size: 18px;'
-        elif val == '↓':
-            styles[evolucao_idx] = 'color: red; font-weight: bold; font-size: 18px;'
-        elif val == '=':
-            styles[evolucao_idx] = 'color: orange; font-weight: bold; font-size: 18px;'
-            
-        return styles
-
-    st.dataframe(df_indicadores.style.apply(style_dataframe, axis=1), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(data_tabela), hide_index=True, use_container_width=True)
 
     st.markdown("---")
-    st.subheader(f"Leads por Vendedor - {mes_selecionado_nome.upper()}")
+    st.subheader("Leads por Vendedor")
 
-    empresa_map = {'11': 'Sorocaba', '33': 'Indaiatuba', '111': 'LLA'}
-
-    df_vend = df_atual[df_atual['RESP_ATUAL'] != ''].copy()
-    df_vend['EMPRESA'] = df_vend['COD_EMPRESA_RESP'].map(empresa_map).fillna('')
+    # Preparação para Tabela de Vendedores
+    df_vend = df_atual.copy()
+    # Se o nome estiver vazio, vira "Não Atribuído" para aparecer na contagem
+    df_vend['RESP_ATUAL'] = df_vend['RESP_ATUAL'].replace('', 'Não Atribuído')
+    
     df_vend['IS_AGENDADO'] = (df_vend['DATA_AGENDADA'] != '').astype(int)
     df_vend['IS_VISITA'] = (df_vend['DATA_VISITA'] != '').astype(int)
-    df_vend['IS_FATURADO'] = [
-        1 if (cp, ce) in propostas_faturadas else 0
-        for cp, ce in zip(df_vend['COD_PROPOSTA'], df_vend['COD_EMPRESA_RESP'])
-    ]
+    df_vend['IS_FATURADO'] = [1 if (p, e) in propostas_faturadas else 0 for p, e in zip(df_vend['COD_PROPOSTA'], df_vend['COD_EMPRESA'])]
 
-    resumo_vend = df_vend.groupby(['EMPRESA', 'RESP_ATUAL']).agg(
+    resumo_vend = df_vend.groupby(['RESP_ATUAL']).agg(
         Leads=('RESP_ATUAL', 'count'),
         Agendados=('IS_AGENDADO', 'sum'),
         Visitas=('IS_VISITA', 'sum'),
         Faturados=('IS_FATURADO', 'sum'),
-    ).reset_index().rename(columns={'RESP_ATUAL': 'Responsável', 'EMPRESA': 'Empresa'})
+    ).reset_index().rename(columns={'RESP_ATUAL': 'Vendedor'})
 
-    # Adicionando a nova coluna "Percentual sucesso" com formatação em % e proteção contra divisão por zero
-    resumo_vend['Percentual sucesso'] = resumo_vend.apply(
-        lambda row: f"{(row['Faturados'] / row['Visitas'] * 100):.2f}%" if row['Visitas'] > 0 else "0.00%", 
-        axis=1
+    resumo_vend['% Sucesso'] = resumo_vend.apply(
+        lambda r: f"{(r['Faturados']/r['Visitas']*100):.1f}%" if r['Visitas'] > 0 else "0.0%", axis=1
     )
 
-    resumo_vend = resumo_vend.sort_values('Leads', ascending=False)
-
-    st.dataframe(resumo_vend, hide_index=True, use_container_width=True)
+    st.dataframe(resumo_vend.sort_values('Leads', ascending=False), hide_index=True, use_container_width=True)
