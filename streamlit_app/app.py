@@ -33,6 +33,7 @@ from views.acompanhamento_chat import EMAILS_ACOMPANHAMENTO_CHAT
 from views.acompanhamento_pos_vendas import EMAILS_POS_VENDAS
 from views.acompanhamento_diario import EMAILS_ACOMPANHAMENTO_DIARIO
 from views.propostas import EMAILS_PRPOSTAS
+from views.fechamento_mes import EMAILS_FECHAMENTO_MES
 from utils.auth import realizar_login, validar_token, check_authentication
 from views import inicio
 from views import estoque_de_pecas
@@ -50,6 +51,7 @@ from views import acompanhamento_chat
 from views import acompanhamento_pos_vendas
 from views import acompanhamento_diario
 from views import propostas
+from views import fechamento_mes
 
 # 1. Configuração da página
 st.set_page_config(page_title="Caiuás - Acesso Rápido",layout="wide")
@@ -113,6 +115,8 @@ else:
         menus_disponiveis.append("Acompanhamento Diário")
     if tem_acesso(email_usuario, EMAILS_PRPOSTAS):
         menus_disponiveis.append("Propostas")
+    if tem_acesso(email_usuario, EMAILS_FECHAMENTO_MES):
+        menus_disponiveis.append("Fechamento Mês")
 
     if not menus_disponiveis:
         st.warning("Seu usuário não possui acesso a nenhum menu. Entre em contato com o administrador.")
@@ -145,6 +149,7 @@ else:
         "Acompanhamento Pós Vendas": acompanhamento_pos_vendas.render,
         "Acompanhamento Diário": acompanhamento_diario.render,
         "Propostas": propostas.render,
+        "Fechamento Mês": fechamento_mes.render,
     }
 
     if menu in menu_handlers:
