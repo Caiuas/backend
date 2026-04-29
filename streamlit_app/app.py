@@ -25,7 +25,6 @@ from views.estoque_de_pecas import EMAILS_ESTOQUE_PECAS
 from views.obsolescencia_de_estoque import EMAILS_OBSOLESCENCIA_ESTOQUE
 from views.crm import EMAILS_CRM
 from views.base_clientes_veiculos import EMAILS_BASE_CLIENTES
-from views.implantacao import EMAILS_IMPLANTACAO
 from views.leads import EMAILS_HAMADA
 from views.leads_agencia import EMAILS_CHAT
 from views.leads_escalera import EMAILS_ESCALERA
@@ -43,7 +42,6 @@ from views import fluxo_de_loja
 from views import recepcao
 from views import veiculos
 from views import base_clientes_veiculos
-from views import implantacao
 from views import leads
 from views import leads_agencia
 from views import leads_escalera
@@ -99,8 +97,6 @@ else:
         menus_disponiveis.append("CRM")
     if tem_acesso(email_usuario, EMAILS_BASE_CLIENTES):
         menus_disponiveis.append("Base Clientes/Veículos")
-    if tem_acesso(email_usuario, EMAILS_IMPLANTACAO):
-        menus_disponiveis.append("IMPLANTACAO")
     if tem_acesso(email_usuario, EMAILS_HAMADA):
         menus_disponiveis.append("Leads")
     if tem_acesso(email_usuario, EMAILS_CHAT):
@@ -141,7 +137,6 @@ else:
         "RECEPCAO": recepcao.render,
         "Veículos": veiculos.render,
         "Base Clientes/Veículos": base_clientes_veiculos.render,
-        "IMPLANTACAO": implantacao.render,
         "Leads": leads.render,
         "Leads Agência": leads_agencia.render,
         "Leads Escalera": leads_escalera.render,
