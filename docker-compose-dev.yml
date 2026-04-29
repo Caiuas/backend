@@ -1,0 +1,115 @@
+services:
+
+  flask_app:
+    build: ./flask_app
+    container_name: backend
+    restart: always
+    env_file:
+      - .env 
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./flask_app:/app
+    command: "flask run --host=0.0.0.0 --port=5000"
+
+  worker_integracao_des:
+    build: ./workers/estoque_veiculos_des
+    container_name: worker_integracao_des
+    restart: always
+    tty: True
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/estoque_veiculos_des:/app
+    command: "bash -c 'python3 estoque_veiculos.py & python3 agendamentos.py & wait'"
+  
+  worker_send_wpp_agendamento:
+    build: ./workers/send_wpp_agendamento
+    container_name: worker_send_wpp_agendamento
+    restart: always
+    # tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/send_wpp_agendamento:/app
+    command: "python3 app.py"
+
+  worker_update_questionario:
+    build: ./workers/update_questionario
+    container_name: worker_update_questionario
+    restart: always
+    # tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/update_questionario:/app
+    command: "python3 app.py"
+
+  worker_pesquisa:
+    build: ./workers/pesquisa
+    container_name: worker_pesquisa
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/pesquisa:/app
+    # command: "python3 app.py"
+    
+  worker_cria_pesquisa:
+    build: ./workers/cria_pesquisa
+    container_name: worker_cria_pesquisa
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/cria_pesquisa:/app
+    command: "python3 app.py"
+
+  worker_update_fechamento_crm:
+    build: ./workers/update_fechamento_crm
+    container_name: worker_update_fechamento_crm
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/update_fechamento_crm:/app
+    command: "python3 app.py"
+
+  worker_myhonda:
+    build: ./workers/myhonda
+    # mem_limit: 2g
+    container_name: worker_myhonda
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/myhonda:/app
+    command: "python3 app.py"
+
+  worker_envia_pesquisa_whatsapp:
+    build: ./workers/envia_pesquisa_whatsapp
+    # mem_limit: 2g
+    container_name: worker_envia_pesquisa_whatsapp
+    restart: always
+    tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/envia_pesquisa_whatsapp:/app
+    command: "python3 app.py"
+
+  worker_update_campanhas:
+    image: backend-flask_app
+    # mem_limit: 2g
+    container_name: worker_update_campanhas
+    restart: always
+    # tty: true
+    env_file:
+      - .env 
+    volumes:
+      - ./workers/update_campanhas:/app
+    command: "python3 app.py"
