@@ -733,6 +733,104 @@ def list_eventos_descartados():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@crm_bp.route('/api/crm/eventos_contato_perdido', methods=['GET'])
+@token_required
+def list_eventos_contato_perdido():
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        conn_oracle, cur_oracle = oracle()
+
+        acesso_query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+        cur_oracle.execute(acesso_query)
+        acesso_rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(acesso_rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+
+        query = f"""
+            SELECT
+                cce.cod_empresa,
+                cce.cod_evento,
+                cce.status,
+                cce.cod_andamento,
+                cce.cod_tipo_fechamento,
+                cce.quem_encerrou,
+                eu_encerrou.NOME_COMPLETO quem_encerrou_nome_completo,
+                TO_CHAR(cce.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+                cce.quem_autorizou,
+                TO_CHAR(cce.authorization_date, 'YYYY-MM-DD HH24:MI:SS') AS authorization_date,
+                CASE
+                    WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO
+                    ELSE c.NOME
+                END nome_cliente,
+                concat(c.PREFIXO_CEL, c.TELEFONE_CEL) tel_cel,
+                ce.fone_cliente_avulso,
+                ce.RESPONSAVEL_PELO_EVENTO,
+                eu.NOME_COMPLETO responsavel_nome_completo,
+                cet.DESC_TIPO_EVENTO,
+                ca.ANDAMENTO,
+                cmp.desc_motivo motivo_perda,
+                TO_CHAR(ce.DATA_CRIACAO, 'YYYY-MM-DD HH24:MI:SS') AS data_criacao_evento,
+                pm.descricao_modelo
+            FROM caiuas_crm_eventos_encerrados cce
+            LEFT JOIN crm_eventos ce ON ce.COD_EMPRESA = cce.cod_empresa AND ce.COD_EVENTO = cce.cod_evento
+            LEFT JOIN clientes c ON c.COD_CLIENTE = ce.COD_CLIENTE
+            LEFT JOIN empresas_usuarios eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO AND NVL(eu.DEMITIDO, 'N') <> 'S'
+            LEFT JOIN empresas_usuarios eu_encerrou ON eu_encerrou.nome = cce.quem_encerrou AND NVL(eu_encerrou.DEMITIDO, 'N') <> 'S'
+            LEFT JOIN crm_eventos_tipo cet ON cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+            LEFT JOIN crm_andamento ca ON ca.COD_ANDAMENTO = cce.cod_andamento
+            LEFT JOIN crm_motivo_perdas cmp ON cmp.cod_motivo_perda = ce.cod_motivo_perda
+            LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+            WHERE 1=1
+                AND ce.cod_motivo_perda IS NOT NULL
+                AND ce.status = 'E'
+                AND cce.authorization_date IS NULL
+                {filter_responsavel}
+            ORDER BY cce.created_at DESC
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        retorno = {'eventos_contato_perdido': []}
+        for row in rows:
+            retorno['eventos_contato_perdido'].append({
+                'cod_empresa': row[0],
+                'cod_evento': row[1],
+                'status_anterior': row[2],
+                'cod_andamento_anterior': row[3],
+                'cod_tipo_fechamento_anterior': row[4],
+                'quem_encerrou': row[5],
+                'quem_encerrou_nome_completo': row[6],
+                'created_at': row[7],
+                'quem_autorizou': row[8],
+                'authorization_date': row[9],
+                'nome_cliente': row[10],
+                'tel_cel': row[11],
+                'fone_cliente_avulso': row[12],
+                'responsavel_pelo_evento': row[13],
+                'responsavel_nome_completo': row[14],
+                'desc_tipo_evento': row[15],
+                'andamento': row[16],
+                'motivo_perda': row[17],
+                'data_criacao_evento': row[18],
+                'descricao_modelo': row[19]
+            })
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @crm_bp.route('/api/crm/eventos_encerrados', methods=['GET'])
 @token_required
 def list_eventos_encerrados():
@@ -1659,6 +1757,87 @@ def autorizar_descarte_evento(id_evento):
         cur_oracle.close()
         conn_oracle.close()
         return jsonify({'message': 'Descarte autorizado com sucesso'}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/eventos/autorizar_contato_perdido/<int:id_evento>', methods=['PUT'])
+@token_required
+def autorizar_contato_perdido_evento(id_evento):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        if email not in ALLOWED_REMOVER_DESCARTE_EMAILS:
+            return jsonify({'status': 'error', 'message': 'Sem permissão para autorizar contato perdido'}), 403
+        cod_empresa = str(id_evento)[:2]
+        if cod_empresa not in ['11', '33']:
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        cod_evento = str(id_evento)[2:]
+        if not cod_evento.isdigit():
+            return jsonify({'status': 'error', 'message': 'ID do evento inválido'}), 400
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT cod_empresa,eu.nome 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+            GROUP BY eu.COD_EMPRESA, eu.nome
+            ORDER BY eu.cod_empresa
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        quem_autorizou = rows[0][1]
+
+        query = f"""
+            SELECT quem_autorizou, authorization_date
+            FROM caiuas_crm_eventos_encerrados
+            WHERE cod_empresa = {cod_empresa}
+                AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        row_encerrado = cur_oracle.fetchone()
+
+        if row_encerrado is None:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Contato perdido não encontrado'}), 404
+
+        if row_encerrado[0] is not None and row_encerrado[1] is not None:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Contato perdido já autorizado'}), 400
+
+        query = f"""
+            UPDATE caiuas_crm_eventos_encerrados
+            SET quem_autorizou = '{quem_autorizou}',
+                authorization_date = CURRENT_TIMESTAMP
+            WHERE cod_empresa = {cod_empresa}
+                AND cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_autorizou}',
+                1,
+                SYSDATE,
+                'Contato perdido do evento autorizado por {quem_autorizou}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_autorizou}')
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        return jsonify({'message': 'Contato perdido autorizado com sucesso'}), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
