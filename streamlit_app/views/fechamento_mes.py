@@ -169,6 +169,13 @@ def get_arrow(val_ant, val_atual):
     elif val_atual < val_ant: return "↓"
     return "="
 
+def get_percent(val_ant, val_atual):
+    if val_ant > 0:
+        return f"{((val_atual - val_ant) / val_ant) * 100:+.1f}%"
+    elif val_atual > 0:
+        return "+100.0%"
+    return "0.0%"
+
 def render():
     st.title("Fechamento por Mês")
     
@@ -224,14 +231,36 @@ def render():
     
     c1, c2 = meses[data_ant.month][:3].upper(), mes_selecionado_nome[:3].upper()
     data_tabela = [
-        {"Indicador": "Total leads do mês", c1: total_leads_ant, c2: total_leads_atual, "Evolução": get_arrow(total_leads_ant, total_leads_atual)},
-        {"Indicador": "Agendados", c1: agendados_ant, c2: agendados_atual, "Evolução": get_arrow(agendados_ant, agendados_atual)},
-        {"Indicador": "Compareceram", c1: compareceram_ant, c2: compareceram_atual, "Evolução": get_arrow(compareceram_ant, compareceram_atual)},
-        {"Indicador": "Total propostas", c1: tot_prop_ant, c2: tot_prop_atual, "Evolução": get_arrow(tot_prop_ant, tot_prop_atual)},
-        {"Indicador": "Faturados", c1: fat_ant, c2: fat_atual, "Evolução": get_arrow(fat_ant, fat_atual)},
-        {"Indicador": "A faturar", c1: a_fat_ant, c2: a_fat_atual, "Evolução": get_arrow(a_fat_ant, a_fat_atual)},
+        {"Indicador": "Total leads do mês", c1: total_leads_ant, c2: total_leads_atual, "Evolução": get_arrow(total_leads_ant, total_leads_atual), "Variação %": get_percent(total_leads_ant, total_leads_atual)},
+        {"Indicador": "Agendados", c1: agendados_ant, c2: agendados_atual, "Evolução": get_arrow(agendados_ant, agendados_atual), "Variação %": get_percent(agendados_ant, agendados_atual)},
+        {"Indicador": "Compareceram", c1: compareceram_ant, c2: compareceram_atual, "Evolução": get_arrow(compareceram_ant, compareceram_atual), "Variação %": get_percent(compareceram_ant, compareceram_atual)},
+        {"Indicador": "Total propostas", c1: tot_prop_ant, c2: tot_prop_atual, "Evolução": get_arrow(tot_prop_ant, tot_prop_atual), "Variação %": get_percent(tot_prop_ant, tot_prop_atual)},
+        {"Indicador": "Faturados", c1: fat_ant, c2: fat_atual, "Evolução": get_arrow(fat_ant, fat_atual), "Variação %": get_percent(fat_ant, fat_atual)},
+        {"Indicador": "A faturar", c1: a_fat_ant, c2: a_fat_atual, "Evolução": get_arrow(a_fat_ant, a_fat_atual), "Variação %": get_percent(a_fat_ant, a_fat_atual)},
     ]
-    st.dataframe(pd.DataFrame(data_tabela), hide_index=True, use_container_width=True)
+    
+    df_tabela = pd.DataFrame(data_tabela)
+    
+    def color_arrow(val):
+        if val == '↑':
+            return 'color: green; font-weight: bold;'
+        elif val == '↓':
+            return 'color: red; font-weight: bold;'
+        return ''
+
+    def color_percent(val):
+        if isinstance(val, str) and val.startswith('+'):
+            return 'color: green; font-weight: bold;'
+        elif isinstance(val, str) and val.startswith('-'):
+            return 'color: red; font-weight: bold;'
+        return ''
+        
+    if hasattr(df_tabela.style, 'map'):
+        styled_df = df_tabela.style.map(color_arrow, subset=['Evolução']).map(color_percent, subset=['Variação %'])
+    else:
+        styled_df = df_tabela.style.applymap(color_arrow, subset=['Evolução']).applymap(color_percent, subset=['Variação %'])
+
+    st.dataframe(styled_df, hide_index=True, use_container_width=True)
 
     st.markdown("---")
     st.subheader("Leads por Vendedor")
