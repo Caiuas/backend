@@ -387,7 +387,7 @@ def send_acompanhamento_diretoria(self):
     for nome, chat_id in TELEGRAM_CHATS.items():
         dados = {
             "chat_id": chat_id,
-            "caption": "Aqui está o relatório de Acompanhamento Diário com as novas sessões."
+            "caption": "Aqui está o relatório para acompanhamento de vendas e faturamento Diário."
         }
         
         logger.info(f"Tentando enviar relatorio para {nome} (ID {chat_id})...")
