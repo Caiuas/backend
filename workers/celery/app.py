@@ -38,10 +38,14 @@ app.conf.update(
             "task": "tasks.acompanhamento_diretoria.send_acompanhamento_diretoria",
             "schedule": crontab(hour=18, minute=0, day_of_week='1-5'),
         },
+        "fix-crm-proposta-zero-every-5min": {
+            "task": "tasks.fix_crm_proposta.fix_crm_proposta_zero",
+            "schedule": 300.0,
+        },
     },
 )
 
-app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria"]
+app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta"]
 
 @app.task(bind=True)
 def debug_task(self):
