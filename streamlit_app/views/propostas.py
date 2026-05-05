@@ -53,7 +53,8 @@ def render():
                 ELSE cid_cob.DESCRICAO 
             END cidade,
             'Aguardando Faturamento' Status,
-            concat(cev.cod_empresa, cev.COD_EVENTO) evento
+            concat(cev.cod_empresa, cev.COD_EVENTO) evento,
+            ca.ANDAMENTO andamento
         FROM VEICULOS_PROPOSTAS vp 
         LEFT JOIN produtos pr ON 1=1
             AND pr.COD_PRODUTO = vp.COD_PRODUTO  
@@ -98,6 +99,7 @@ def render():
             AND cev.COD_PROPOSTA = vp.COD_PROPOSTA
             AND cev.status <> 'D'
             AND cev.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
+        LEFT JOIN crm_andamento ca ON ca.COD_ANDAMENTO = cev.COD_ANDAMENTO
         WHERE 1=1
             AND vp.status_proposta = 'A'
             AND TRUNC(vp.EMISSAO) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
@@ -139,8 +141,9 @@ def render():
                 WHEN c.COD_CID_RES <> NULL THEN cid_res.DESCRICAO 
                 ELSE cid_cob.DESCRICAO 
             END cidade,
-            'Aguardando Faturamento' Status,
-            concat(ce.cod_empresa, ce.COD_EVENTO) evento
+            'Faturado' Status,
+            concat(ce.cod_empresa, ce.COD_EVENTO) evento,
+            ca2.ANDAMENTO andamento
         FROM veiculos v 
         LEFT JOIN produtos pr ON 1=1
             AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -175,6 +178,7 @@ def render():
             AND ce.COD_PROPOSTA = v.COD_PROPOSTA
             AND ce.status <> 'D'
             AND ce.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
+        LEFT JOIN crm_andamento ca2 ON ca2.COD_ANDAMENTO = ce.COD_ANDAMENTO
         WHERE v.status = 'V'
             AND vp.status_proposta = 'V'
             --AND v.cod_proposta <> 0
@@ -213,6 +217,7 @@ def render():
         'NOVO_USADO': 'Novo/Usado',
         'CIDADE': 'Cidade',
         'STATUS': 'Status',
+        'ANDAMENTO': 'Andamento',
         'LINK_EVENTO': 'Evento NBS'
     })
     import io
@@ -275,6 +280,7 @@ def render():
         use_container_width=True,
         height=800,
         column_config={
+            "Andamento": st.column_config.TextColumn("Andamento"),
             "Evento NBS": st.column_config.LinkColumn("Evento NBS", display_text="Abrir"),
         }
     )
