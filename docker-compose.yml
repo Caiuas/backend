@@ -197,4 +197,10 @@
     depends_on:
       - rabbitmq
       - worker_celery
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.flower-app.rule=Host(`flower.caiuas.com.br`)"
+      - "traefik.http.routers.flower-app.entrypoints=websecure"
+      - "traefik.http.routers.flower-app.tls.certresolver=letsencryptresolver"
+      - "traefik.http.services.flower-app.loadbalancer.server.port=5555"
     command: sh -c "celery -A app flower --port=5555 $${FLOWER_USER:+--basic_auth=$${FLOWER_USER}:$${FLOWER_PASSWORD}}"
