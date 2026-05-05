@@ -189,3 +189,4 @@ workers/estoque_veiculos_des/veiculos2.json
 oracle-jdbc-11.jar
 postgresql-42.7.5.jar
 workers/celery/celerybeat-schedule-wal
+workers/celery/celerybeat-schedule-wal
