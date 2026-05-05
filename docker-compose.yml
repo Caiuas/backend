@@ -182,3 +182,19 @@
       - ./workers/celery:/app
       - ./flask_app:/flask_app
     command: "celery -A app worker --loglevel=info --concurrency=4 -B"
+
+  flower:
+    build: ./workers/celery
+    container_name: flower
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./workers/celery:/app
+      - ./flask_app:/flask_app
+    ports:
+      - "5555:5555"
+    depends_on:
+      - rabbitmq
+      - worker_celery
+    command: sh -c "celery -A app flower --port=5555 $${FLOWER_USER:+--basic_auth=$${FLOWER_USER}:$${FLOWER_PASSWORD}}"
