@@ -12,8 +12,8 @@ crm_bp = Blueprint('crm', __name__)
 ALLOWED_DATA_VISITA_EMAILS = [
     'pablo.ti@caiuas.com.br',
     'cristiane.aguilar@caiuas.com.br',
-    'mirela.novaga@caiuas.com.br',
-    'isadora.fraga@caiuas.com.br'
+    # 'mirela.novaga@caiuas.com.br',
+    # 'isadora.fraga@caiuas.com.br'
 ]
 
 def processar_obs_memo(obs_memo):
