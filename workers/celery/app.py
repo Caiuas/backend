@@ -26,17 +26,17 @@ app.conf.update(
             "task": "tasks.fix_connections.fix_connections_nbs",
             "schedule": 60.0,
         },
-        "send-acompanhamento-diretoria-10-55": {
+        "send-acompanhamento-diretoria-13-00": {
             "task": "tasks.acompanhamento_diretoria.send_acompanhamento_diretoria",
-            "schedule": crontab(hour=10, minute=55, day_of_week='1-5'),
+            "schedule": crontab(hour=13, minute=0, day_of_week='1-5'),
         },
-        "send-acompanhamento-diretoria-10-56": {
+        "send-acompanhamento-diretoria-17-30": {
             "task": "tasks.acompanhamento_diretoria.send_acompanhamento_diretoria",
-            "schedule": crontab(hour=10, minute=56, day_of_week='1-5'),
+            "schedule": crontab(hour=17, minute=30, day_of_week='1-5'),
         },
-        "send-acompanhamento-diretoria-10-57": {
+        "send-acompanhamento-diretoria-18-00": {
             "task": "tasks.acompanhamento_diretoria.send_acompanhamento_diretoria",
-            "schedule": crontab(hour=10, minute=57, day_of_week='1-5'),
+            "schedule": crontab(hour=18, minute=0, day_of_week='1-5'),
         },
     },
 )

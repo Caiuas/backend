@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("TELEGRAM_BOT", "")
 TELEGRAM_CHATS = {
     "Pablo": "548519349",
+    "Cristiane": "8703967479",
     # Adicione outros números aqui seguindo o modelo:
     # "Nome do Diretor": "ID_AQUI",
 }
