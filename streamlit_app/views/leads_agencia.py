@@ -100,7 +100,14 @@ def render():
             concat(ce.COD_EMPRESA, ce.COD_EVENTO) AS evento,
             eu.NOME_COMPLETO AS responsavel_oracle,
             ca.ANDAMENTO AS andamento_atendimento,
-            TO_CHAR(ce.TERMOMETRO) AS termometro,
+            CASE 
+                WHEN ce.COD_PROPOSTA IS NOT NULL THEN 'Super quente'
+                
+                WHEN ce.TERMOMETRO = 1 THEN 'Frio'
+                WHEN ce.TERMOMETRO = 2 THEN 'Morno'
+                WHEN ce.TERMOMETRO = 3 THEN 'Quente'
+                ELSE 'Não classificado'
+            END AS termometro,
             ce.COD_PROPOSTA
         FROM crm_eventos ce
         LEFT JOIN empresas_usuarios eu ON 1=1
@@ -118,9 +125,10 @@ def render():
         df_oracle_eventos = pd.DataFrame(result_oracle_chat, columns=columns_oracle_chat, dtype=str).fillna('')
         df_chatwoot_excel = df_chatwoot_excel.merge(df_oracle_eventos[['evento', 'andamento_atendimento', 'termometro','cod_proposta']], on='evento', how='left')
         df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].fillna('')
-        df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('').map(
-            lambda v: {'1': 'Frio', '2': 'Morno', '3': 'Quente'}.get(str(v).strip(), 'Não classificado')
-        )
+        df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('Não classificado')
+    else:
+        df_chatwoot_excel['andamento_atendimento'] = ''
+        df_chatwoot_excel['termometro'] = 'Não classificado'
     
     st.subheader("Campanhas (Chatwoot)")
     total_linhas_chatwoot = len(df_chatwoot)
@@ -135,13 +143,14 @@ def render():
         key="download_chatwoot_chat"
     )
     st.dataframe(
-        df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha', 'link_crm', 'link_chat']],
+        df_chatwoot_excel[['conversation_id','responsavel', 'created_at', 'link_campanha', 'link_crm', 'link_chat', 'termometro']],
         hide_index=True,
         use_container_width=True,
         column_config={
             "link_campanha": st.column_config.LinkColumn("Link Campanha", display_text="Abrir"),
             "link_crm": st.column_config.LinkColumn("Link Evento NBS", display_text="Abrir"),
             "link_chat": st.column_config.LinkColumn("Link Chat", display_text="Abrir"),
+            "termometro": st.column_config.TextColumn("Temperatura"),
         }
     )
     

@@ -31,7 +31,8 @@ def render():
     SELECT 
         ce.COD_EMPRESA, 
         ce.COD_EVENTO,
-        to_char(ce.cod_proposta) as cod_proposta,
+        to_char(p.cod_proposta) as cod_proposta,
+        p.emissao, 
         eu2.NOME_COMPLETO quem_criou,
         eu.NOME_COMPLETO resp_atual,
         case
@@ -105,6 +106,9 @@ def render():
     LEFT JOIN crm_eventos cev ON 1=1
     	AND cev.COD_EVENTO = ce.COD_EVENTO_ANTERIOR 
     	AND cev.COD_EMPRESA = ce.COD_EMPRESA_ANTERIOR 
+    left join veiculos_propostas p on 1=1
+        and p.cod_proposta = ce.cod_proposta
+        and p.status_proposta not in ('C','R')
     WHERE 1=1
         AND ce.cod_tipo_evento in ('829','831','795','793','797','799','819','821','785','807','815','817','810','812')
         AND trunc(ce.DATA_CRIACAO) >= TO_DATE('{data_inicial_hamada}', 'YYYY-MM-DD')

@@ -54,7 +54,14 @@ def render():
             END cidade,
             'Aguardando Faturamento' Status,
             concat(cev.cod_empresa, cev.COD_EVENTO) evento,
-            ca.ANDAMENTO andamento
+            ca.ANDAMENTO andamento,
+            CASE 
+                WHEN cev.COD_PROPOSTA IS NOT NULL THEN 'Super quente'
+                WHEN cev.TERMOMETRO = 1 THEN 'Frio'
+                WHEN cev.TERMOMETRO = 2 THEN 'Morno'
+                WHEN cev.TERMOMETRO = 3 THEN 'Quente'
+                ELSE 'Não classificado'
+            END AS termometro
         FROM VEICULOS_PROPOSTAS vp 
         LEFT JOIN produtos pr ON 1=1
             AND pr.COD_PRODUTO = vp.COD_PRODUTO  
@@ -142,8 +149,17 @@ def render():
                 ELSE cid_cob.DESCRICAO 
             END cidade,
             'Faturado' Status,
-            concat(ce.cod_empresa, ce.COD_EVENTO) evento,
-            ca2.ANDAMENTO andamento
+            concat(cev2.cod_empresa, cev2.COD_EVENTO) evento,
+            ca2.ANDAMENTO andamento,
+            CASE 
+                WHEN cev2.COD_PROPOSTA IS NOT NULL THEN 'Super quente'
+                WHEN cev2.status = 'D' THEN 'Frio'
+                WHEN cev2.status = 'E' AND cev2.COD_MOTIVO_PERDA IS NOT NULL THEN 'Frio'
+                WHEN cev2.TERMOMETRO = 1 THEN 'Frio'
+                WHEN cev2.TERMOMETRO = 2 THEN 'Morno'
+                WHEN cev2.TERMOMETRO = 3 THEN 'Quente'
+                ELSE 'Não classificado'
+            END AS termometro
         FROM veiculos v 
         LEFT JOIN produtos pr ON 1=1
             AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -174,11 +190,11 @@ def render():
         LEFT JOIN cidades cid_cob ON 1=1
             AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
             AND cid_cob.uf = c.UF_COBRANCA
-        LEFT JOIN crm_eventos ce ON 1=1
-            AND ce.COD_PROPOSTA = v.COD_PROPOSTA
-            AND ce.status <> 'D'
-            AND ce.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
-        LEFT JOIN crm_andamento ca2 ON ca2.COD_ANDAMENTO = ce.COD_ANDAMENTO
+        LEFT JOIN crm_eventos cev2 ON 1=1
+            AND cev2.COD_PROPOSTA = v.COD_PROPOSTA
+            AND cev2.status <> 'D'
+            AND cev2.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
+        LEFT JOIN crm_andamento ca2 ON ca2.COD_ANDAMENTO = cev2.COD_ANDAMENTO
         WHERE v.status = 'V'
             AND vp.status_proposta = 'V'
             --AND v.cod_proposta <> 0
@@ -218,6 +234,7 @@ def render():
         'CIDADE': 'Cidade',
         'STATUS': 'Status',
         'ANDAMENTO': 'Andamento',
+        'TERMOMETRO': 'Temperatura',
         'LINK_EVENTO': 'Evento NBS'
     })
     import io
@@ -281,6 +298,7 @@ def render():
         height=800,
         column_config={
             "Andamento": st.column_config.TextColumn("Andamento"),
+            "Temperatura": st.column_config.TextColumn("Temperatura"),
             "Evento NBS": st.column_config.LinkColumn("Evento NBS", display_text="Abrir"),
         }
     )
