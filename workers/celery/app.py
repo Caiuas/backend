@@ -42,10 +42,14 @@ app.conf.update(
             "task": "tasks.fix_crm_proposta.fix_crm_proposta_zero",
             "schedule": 300.0,
         },
+        "sync-propostas-rdstation-every-30s": {
+            "task": "tasks.sync_rdstation.sync_propostas_rdstation",
+            "schedule": 30.0,
+        },
     },
 )
 
-app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta"]
+app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation"]
 
 @app.task(bind=True)
 def debug_task(self):
