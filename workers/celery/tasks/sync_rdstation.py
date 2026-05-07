@@ -119,13 +119,15 @@ def _fetch_proposta(cursor):
 
 def _buscar_id_crm_cliente_antigo(cursor, cod_cliente):
     query = """
-        SELECT csr.id_crm
-        FROM veiculos_propostas vp
-        JOIN caiuas_sync_rdstation csr ON csr.cod_proposta = vp.cod_proposta
-        WHERE vp.cod_cliente = ?
-          AND csr.id_crm IS NOT NULL
-          AND vp.EMISSAO < TRUNC(SYSDATE) - 60
-          AND ROWNUM = 1
+        SELECT id_crm FROM (
+            SELECT csr.id_crm
+            FROM veiculos_propostas vp
+            JOIN caiuas_sync_rdstation csr ON csr.cod_proposta = vp.cod_proposta
+            WHERE vp.cod_cliente = ?
+              AND csr.id_crm IS NOT NULL
+              AND vp.EMISSAO >= TRUNC(SYSDATE) - 60
+            ORDER BY vp.EMISSAO DESC
+        ) WHERE ROWNUM = 1
     """
     cursor.execute(query, [cod_cliente])
     row = cursor.fetchone()
@@ -418,7 +420,8 @@ def sync_propostas_rdstation(self):
         id_crm = _buscar_id_crm_cliente_antigo(cursor, cod_cliente)
 
         if id_crm:
-            logger.info("sync_rdstation: reutilizando id_crm %s do cliente %s (proposta > 60 dias)", id_crm, cod_cliente)
+            # Correção no texto do log para refletir a lógica certa
+            logger.info("sync_rdstation: reutilizando id_crm %s do cliente %s (proposta nos ultimos 60 dias)", id_crm, cod_cliente)
         else:
             id_crm = _criar_deal_rdstation(proposta)
             if not id_crm:
