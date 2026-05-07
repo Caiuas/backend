@@ -2,6 +2,7 @@ import os
 import logging
 import datetime
 import requests
+from io import BytesIO
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
@@ -24,7 +25,6 @@ TELEGRAM_CHATS = {
     # "Nome do Diretor": "ID_AQUI",
 }
 LOGO_PATH = "images/logo_honda.png"
-CAMINHO_ARQUIVO = "relatorio_diario.pdf"
 
 def get_data():
     query = """
@@ -361,25 +361,20 @@ def generate_pdf():
     else:
         ax_t3.text(0.5, 0.8, "Nenhum faturamento", ha='center', va='center', fontsize=12, color='#7F8C8D')
 
-    plt.savefig(CAMINHO_ARQUIVO, format='pdf', bbox_inches='tight')
+    buf = BytesIO()
+    plt.savefig(buf, format='pdf', bbox_inches='tight')
     plt.close()
+    buf.seek(0)
+    return buf.read()
 
 @app.task(bind=True, max_retries=2, default_retry_delay=60)
 def send_acompanhamento_diretoria(self):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
     logger.info(f"Gerando relatorio PDF...")
     try:
-        generate_pdf()
+        pdf_data = generate_pdf()
     except Exception as exc:
         logger.error(f"Erro ao gerar relatorio PDF: {exc}")
-        return {"status": "error", "details": str(exc)}
-    
-    # Lendo o arquivo uma vez na memória para poder enviar a todos
-    try:
-        with open(CAMINHO_ARQUIVO, "rb") as arquivo:
-            pdf_data = arquivo.read()
-    except Exception as exc:
-        logger.error(f"Erro ao ler o arquivo PDF gerado: {exc}")
         return {"status": "error", "details": str(exc)}
 
     resultados = []
@@ -392,7 +387,6 @@ def send_acompanhamento_diretoria(self):
         
         logger.info(f"Tentando enviar relatorio para {nome} (ID {chat_id})...")
         try:
-            # Recriamos a tupla do arquivo para cada request
             arquivos = {"document": ("relatorio_diario.pdf", pdf_data)}
             resposta = requests.post(url, data=dados, files=arquivos, timeout=15)
             if resposta.status_code == 200:
@@ -405,7 +399,6 @@ def send_acompanhamento_diretoria(self):
             logger.error(f"❌ Erro na requisição para {nome}: {exc}")
             resultados.append({"nome": nome, "status": "error", "details": str(exc)})
             
-    # Checar se pelo menos um falhou para status final (opcional)
     if any(r.get('status') == 'error' for r in resultados):
         logger.warning(f"Envio concluído com alguns erros: {resultados}")
         return {"status": "partial_success_or_error", "details": resultados}
