@@ -1,11 +1,13 @@
 import os
+import re
 import logging
 import datetime
 import requests
 from io import BytesIO
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
+import matplotlib.ticker as mticker
+from matplotlib.gridspec import GridSpec
 from matplotlib.patches import FancyBboxPatch
 from PIL import Image
 import numpy as np
@@ -14,356 +16,505 @@ from database import oracle
 
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# 1. SUAS CONFIGURAÇÕES
-# ==========================================
 TOKEN = os.getenv("TELEGRAM_BOT", "")
 TELEGRAM_CHATS = {
     "Pablo": "548519349",
     "Cristiane": "8703967479",
     "Marcelo Camargo": "8105764200",
-    # Adicione outros números aqui seguindo o modelo:
-    # "Nome do Diretor": "ID_AQUI",
 }
 LOGO_PATH = "images/logo_honda.png"
 
-def get_data():
-    query = """
-    SELECT 
-        eu.cod_empresa,
-        to_char(vp.COD_PROPOSTA) COD_PROPOSTA,
-        vp.EMISSAO data_proposta, 
-        upper(eu.NOME_COMPLETO) nome_vendedor, 
-        pm.DESCRICAO_MODELO modelo, 
-        COALESCE(ce_veic.DESCRICAO, ce_ped.DESCRICAO, ce_fic.DESCRICAO) AS cor, 
-        v.CHASSI_COMPLETO, 
-        c.NOME nome_cliente,
-        CASE 
-            WHEN c.NUMERO_MSG_TXT_INST IS NOT NULL THEN c.PREFIXO_MSG_TXT_INST || c.NUMERO_MSG_TXT_INST
-            WHEN c.TELEFONE_CEL IS NOT NULL THEN c.PREFIXO_CEL || c.TELEFONE_CEL
-            WHEN c.TELEFONE_res IS NOT NULL THEN c.PREFIXO_RES || c.TELEFONE_res
-            WHEN c.TELEFONE_COM IS NOT NULL THEN c.PREFIXO_COM || c.TELEFONE_COM
-        END AS telefone,
-        c.EMAIL_NFE email,
-        CASE 
-            WHEN v.novo_usado = 'U' THEN 'Usado'
-            ELSE 'Novo'
-        END novo_usado,
-        CASE
-            WHEN c.COD_CID_COM IS NOT NULL THEN cid_com.DESCRICAO 
-            WHEN c.COD_CID_RES IS NOT NULL THEN cid_res.DESCRICAO 
-            ELSE cid_cob.DESCRICAO 
-        END cidade,
-        'Aguardando Faturamento' Status,
-        concat(cev.cod_empresa, cev.COD_EVENTO) evento
-    FROM VEICULOS_PROPOSTAS vp 
-    LEFT JOIN produtos pr ON 1=1
-        AND pr.COD_PRODUTO = vp.COD_PRODUTO  
-    LEFT JOIN produtos_modelos pm ON 1=1
-        AND pm.COD_PRODUTO = vp.COD_PRODUTO 
-        AND pm.COD_MODELO = vp.COD_MODELO 
-    LEFT JOIN VEICULOS v ON 1=1
-        AND vp.CHASSI_RESUMIDO = v.CHASSI_RESUMIDO
-        AND vp.COD_PRODUTO = v.COD_PRODUTO      
-        AND vp.COD_MODELO = v.COD_MODELO        
-        AND vp.cod_empresa = v.cod_empresa      
-        AND v.status = 'E' 
-    LEFT JOIN VEICULOS_PEDIDOS vped ON 1=1
-        AND vp.COD_PEDIDO = vped.COD_PEDIDO
-    LEFT JOIN PROP_FICTICIA_DADOS pfd ON 1=1
-        AND vp.COD_FICTICIO = pfd.COD_FICTICIO
-    LEFT JOIN clientes c ON c.COD_CLIENTE = vp.COD_CLIENTE 
-    LEFT JOIN patio p ON 1=1
-        AND p.COD_PATIO = v.COD_PATIO
-    LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
-        AND eu.NOME = vp.VENDEDOR 
-    LEFT JOIN empresas_usuarios eu2 ON 1=1
-        AND eu2.nome = vp.QUEM_APROVOU 
-    LEFT JOIN empresas e ON 1=1
-        AND e.cod_empresa = v.COD_EMPRESA 
-    LEFT JOIN cidades cid_res ON 1=1
-        AND cid_res.cod_cidades = c.COD_CID_RES 
-        AND cid_res.uf = c.UF_RES 
-    LEFT JOIN cidades cid_com ON 1=1
-        AND cid_com.cod_cidades = c.COD_CID_COM 
-        AND cid_com.uf = c.UF_COM 
-    LEFT JOIN cidades cid_cob ON 1=1
-        AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
-        AND cid_cob.uf = c.UF_COBRANCA
-    LEFT JOIN CORES_EXTERNAS ce_veic ON 1=1          
-        AND ce_veic.COR_EXTERNA = v.COR_EXTERNA
-    LEFT JOIN CORES_EXTERNAS ce_ped ON 1=1         
-        AND ce_ped.COR_EXTERNA = vped.COR_EXTERNA
-    LEFT JOIN CORES_EXTERNAS ce_fic ON 1=1         
-        AND ce_fic.COR_EXTERNA = pfd.COR_EXTERNA
-    LEFT JOIN crm_eventos cev ON 1=1            
-        AND cev.COD_PROPOSTA = vp.COD_PROPOSTA
-        AND cev.status <> 'D'
-        AND cev.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
-    WHERE 1=1
-        AND vp.status_proposta in ('A','V')
-        AND TRUNC(vp.EMISSAO) >= TRUNC(SYSDATE) - 6
-    """
+# Paleta do Design System
+COR_VERMELHO = "#D50000"
+COR_AZUL = "#337AB7"
+COR_CINZA_BORDA = "#D8DCE3"
+COR_CINZA_FUNDO = "#F8F9FA"
+COR_FUNDO_CARD = "#FFFFFF"
+COR_TEXTO = "#2C3E50"
+
+EMPRESAS_MAP = {"11": "Sorocaba", "33": "Indaiatuba", "111": "Seminovos"}
+
+def _conexao():
     conn, cursor = oracle()
+    return conn, cursor
+
+def _extrair_empresa(cod_empresa_val):
+    raw = str(cod_empresa_val) if cod_empresa_val is not None else ""
+    m = re.search(r"(\d+)", raw)
+    cod = m.group(1) if m else ""
+    return EMPRESAS_MAP.get(cod, "Outros")
+
+def _fetch_propostas_emitidas():
+    query = """
+        SELECT
+            eu.cod_empresa,
+            eu.NOME_COMPLETO NOME_VENDEDOR,
+            pm.DESCRICAO_MODELO MODELO,
+            vp.COD_PROPOSTA,
+            vp.EMISSAO DATA_PROPOSTA,
+            vp.DATA_VENDA,
+            vp.DATA_CANCELAMENTO,
+            vp.VALOR_PROPOSTA,
+            vp.STATUS_PROPOSTA,
+            vp.COD_CLIENTE,
+            c.NOME NOME_CLIENTE
+        FROM VEICULOS_PROPOSTAS vp
+        LEFT JOIN EMPRESAS_USUARIOS eu ON eu.NOME = vp.VENDEDOR
+        LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = vp.COD_PRODUTO AND pm.COD_MODELO = vp.COD_MODELO
+        LEFT JOIN clientes c ON c.COD_CLIENTE = vp.COD_CLIENTE
+        WHERE TRUNC(vp.EMISSAO) >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1)
+            AND vp.status_proposta NOT IN ('C')
+        ORDER BY vp.EMISSAO
+    """
+    conn, cursor = _conexao()
     try:
         cursor.execute(query)
         result = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
-        df = pd.DataFrame(result, columns=columns)
-        return df
+        return pd.DataFrame(result, columns=columns)
     finally:
         cursor.close()
         conn.close()
 
-def get_faturamento_data():
+def _fetch_canceladas():
     query = """
-    SELECT 
-        eu.cod_empresa,
-        to_char(vp.COD_PROPOSTA) COD_PROPOSTA,
-        vp.EMISSAO data_proposta, 
-        upper(eu.NOME_COMPLETO) nome_vendedor, 
-        pm.DESCRICAO_MODELO modelo, 
-        COALESCE(ce_veic.DESCRICAO, ce_ped.DESCRICAO, ce_fic.DESCRICAO) AS cor, 
-        v.CHASSI_COMPLETO, 
-        c.NOME nome_cliente,
-        CASE 
-            WHEN c.NUMERO_MSG_TXT_INST IS NOT NULL THEN c.PREFIXO_MSG_TXT_INST || c.NUMERO_MSG_TXT_INST
-            WHEN c.TELEFONE_CEL IS NOT NULL THEN c.PREFIXO_CEL || c.TELEFONE_CEL
-            WHEN c.TELEFONE_res IS NOT NULL THEN c.PREFIXO_RES || c.TELEFONE_res
-            WHEN c.TELEFONE_COM IS NOT NULL THEN c.PREFIXO_COM || c.TELEFONE_COM
-        END AS telefone,
-        c.EMAIL_NFE email,
-        CASE 
-            WHEN v.novo_usado = 'U' THEN 'Usado'
-            ELSE 'Novo'
-        END novo_usado,
-        CASE
-            WHEN c.COD_CID_COM IS NOT NULL THEN cid_com.DESCRICAO 
-            WHEN c.COD_CID_RES IS NOT NULL THEN cid_res.DESCRICAO 
-            ELSE cid_cob.DESCRICAO 
-        END cidade,
-        'Faturado' Status,
-        concat(cev.cod_empresa, cev.COD_EVENTO) evento
-    FROM VEICULOS_PROPOSTAS vp 
-    LEFT JOIN produtos pr ON 1=1
-        AND pr.COD_PRODUTO = vp.COD_PRODUTO  
-    LEFT JOIN produtos_modelos pm ON 1=1
-        AND pm.COD_PRODUTO = vp.COD_PRODUTO 
-        AND pm.COD_MODELO = vp.COD_MODELO 
-    LEFT JOIN VEICULOS v ON 1=1
-        AND vp.CHASSI_RESUMIDO = v.CHASSI_RESUMIDO
-        AND vp.COD_PRODUTO = v.COD_PRODUTO      
-        AND vp.COD_MODELO = v.COD_MODELO        
-        AND vp.cod_empresa = v.cod_empresa      
-        AND v.status = 'V' 
-    LEFT JOIN VEICULOS_PEDIDOS vped ON 1=1
-        AND vp.COD_PEDIDO = vped.COD_PEDIDO
-    LEFT JOIN PROP_FICTICIA_DADOS pfd ON 1=1
-        AND vp.COD_FICTICIO = pfd.COD_FICTICIO
-    LEFT JOIN clientes c ON c.COD_CLIENTE = vp.COD_CLIENTE 
-    LEFT JOIN patio p ON 1=1
-        AND p.COD_PATIO = v.COD_PATIO
-    LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
-        AND eu.NOME = vp.VENDEDOR 
-    LEFT JOIN empresas_usuarios eu2 ON 1=1
-        AND eu2.nome = vp.QUEM_APROVOU 
-    LEFT JOIN empresas e ON 1=1
-        AND e.cod_empresa = v.COD_EMPRESA 
-    LEFT JOIN cidades cid_res ON 1=1
-        AND cid_res.cod_cidades = c.COD_CID_RES 
-        AND cid_res.uf = c.UF_RES 
-    LEFT JOIN cidades cid_com ON 1=1
-        AND cid_com.cod_cidades = c.COD_CID_COM 
-        AND cid_com.uf = c.UF_COM 
-    LEFT JOIN cidades cid_cob ON 1=1
-        AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
-        AND cid_cob.uf = c.UF_COBRANCA
-    LEFT JOIN CORES_EXTERNAS ce_veic ON 1=1          
-        AND ce_veic.COR_EXTERNA = v.COR_EXTERNA
-    LEFT JOIN CORES_EXTERNAS ce_ped ON 1=1         
-        AND ce_ped.COR_EXTERNA = vped.COR_EXTERNA
-    LEFT JOIN CORES_EXTERNAS ce_fic ON 1=1         
-        AND ce_fic.COR_EXTERNA = pfd.COR_EXTERNA
-    LEFT JOIN crm_eventos cev ON 1=1            
-        AND cev.COD_PROPOSTA = vp.COD_PROPOSTA
-        AND cev.status <> 'D'
-        AND cev.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
-    WHERE 1=1
-        AND vp.status_proposta = 'V'
-        AND TRUNC(vp.EMISSAO) = TRUNC(SYSDATE)
+        SELECT
+            eu.cod_empresa,
+            eu.NOME_COMPLETO NOME_VENDEDOR,
+            pm.DESCRICAO_MODELO MODELO,
+            vp.COD_PROPOSTA,
+            vp.DATA_CANCELAMENTO,
+            vp.VALOR_PROPOSTA,
+            c.NOME NOME_CLIENTE
+        FROM VEICULOS_PROPOSTAS vp
+        LEFT JOIN EMPRESAS_USUARIOS eu ON eu.NOME = vp.VENDEDOR
+        LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = vp.COD_PRODUTO AND pm.COD_MODELO = vp.COD_MODELO
+        LEFT JOIN clientes c ON c.COD_CLIENTE = vp.COD_CLIENTE
+        WHERE TRUNC(vp.DATA_CANCELAMENTO) >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1)
+        ORDER BY vp.DATA_CANCELAMENTO
     """
-    conn, cursor = oracle()
+    conn, cursor = _conexao()
     try:
         cursor.execute(query)
         result = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
-        df = pd.DataFrame(result, columns=columns)
-        return df
+        return pd.DataFrame(result, columns=columns)
     finally:
         cursor.close()
         conn.close()
+
+def _fetch_faturadas_hoje():
+    query = """
+        SELECT
+            eu.cod_empresa,
+            eu.NOME_COMPLETO NOME_VENDEDOR,
+            pm.DESCRICAO_MODELO MODELO,
+            vp.COD_PROPOSTA,
+            vp.DATA_VENDA,
+            vp.VALOR_PROPOSTA,
+            c.NOME NOME_CLIENTE
+        FROM VEICULOS_PROPOSTAS vp
+        LEFT JOIN EMPRESAS_USUARIOS eu ON eu.NOME = vp.VENDEDOR
+        LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = vp.COD_PRODUTO AND pm.COD_MODELO = vp.COD_MODELO
+        LEFT JOIN clientes c ON c.COD_CLIENTE = vp.COD_CLIENTE
+        WHERE vp.status_proposta = 'V'
+            AND TRUNC(vp.DATA_VENDA) = TRUNC(SYSDATE)
+        ORDER BY vp.DATA_VENDA
+    """
+    conn, cursor = _conexao()
+    try:
+        cursor.execute(query)
+        result = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        return pd.DataFrame(result, columns=columns)
+    finally:
+        cursor.close()
+        conn.close()
+
+def _gerar_kpis(df_emitidas, df_canceladas, df_faturadas):
+    hoje = df_emitidas[df_emitidas["DATA_PROPOSTA"].notna()].copy()
+    hoje["DATA"] = pd.to_datetime(hoje["DATA_PROPOSTA"]).dt.date
+    hoje["MES"] = pd.to_datetime(hoje["DATA_PROPOSTA"]).dt.month
+    hoje["ANO"] = pd.to_datetime(hoje["DATA_PROPOSTA"]).dt.year
+    
+    hoje_dia = datetime.date.today()
+    mes_atual = hoje_dia.month
+    ano_atual = hoje_dia.year
+
+    primeiro_dia_mes_atual = hoje_dia.replace(day=1)
+    ultimo_dia_mes_anterior = primeiro_dia_mes_atual - datetime.timedelta(days=1)
+    mes_anterior = ultimo_dia_mes_anterior.month
+    ano_anterior = ultimo_dia_mes_anterior.year
+
+    df_hoje = hoje[hoje["DATA"] == hoje_dia]
+    df_mes = hoje[(hoje["MES"] == mes_atual) & (hoje["ANO"] == ano_atual)]
+    df_mes_ant = hoje[(hoje["MES"] == mes_anterior) & (hoje["ANO"] == ano_anterior)]
+
+    canc = df_canceladas[df_canceladas["DATA_CANCELAMENTO"].notna()].copy()
+    canc["DATA"] = pd.to_datetime(canc["DATA_CANCELAMENTO"]).dt.date
+    canc["MES"] = pd.to_datetime(canc["DATA_CANCELAMENTO"]).dt.month
+    canc["ANO"] = pd.to_datetime(canc["DATA_CANCELAMENTO"]).dt.year
+    
+    df_canceladas_hoje = canc[canc["DATA"] == hoje_dia]
+    df_canceladas_mes = canc[(canc["MES"] == mes_atual) & (canc["ANO"] == ano_atual)]
+
+    total_emitidas_mes = len(df_mes)
+    total_emitidas_mes_ant = len(df_mes_ant)
+    total_emitidas = len(df_hoje)
+    total_canceladas = len(df_canceladas_hoje)
+    total_faturadas = len(df_faturadas)
+
+    def _por_unidade(df, col_data="DATA_PROPOSTA"):
+        result = {}
+        for cod, nome in EMPRESAS_MAP.items():
+            result[nome] = 0
+        if df.empty:
+            return result
+        for _, row in df.iterrows():
+            nome = _extrair_empresa(row.get("COD_EMPRESA"))
+            if nome in result:
+                result[nome] += 1
+        return result
+
+    unids_emitidas_mes = _por_unidade(df_mes)
+    unids_emitidas = _por_unidade(df_hoje)
+    unids_canceladas = _por_unidade(df_canceladas_hoje, "DATA_CANCELAMENTO")
+    unids_faturadas = _por_unidade(df_faturadas, "DATA_VENDA")
+
+    return {
+        "emitidas_mes": {"total": total_emitidas_mes, "unidades": unids_emitidas_mes, "total_anterior": total_emitidas_mes_ant},
+        "emitidas": {"total": total_emitidas, "unidades": unids_emitidas},
+        "canceladas": {"total": total_canceladas, "unidades": unids_canceladas},
+        "faturadas": {"total": total_faturadas, "unidades": unids_faturadas},
+    }, df_hoje, df_canceladas_hoje, df_mes, df_canceladas_mes
+
+def _formatar_tabela_design(t):
+    t.auto_set_font_size(False)
+    t.set_fontsize(7)
+    for key, cell in t.get_celld().items():
+        cell.set_edgecolor(COR_CINZA_BORDA)
+        cell.set_linewidth(0.5)
+        
+        if key[0] == 0:
+            cell.set_text_props(weight="bold", color="#333333", family="sans-serif")
+            cell.set_facecolor("#E9ECEF")
+        else:
+            cell.set_facecolor(COR_FUNDO_CARD)
+            cell.set_text_props(color=COR_TEXTO, family="sans-serif")
+
+        if key[1] == 0:
+            cell.set_text_props(ha='left')
+            text_obj = cell.get_text()
+            if not text_obj.get_text().startswith("  "):
+                text_obj.set_text("   " + text_obj.get_text())
+        else:
+            cell.set_text_props(ha='center')
+
+def setup_outer_card(ax):
+    ax.set_facecolor(COR_FUNDO_CARD)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_edgecolor(COR_CINZA_BORDA)
+        spine.set_linewidth(1.0)
+
+def setup_inner_plot(ax):
+    ax.set_facecolor(COR_FUNDO_CARD)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_color(COR_CINZA_BORDA)
+    ax.grid(axis="y", linestyle="--", color=COR_CINZA_BORDA, alpha=0.7, zorder=0)
+    ax.tick_params(axis="y", colors="#7F8C8D", labelsize=8, length=0)
+    ax.tick_params(axis="x", colors=COR_TEXTO, labelsize=8)
+    ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
 
 def generate_pdf():
-    df = get_data()
-    df_fat = get_faturamento_data()
+    df_emitidas = _fetch_propostas_emitidas()
+    df_canceladas = _fetch_canceladas()
+    df_faturadas = _fetch_faturadas_hoje()
+
+    kpis, df_hoje, df_canceladas_hoje, df_mes, df_canceladas_mes = _gerar_kpis(df_emitidas, df_canceladas, df_faturadas)
+    hoje_data = datetime.date.today()
+
+    fig = plt.figure(figsize=(8.27, 16.5), facecolor=COR_CINZA_FUNDO)
     
-    # Preprocessamento das datas
-    df['DATA_PROPOSTA'] = pd.to_datetime(df['DATA_PROPOSTA']).dt.date
-    if not df_fat.empty:
-        df_fat['DATA_PROPOSTA'] = pd.to_datetime(df_fat['DATA_PROPOSTA']).dt.date
-        
-    hoje = datetime.date.today()
-    
-    # HOJE VENDAS
-    df_hoje = df[df['DATA_PROPOSTA'] == hoje]
-    vendas_hoje = len(df_hoje)
-    
-    # EVOLUCAO 7 DIAS VENDAS
-    vendas_por_dia = df.groupby('DATA_PROPOSTA').size()
-    dias = [hoje - datetime.timedelta(days=i) for i in range(6, -1, -1)]
-    valores = [vendas_por_dia.get(dia, 0) for dia in dias]
-    labels_dias = [dia.strftime('%d/%m') for dia in dias]
-    
-    # Criacao do PDF expandido (12x14)
-    fig = plt.figure(figsize=(12, 14), facecolor='#F4F7F6')
-    
-    # ==========================================
-    # SESSÃO 1: CABEÇALHO E GRÁFICOS (HOJE vs 7D)
-    # ==========================================
-    
+    gs = GridSpec(7, 4, figure=fig, 
+                  height_ratios=[0.5, 1.3, 1.8, 1.8, 2.5, 2.5, 1.8],
+                  top=0.96, bottom=0.04, left=0.06, right=0.94,
+                  hspace=0.35, wspace=0.35)
+
+    # --- 0. CABECALHO ---
+    ax_header = fig.add_subplot(gs[0, :])
+    ax_header.axis("off")
+    ax_header.set_xlim(0, 1)
+    ax_header.set_ylim(0, 1)
     try:
         logo_pil = Image.open(LOGO_PATH).convert("RGBA")
-        logo = np.array(logo_pil)
-        ax_logo = fig.add_axes([0.05, 0.92, 0.15, 0.05], anchor='NW', zorder=1)
-        ax_logo.imshow(logo)
-        ax_logo.axis('off')
+        logo_arr = np.array(logo_pil)
+        ax_logo = ax_header.inset_axes([0, 0, 0.15, 1])
+        ax_logo.imshow(logo_arr)
+        ax_logo.axis("off")
     except Exception as e:
-        logger.warning(f"Não foi possível carregar a logo: {e}")
-    
-    fig.text(0.5, 0.95, "Acompanhamento Diário de Vendas", fontsize=24, ha='center', weight='bold', color='#2C3E50', family='sans-serif')
-    fig.text(0.5, 0.92, f"Relatório gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", fontsize=11, ha='center', color='#7F8C8D', style='italic')
-    
-    # QUADRO VENDAS HOJE
-    ax_quadro = fig.add_axes([0.05, 0.55, 0.35, 0.32])
-    ax_quadro.axis('off')
-    
-    box = FancyBboxPatch((0.05, 0.05), 0.9, 0.9, boxstyle="round,pad=0.05", 
-                         fill=True, color='white', ec='#E0E4E8', lw=1.5, zorder=0)
-    ax_quadro.add_patch(box)
-    
-    ax_quadro.text(0.5, 0.85, "VENDAS HOJE", ha='center', va='center', fontsize=16, weight='bold', color='#7F8C8D')
-    ax_quadro.text(0.5, 0.65, f"{vendas_hoje}", ha='center', va='center', fontsize=65, weight='bold', color='#2980B9')
-    ax_quadro.plot([0.2, 0.8], [0.48, 0.48], color='#ECF0F1', lw=2)
-    
-    col_empresa_hoje = next((c for c in df_hoje.columns if c.upper() == 'COD_EMPRESA'), None)
-    empresas_map = {'11': "Sorocaba", '33': "Indaiatuba", '111': "Seminovos"}
-    
-    if col_empresa_hoje:
-        y_pos = 0.35
-        for cod, nome in empresas_map.items():
-            qtd = len(df_hoje[df_hoje[col_empresa_hoje].astype(str).str.extract(r'(\d+)', expand=False) == cod])
-            ax_quadro.text(0.25, y_pos, f"{nome}", ha='left', va='center', fontsize=14, color='#34495E', weight='medium')
-            ax_quadro.text(0.75, y_pos, f"{qtd}", ha='right', va='center', fontsize=16, color='#2C3E50', weight='bold')
-            y_pos -= 0.12
-            
-    # GRÁFICO 7 DIAS
-    ax_bar = fig.add_axes([0.48, 0.55, 0.45, 0.32])
-    ax_bar.set_facecolor('#F4F7F6')
-    bars = ax_bar.bar(labels_dias, valores, color='#3498DB', edgecolor='none', width=0.6, zorder=3)
-    ax_bar.spines['top'].set_visible(False)
-    ax_bar.spines['right'].set_visible(False)
-    ax_bar.spines['left'].set_visible(False)
-    ax_bar.spines['bottom'].set_color('#BDC3C7')
-    ax_bar.grid(axis='y', linestyle='--', color='#BDC3C7', alpha=0.7, zorder=0)
-    ax_bar.set_title("Evolução dos Últimos 7 Dias", fontsize=16, weight='bold', color='#2C3E50', pad=20)
-    
-    if max(valores) > 0:
-        ax_bar.set_ylim(0, max(valores) * 1.2)
-    else:
-        ax_bar.set_ylim(0, 5)
+        logger.warning("Logo nao carregada: %s", e)
         
-    ax_bar.tick_params(axis='y', colors='#7F8C8D', labelsize=11, length=0)
-    ax_bar.tick_params(axis='x', colors='#34495E', labelsize=11)
-    for i, v in enumerate(valores):
-        ax_bar.text(i, v + (max(valores)*0.03 if max(valores) > 0 else 0.1), str(v), ha='center', va='bottom', fontsize=13, weight='bold', color='#2C3E50')
+    ax_header.text(0.5, 0.6, "ACOMPANHAMENTO DIÁRIO", fontsize=18, ha="center",
+                   weight="bold", color=COR_VERMELHO, family="sans-serif", transform=ax_header.transAxes)
+    ax_header.text(0.5, 0.2, f"Relatório gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                   fontsize=9, ha="center", color="#7F8C8D", family="sans-serif", transform=ax_header.transAxes)
 
-    # ==========================================
-    # SESSÃO 2: TABELAS DETALHADAS 
-    # ==========================================
-    
-    # 1) Agrupamentos: Vendas por Vendedor
-    col_vendedor = next((c for c in df_hoje.columns if c.upper() == 'NOME_VENDEDOR'), None)
-    if col_vendedor and not df_hoje.empty:
-        vendas_vend = df_hoje.groupby(col_vendedor).size().sort_values(ascending=False)
-        vendas_vend = vendas_vend[vendas_vend > 0]
-    else:
-        vendas_vend = pd.Series(dtype=int)
+    # --- 1. CARDS DE KPI ---
+    kpi_configs = [
+        ("EMITIDAS (MÊS)", kpis["emitidas_mes"]["total"], kpis["emitidas_mes"]["unidades"], "#8E44AD"),
+        ("EMITIDAS (HOJE)", kpis["emitidas"]["total"], kpis["emitidas"]["unidades"], COR_AZUL),
+        ("CANCELADAS (HOJE)", kpis["canceladas"]["total"], kpis["canceladas"]["unidades"], "#E74C3C"),
+        ("FATURADAS (HOJE)", kpis["faturadas"]["total"], kpis["faturadas"]["unidades"], "#27AE60"),
+    ]
 
-    # 2) Agrupamentos: Faturamento por Vendedor
-    col_vendedor_fat = next((c for c in df_fat.columns if c.upper() == 'NOME_VENDEDOR'), None)
-    if col_vendedor_fat and not df_fat.empty:
-        faturamento_vend = df_fat.groupby(col_vendedor_fat).size().sort_values(ascending=False)
-        faturamento_vend = faturamento_vend[faturamento_vend > 0]
-    else:
-        faturamento_vend = pd.Series(dtype=int)
+    for idx, (titulo, total, unidades, cor_destaque) in enumerate(kpi_configs):
+        ax_kpi = fig.add_subplot(gs[1, idx])
+        setup_outer_card(ax_kpi)
+
+        ax_kpi.text(0.5, 0.82, titulo, ha="center", va="center", fontsize=7.5,
+                    weight="bold", color="#333333", family="sans-serif", transform=ax_kpi.transAxes)
         
-    # 3) Agrupamentos: Faturamento por Empresa
-    col_empresa_fat = next((c for c in df_fat.columns if c.upper() == 'COD_EMPRESA'), None)
-    fat_empresa_data = []
-    if col_empresa_fat and not df_fat.empty:
-        for cod, nome in empresas_map.items():
-            qtd = len(df_fat[df_fat[col_empresa_fat].astype(str).str.extract(r'(\d+)', expand=False) == cod])
-            if qtd > 0:
-                fat_empresa_data.append([nome, qtd])
-        fat_empresa_data = sorted(fat_empresa_data, key=lambda x: x[1], reverse=True)
+        y_numero = 0.52 if titulo == "EMITIDAS (MÊS)" else 0.48
+        
+        ax_kpi.text(0.5, y_numero, str(total), ha="center", va="center", fontsize=28,
+                    weight="bold", color=cor_destaque, family="sans-serif", transform=ax_kpi.transAxes)
 
-    def formatar_tabela(t, cor_header):
-        t.auto_set_font_size(False)
-        t.set_fontsize(10)
-        t.scale(1, 1.8)
-        for key, cell in t.get_celld().items():
-            cell.set_edgecolor('#ECF0F1')
-            if key[0] == 0:
-                cell.set_text_props(weight='bold', color='white', family='sans-serif')
-                cell.set_facecolor(cor_header)
+        if titulo == "EMITIDAS (MÊS)":
+            total_ant = kpis["emitidas_mes"]["total_anterior"]
+            if total_ant > 0:
+                pct = ((total - total_ant) / total_ant) * 100
+                sinal = "▲" if pct > 0 else ("▼" if pct < 0 else "=")
+                cor_pct = "#27AE60" if pct > 0 else ("#E74C3C" if pct < 0 else "#7F8C8D")
+                comp_text = f"Mês ant: {total_ant} ({sinal} {abs(pct):.0f}%)"
             else:
-                cell.set_facecolor('white')
-                cell.set_text_props(color='#2C3E50', family='sans-serif')
+                comp_text = f"Mês ant: {total_ant}"
+                cor_pct = "#7F8C8D"
+                
+            ax_kpi.text(0.5, 0.30, comp_text, ha="center", va="center", fontsize=6.5,
+                        weight="bold", color=cor_pct, family="sans-serif", transform=ax_kpi.transAxes)
 
-    # DESENHAR TABELA 1
-    ax_t1 = fig.add_axes([0.05, 0.05, 0.28, 0.40])
-    ax_t1.axis('off')
-    ax_t1.set_title("Vendas Vendedor (HOJE)", fontsize=14, weight='bold', color='#2C3E50', pad=10)
-    if not vendas_vend.empty:
-        cellText1 = [[v[:22], q] for v, q in vendas_vend.items()]
-        t1 = ax_t1.table(cellText=cellText1, colLabels=["Vendedor", "Qtd"], colWidths=[0.75, 0.25], loc='upper center', cellLoc='center')
-        formatar_tabela(t1, '#3498DB')
+        # A CORREÇÃO ESTÁ AQUI ABAIXO: Usando uma lista de 2 pontos pro Y também
+        ax_kpi.plot([0.1, 0.9], [0.22, 0.22], color=COR_CINZA_BORDA, lw=1, transform=ax_kpi.transAxes)
+
+        nomes_unidades = ["Sorocaba", "Indaiatuba", "Seminovos"]
+        for j, nome in enumerate(nomes_unidades):
+            qtd = unidades.get(nome, 0)
+            x_nome = 0.16 + j * 0.34
+            nome_abrev = nome if nome != "Indaiatuba" else "Indaia."
+            ax_kpi.text(x_nome, 0.13, nome_abrev, ha="center", va="center",
+                        fontsize=6, color="#7F8C8D", family="sans-serif", transform=ax_kpi.transAxes)
+            ax_kpi.text(x_nome, 0.04, str(qtd), ha="center", va="center",
+                        fontsize=8.5, weight="bold", color=COR_TEXTO, family="sans-serif", transform=ax_kpi.transAxes)
+
+    # --- 2. GRÁFICO 1: Evolução Emitidas ---
+    df_emitidas["DATA"] = pd.to_datetime(df_emitidas["DATA_PROPOSTA"]).dt.date
+    vendas_por_dia = df_emitidas.groupby("DATA").size()
+    dias = [hoje_data - datetime.timedelta(days=i) for i in range(6, -1, -1)]
+    valores_7d = [vendas_por_dia.get(dia, 0) for dia in dias]
+    labels_7d = [dia.strftime("%d/%m") for dia in dias]
+
+    ax_card1 = fig.add_subplot(gs[2, :])
+    setup_outer_card(ax_card1)
+    ax_card1.text(0.02, 0.88, "EVOLUÇÃO DE PROPOSTAS EMITIDAS", fontsize=11, weight="bold", color=COR_TEXTO, transform=ax_card1.transAxes)
+
+    ax_plot1 = ax_card1.inset_axes([0.03, 0.12, 0.94, 0.65])
+    setup_inner_plot(ax_plot1)
+    
+    bars1 = ax_plot1.bar(range(len(labels_7d)), valores_7d, color=COR_AZUL, edgecolor="none", width=0.5, zorder=3)
+    ax_plot1.set_xticks(range(len(labels_7d)))
+    ax_plot1.set_xticklabels(labels_7d)
+    
+    ymax1 = max(valores_7d) if max(valores_7d) > 0 else 5
+    ax_plot1.set_ylim(0, ymax1 * 1.25)
+    for i, v in enumerate(valores_7d):
+        ax_plot1.text(i, v + ymax1 * 0.02, str(v), ha="center", va="bottom", fontsize=8, weight="bold", color=COR_TEXTO)
+
+    # --- 3. GRÁFICO 2: Evolução Vendas ---
+    ax_card2 = fig.add_subplot(gs[3, :])
+    setup_outer_card(ax_card2)
+    ax_card2.text(0.02, 0.88, "EVOLUÇÃO DE VENDAS", fontsize=11, weight="bold", color=COR_TEXTO, transform=ax_card2.transAxes)
+    ax_card2.text(0.02, 0.76, "Vendas contabilizadas como: Propostas Emitidas - Propostas Canceladas no mesmo dia", fontsize=8, color="#7F8C8D", style="italic", transform=ax_card2.transAxes)
+
+    ax_plot2 = ax_card2.inset_axes([0.03, 0.12, 0.94, 0.55])
+    setup_inner_plot(ax_plot2)
+    
+    df_canceladas["DATA"] = pd.to_datetime(df_canceladas["DATA_CANCELAMENTO"]).dt.date
+    df_emitidas["NOME_EMPRESA"] = df_emitidas["COD_EMPRESA"].apply(_extrair_empresa)
+    df_canceladas["NOME_EMPRESA"] = df_canceladas["COD_EMPRESA"].apply(_extrair_empresa)
+
+    v_soro, v_inda, v_semi, v_tot = [], [], [], []
+    for dia in dias:
+        emi_dia = df_emitidas[df_emitidas["DATA"] == dia]
+        canc_dia = df_canceladas[df_canceladas["DATA"] == dia]
+        v_soro.append(len(emi_dia[emi_dia["NOME_EMPRESA"] == "Sorocaba"]) - len(canc_dia[canc_dia["NOME_EMPRESA"] == "Sorocaba"]))
+        v_inda.append(len(emi_dia[emi_dia["NOME_EMPRESA"] == "Indaiatuba"]) - len(canc_dia[canc_dia["NOME_EMPRESA"] == "Indaiatuba"]))
+        v_semi.append(len(emi_dia[emi_dia["NOME_EMPRESA"] == "Seminovos"]) - len(canc_dia[canc_dia["NOME_EMPRESA"] == "Seminovos"]))
+        v_tot.append(len(emi_dia) - len(canc_dia))
+
+    x_pos = np.arange(len(labels_7d))
+    width = 0.2
+
+    b_soro = ax_plot2.bar(x_pos - 1.5 * width, v_soro, width, label='Sorocaba', color='#3498DB', zorder=3)
+    b_inda = ax_plot2.bar(x_pos - 0.5 * width, v_inda, width, label='Indaiatuba', color='#E67E22', zorder=3)
+    b_semi = ax_plot2.bar(x_pos + 0.5 * width, v_semi, width, label='Seminovos', color='#9B59B6', zorder=3)
+    b_tot = ax_plot2.bar(x_pos + 1.5 * width, v_tot, width, label='Total', color='#27AE60', zorder=3)
+
+    ax_plot2.set_xticks(x_pos)
+    ax_plot2.set_xticklabels(labels_7d)
+    ax_plot2.legend(loc='upper right', bbox_to_anchor=(1.0, 1.45), ncol=4, frameon=False, fontsize=8)
+
+    max_val2 = max(max(v_soro), max(v_inda), max(v_semi), max(v_tot))
+    ymax2 = max_val2 if max_val2 > 0 else 5
+    ax_plot2.set_ylim(0, ymax2 * 1.35)
+
+    for bars in [b_soro, b_inda, b_semi, b_tot]:
+        for bar in bars:
+            v = bar.get_height()
+            ax_plot2.text(bar.get_x() + bar.get_width()/2., v + ymax2 * 0.02, str(int(v)), ha="center", va="bottom", fontsize=6, weight="bold", color=COR_TEXTO)
+
+    # --- 4. TABELAS HOJE ---
+    ax_card3 = fig.add_subplot(gs[4, 0:2])
+    setup_outer_card(ax_card3)
+    ax_card3.text(0.04, 0.90, "PROPOSTAS POR VENDEDOR (HOJE)", fontsize=10, weight="bold", color=COR_TEXTO, transform=ax_card3.transAxes)
+
+    ax_tab1 = ax_card3.inset_axes([0.04, 0.04, 0.92, 0.80])
+    ax_tab1.axis("off")
+    if not df_hoje.empty and "NOME_VENDEDOR" in df_hoje.columns:
+        vendas_vend = df_hoje.groupby("NOME_VENDEDOR").size().reset_index(name="EMITIDAS")
+        vendas_vend["NOME_VENDEDOR"] = vendas_vend["NOME_VENDEDOR"].str.upper().str.strip()
+        if not df_canceladas_hoje.empty and "NOME_VENDEDOR" in df_canceladas_hoje.columns:
+            canc_vend = df_canceladas_hoje.groupby("NOME_VENDEDOR").size().reset_index(name="CANCELADAS")
+            canc_vend["NOME_VENDEDOR"] = canc_vend["NOME_VENDEDOR"].str.upper().str.strip()
+            tabela = vendas_vend.merge(canc_vend, on="NOME_VENDEDOR", how="left")
+        else:
+            tabela = vendas_vend.copy()
+            tabela["CANCELADAS"] = 0
+
+        tabela["CANCELADAS"] = tabela["CANCELADAS"].fillna(0).astype(int)
+        tabela["VENDAS"] = tabela["EMITIDAS"] - tabela["CANCELADAS"]
+        tabela = tabela.sort_values("EMITIDAS", ascending=False).head(10)
+        tabela["NOME_VENDEDOR"] = tabela["NOME_VENDEDOR"].str[:25]
+
+        cell_text = tabela[["NOME_VENDEDOR", "EMITIDAS", "CANCELADAS", "VENDAS"]].values.tolist()
+        t1 = ax_tab1.table(cellText=cell_text, colLabels=["Vendedor", "Emitidas", "Canceladas", "Vendas"],
+                         colWidths=[0.49, 0.17, 0.17, 0.17], loc="center", bbox=[0, 0, 1, 1])
+        _formatar_tabela_design(t1)
     else:
-        ax_t1.text(0.5, 0.8, "Nenhuma venda", ha='center', va='center', fontsize=12, color='#7F8C8D')
+        ax_tab1.text(0.5, 0.5, "Nenhuma proposta hoje", ha="center", va="center", fontsize=9, color="#7F8C8D")
 
-    # DESENHAR TABELA 2
-    ax_t2 = fig.add_axes([0.36, 0.05, 0.28, 0.40])
-    ax_t2.axis('off')
-    ax_t2.set_title("Faturamento Vendedor (HOJE)", fontsize=14, weight='bold', color='#2C3E50', pad=10)
-    if not faturamento_vend.empty:
-        cellText2 = [[v[:22], q] for v, q in faturamento_vend.items()]
-        t2 = ax_t2.table(cellText=cellText2, colLabels=["Vendedor", "Qtd"], colWidths=[0.75, 0.25], loc='upper center', cellLoc='center')
-        formatar_tabela(t2, '#27AE60') # Verde para faturamento
+    ax_card4 = fig.add_subplot(gs[4, 2:4])
+    setup_outer_card(ax_card4)
+    ax_card4.text(0.04, 0.90, "PROPOSTAS POR VEÍCULO (HOJE)", fontsize=10, weight="bold", color=COR_TEXTO, transform=ax_card4.transAxes)
+
+    ax_tab2 = ax_card4.inset_axes([0.04, 0.04, 0.92, 0.80])
+    ax_tab2.axis("off")
+    if not df_hoje.empty and "MODELO" in df_hoje.columns:
+        veic = df_hoje.groupby("MODELO").agg(PROPOSTAS=("COD_PROPOSTA", "count"), PRECO_MEDIO=("VALOR_PROPOSTA", "mean")).reset_index()
+        veic["PRECO_MEDIO"] = veic["PRECO_MEDIO"].fillna(0).apply(lambda x: f"R$ {x:,.0f}" if x > 0 else "R$ 0")
+        veic = veic.sort_values("PROPOSTAS", ascending=False).head(10)
+        veic["MODELO"] = veic["MODELO"].fillna("Não informado").str[:25]
+
+        cell_text2 = veic[["MODELO", "PROPOSTAS", "PRECO_MEDIO"]].values.tolist()
+        t2 = ax_tab2.table(cellText=cell_text2, colLabels=["Veículo", "Propostas", "Preço Médio"],
+                         colWidths=[0.55, 0.20, 0.25], loc="center", bbox=[0, 0, 1, 1])
+        _formatar_tabela_design(t2)
     else:
-        ax_t2.text(0.5, 0.8, "Nenhum faturamento", ha='center', va='center', fontsize=12, color='#7F8C8D')
+        ax_tab2.text(0.5, 0.5, "Nenhuma proposta hoje", ha="center", va="center", fontsize=9, color="#7F8C8D")
 
-    # DESENHAR TABELA 3
-    ax_t3 = fig.add_axes([0.67, 0.05, 0.28, 0.40])
-    ax_t3.axis('off')
-    ax_t3.set_title("Faturamento Loja (HOJE)", fontsize=14, weight='bold', color='#2C3E50', pad=10)
-    if fat_empresa_data:
-        t3 = ax_t3.table(cellText=fat_empresa_data, colLabels=["Empresa", "Qtd"], colWidths=[0.75, 0.25], loc='upper center', cellLoc='center')
-        formatar_tabela(t3, '#27AE60')
+    # --- 5. TABELAS MÊS ---
+    ax_card5 = fig.add_subplot(gs[5, 0:2])
+    setup_outer_card(ax_card5)
+    ax_card5.text(0.04, 0.90, "PROPOSTAS POR VENDEDOR (MÊS)", fontsize=10, weight="bold", color=COR_TEXTO, transform=ax_card5.transAxes)
+
+    ax_tab3 = ax_card5.inset_axes([0.04, 0.04, 0.92, 0.80])
+    ax_tab3.axis("off")
+    if not df_mes.empty and "NOME_VENDEDOR" in df_mes.columns:
+        vendas_vend_m = df_mes.groupby("NOME_VENDEDOR").size().reset_index(name="EMITIDAS")
+        vendas_vend_m["NOME_VENDEDOR"] = vendas_vend_m["NOME_VENDEDOR"].str.upper().str.strip()
+        if not df_canceladas_mes.empty and "NOME_VENDEDOR" in df_canceladas_mes.columns:
+            canc_vend_m = df_canceladas_mes.groupby("NOME_VENDEDOR").size().reset_index(name="CANCELADAS")
+            canc_vend_m["NOME_VENDEDOR"] = canc_vend_m["NOME_VENDEDOR"].str.upper().str.strip()
+            tabela_m = vendas_vend_m.merge(canc_vend_m, on="NOME_VENDEDOR", how="left")
+        else:
+            tabela_m = vendas_vend_m.copy()
+            tabela_m["CANCELADAS"] = 0
+
+        tabela_m["CANCELADAS"] = tabela_m["CANCELADAS"].fillna(0).astype(int)
+        tabela_m["VENDAS"] = tabela_m["EMITIDAS"] - tabela_m["CANCELADAS"]
+        tabela_m = tabela_m.sort_values("EMITIDAS", ascending=False).head(12)
+        tabela_m["NOME_VENDEDOR"] = tabela_m["NOME_VENDEDOR"].str[:25]
+
+        cell_text_m = tabela_m[["NOME_VENDEDOR", "EMITIDAS", "CANCELADAS", "VENDAS"]].values.tolist()
+        t3 = ax_tab3.table(cellText=cell_text_m, colLabels=["Vendedor", "Emitidas", "Canceladas", "Vendas"],
+                         colWidths=[0.49, 0.17, 0.17, 0.17], loc="center", bbox=[0, 0, 1, 1])
+        _formatar_tabela_design(t3)
     else:
-        ax_t3.text(0.5, 0.8, "Nenhum faturamento", ha='center', va='center', fontsize=12, color='#7F8C8D')
+        ax_tab3.text(0.5, 0.5, "Nenhuma proposta no mês", ha="center", va="center", fontsize=9, color="#7F8C8D")
 
+    ax_card6 = fig.add_subplot(gs[5, 2:4])
+    setup_outer_card(ax_card6)
+    ax_card6.text(0.04, 0.90, "PROPOSTAS POR VEÍCULO (MÊS)", fontsize=10, weight="bold", color=COR_TEXTO, transform=ax_card6.transAxes)
+
+    ax_tab4 = ax_card6.inset_axes([0.04, 0.04, 0.92, 0.80])
+    ax_tab4.axis("off")
+    if not df_mes.empty and "MODELO" in df_mes.columns:
+        veic_m = df_mes.groupby("MODELO").agg(PROPOSTAS=("COD_PROPOSTA", "count"), PRECO_MEDIO=("VALOR_PROPOSTA", "mean")).reset_index()
+        veic_m["PRECO_MEDIO"] = veic_m["PRECO_MEDIO"].fillna(0).apply(lambda x: f"R$ {x:,.0f}" if x > 0 else "R$ 0")
+        veic_m = veic_m.sort_values("PROPOSTAS", ascending=False).head(12)
+        veic_m["MODELO"] = veic_m["MODELO"].fillna("Não informado").str[:25]
+
+        cell_text4 = veic_m[["MODELO", "PROPOSTAS", "PRECO_MEDIO"]].values.tolist()
+        t4 = ax_tab4.table(cellText=cell_text4, colLabels=["Veículo", "Propostas", "Preço Médio"],
+                         colWidths=[0.55, 0.20, 0.25], loc="center", bbox=[0, 0, 1, 1])
+        _formatar_tabela_design(t4)
+    else:
+        ax_tab4.text(0.5, 0.5, "Nenhuma proposta no mês", ha="center", va="center", fontsize=9, color="#7F8C8D")
+
+    # --- 6. GRÁFICO 3: Total Emitidas Mês ---
+    ax_card7 = fig.add_subplot(gs[6, :])
+    setup_outer_card(ax_card7)
+    ax_card7.text(0.02, 0.88, "TOTAL DE EMITIDAS DO MÊS (ACUMULADO)", fontsize=11, weight="bold", color=COR_TEXTO, transform=ax_card7.transAxes)
+    
+    ax_plot3 = ax_card7.inset_axes([0.03, 0.15, 0.94, 0.65])
+    setup_inner_plot(ax_plot3)
+    
+    df_emitidas['MES_COMP'] = pd.to_datetime(df_emitidas["DATA_PROPOSTA"]).dt.month
+    df_emitidas['DIA'] = pd.to_datetime(df_emitidas["DATA_PROPOSTA"]).dt.day
+
+    mes_atual = hoje_data.month
+    primeiro_dia_mes_atual = hoje_data.replace(day=1)
+    ultimo_dia_mes_anterior = primeiro_dia_mes_atual - datetime.timedelta(days=1)
+    mes_anterior = ultimo_dia_mes_anterior.month
+
+    emitidas_atual = df_emitidas[df_emitidas['MES_COMP'] == mes_atual].groupby('DIA').size()
+    emitidas_anterior = df_emitidas[df_emitidas['MES_COMP'] == mes_anterior].groupby('DIA').size()
+
+    max_dias_atual = (primeiro_dia_mes_atual.replace(month=primeiro_dia_mes_atual.month % 12 + 1, day=1) - datetime.timedelta(days=1)).day if primeiro_dia_mes_atual.month < 12 else 31
+    max_dias_anterior = ultimo_dia_mes_anterior.day
+    max_dias_plot = max(max_dias_atual, max_dias_anterior)
+    dias_x = list(range(1, max_dias_plot + 1))
+    
+    y_atual = [emitidas_atual.get(d, 0) for d in dias_x]
+    y_anterior = [emitidas_anterior.get(d, 0) for d in dias_x]
+    emitidas_atual_cum = np.cumsum(y_atual)
+    emitidas_anterior_cum = np.cumsum(y_anterior)
+
+    dias_atual_plot = dias_x[:hoje_data.day]
+    y_atual_plot = emitidas_atual_cum[:hoje_data.day]
+
+    ax_plot3.plot(dias_atual_plot, y_atual_plot, marker='o', color=COR_AZUL, linewidth=2, label="Mês Atual", zorder=3)
+    ax_plot3.plot(dias_x, emitidas_anterior_cum, marker='o', color="#BDC3C7", linewidth=2, label="Mês Anterior", zorder=2)
+
+    ax_plot3.legend(loc="upper left", bbox_to_anchor=(0.0, 1.15), frameon=False, fontsize=8)
+    ax_plot3.set_xticks(dias_x)
+    
     buf = BytesIO()
-    plt.savefig(buf, format='pdf', bbox_inches='tight')
+    plt.savefig(buf, format="pdf", bbox_inches="tight", dpi=150)
     plt.close()
     buf.seek(0)
     return buf.read()
@@ -371,37 +522,35 @@ def generate_pdf():
 @app.task(bind=True, max_retries=2, default_retry_delay=60)
 def send_acompanhamento_diretoria(self):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    logger.info(f"Gerando relatorio PDF...")
+    logger.info("Gerando relatorio PDF...")
     try:
         pdf_data = generate_pdf()
     except Exception as exc:
-        logger.error(f"Erro ao gerar relatorio PDF: {exc}")
+        logger.error("Erro ao gerar relatorio PDF: %s", exc)
         return {"status": "error", "details": str(exc)}
 
     resultados = []
-    
     for nome, chat_id in TELEGRAM_CHATS.items():
         dados = {
             "chat_id": chat_id,
-            "caption": "Aqui está o relatório para acompanhamento de vendas e faturamento Diário."
+            "caption": "Acompanhamento diario de vendas e faturamento.",
         }
-        
-        logger.info(f"Tentando enviar relatorio para {nome} (ID {chat_id})...")
+        logger.info("Tentando enviar relatorio para %s (ID %s)...", nome, chat_id)
         try:
             arquivos = {"document": ("relatorio_diario.pdf", pdf_data)}
             resposta = requests.post(url, data=dados, files=arquivos, timeout=15)
             if resposta.status_code == 200:
-                logger.info(f"✅ Sucesso! Mensagem foi entregue para {nome}.")
+                logger.info("Enviado com sucesso para %s.", nome)
                 resultados.append({"nome": nome, "status": "success"})
             else:
-                logger.error(f"❌ Ops, algo deu errado para {nome}. Detalhes: {resposta.json()}")
+                logger.error("Falha ao enviar para %s: %s", nome, resposta.json())
                 resultados.append({"nome": nome, "status": "error", "details": resposta.json()})
         except Exception as exc:
-            logger.error(f"❌ Erro na requisição para {nome}: {exc}")
+            logger.error("Erro ao enviar para %s: %s", nome, exc)
             resultados.append({"nome": nome, "status": "error", "details": str(exc)})
-            
-    if any(r.get('status') == 'error' for r in resultados):
-        logger.warning(f"Envio concluído com alguns erros: {resultados}")
+
+    if any(r.get("status") == "error" for r in resultados):
+        logger.warning("Envio concluido com erros: %s", resultados)
         return {"status": "partial_success_or_error", "details": resultados}
 
     return {"status": "success", "details": resultados}
