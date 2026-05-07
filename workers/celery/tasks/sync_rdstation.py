@@ -329,7 +329,18 @@ def _criar_deal_rdstation(proposta):
         deal_custom_fields.append({"custom_field_id": FIELD_CIDADE, "value": cidade})
 
     phones = _split_unique(proposta.get('TELEFONES'))
-    emails = _split_unique(proposta.get('EMAILS'))
+    emails_raw = _split_unique(proposta.get('EMAILS'))
+    emails = _filtrar_emails_validos(emails_raw)
+
+    if emails_raw and not emails:
+        logger.warning("sync_rdstation: proposta %s com emails invalidos descartados: %s", cod_proposta, emails_raw)
+    elif len(emails) < len(emails_raw):
+        logger.warning(
+            "sync_rdstation: proposta %s com parte dos emails invalidos descartados (%s de %s)",
+            cod_proposta,
+            len(emails_raw) - len(emails),
+            len(emails_raw),
+        )
 
     contact = {"name": nome_cliente}
     if emails:
@@ -359,12 +370,24 @@ def _criar_deal_rdstation(proposta):
 
     logger.info("sync_rdstation: resposta HTTP %s - %s", response.status_code, response.text[:500])
 
-    if response.status_code in (200, 201):
+    data = {}
+    try:
         data = response.json()
+    except ValueError:
+        pass
+
+    if response.status_code in (200, 201):
         return data.get("_id") or data.get("id")
-    else:
-        logger.error("sync_rdstation: erro ao criar deal - %s", response.text)
-        return None
+
+    # Alguns cenarios retornam 422 por dados do contato, mas o deal e criado e vem com id no corpo.
+    if response.status_code == 422:
+        deal_id = data.get("_id") or data.get("id")
+        if deal_id:
+            logger.warning("sync_rdstation: deal criado com aviso de validacao (HTTP 422), id=%s", deal_id)
+            return deal_id
+
+    logger.error("sync_rdstation: erro ao criar deal - %s", response.text)
+    return None
 
 
 def _insert_sync(cursor, cod_proposta, id_crm, id_mkt):
