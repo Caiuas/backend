@@ -411,7 +411,8 @@ def veiculos_faturados():
                     WHEN c.COD_CID_COM <> NULL THEN cid_com.DESCRICAO
                     WHEN c.COD_CID_RES <> NULL THEN cid_res.DESCRICAO 
                     ELSE cid_cob.DESCRICAO 
-                END cidade
+                END cidade,
+                vp.DATA_VENDA
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
                 AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -501,7 +502,8 @@ def veiculos_faturados():
                 'placa': row[14],
                 'cidade': row[15],
                 'andamento': None,
-                'usado': None
+                'usado': None,
+                'data_venda': format_date(row[16])
             }
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
