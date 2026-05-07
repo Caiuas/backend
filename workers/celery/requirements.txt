@@ -4,4 +4,5 @@ requests==2.32.3
 boto3==1.42.25
 JayDeBeApi==1.2.3
 psycopg2-binary==2.9.10
-flower
+flower==2.0.1
+xlsxwriter==3.2.9

@@ -6,7 +6,7 @@ from io import BytesIO
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
-import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 from app import app
 from database import oracle
 
@@ -16,6 +16,7 @@ TOKEN = os.getenv("TELEGRAM_BOT", "")
 TELEGRAM_CHATS = {
     "Pablo": "548519349",
     "Cristiane": "8703967479",
+    "Fabio": "8653376419",
 }
 
 COR_VERMELHO = "#D50000"
@@ -23,6 +24,7 @@ COR_AZUL = "#337AB7"
 COR_CINZA = "#D8DCE3"
 COR_FUNDO = "#FFFFFF"
 COR_TEXTO = "#2C3E50"
+COR_CANCELADO = "#E74C3C"
 
 
 def _conexao():
@@ -185,50 +187,128 @@ def _gerar_excel(df, data_agenda):
 
 def _gerar_pdf(df, data_agenda):
     data_formatada = datetime.datetime.strptime(data_agenda, "%Y-%m-%d").strftime("%d/%m/%Y")
-    n_rows = len(df)
-    row_height = 0.35
-    fig_height = max(6, 1.2 + n_rows * row_height + 1.0)
-    fig = plt.figure(figsize=(12, fig_height), facecolor=COR_FUNDO)
+    n_total = len(df)
+    hoje_str = datetime.datetime.strptime(data_agenda, "%Y-%m-%d").strftime("%d/%m/%Y")
+    dia_semana = datetime.datetime.strptime(data_agenda, "%Y-%m-%d").strftime("%A")
+    dias_pt = {"Monday": "Segunda", "Tuesday": "Terca", "Wednesday": "Quarta", "Thursday": "Quinta",
+               "Friday": "Sexta", "Saturday": "Sabado", "Sunday": "Domingo"}
+    dia_semana_pt = dias_pt.get(dia_semana, dia_semana)
 
-    fig.text(0.5, 0.97, f"Agendamentos - {data_formatada}", fontsize=16, ha="center",
-             weight="bold", color=COR_VERMELHO, family="sans-serif")
-    fig.text(0.5, 0.94, f"Total: {n_rows} agendamento(s)", fontsize=9, ha="center",
-             color="#7F8C8D", family="sans-serif")
+    df = df.fillna("")
 
-    if n_rows > 0:
-        col_labels = list(df.columns)
-        cell_text = df.values.tolist()
-        col_widths = [0.18, 0.14, 0.12, 0.08, 0.14, 0.10, 0.05, 0.19]
+    fig_w = 8.27
+    fig_h = 11.69
 
-        ax_tb = fig.add_axes([0.03, 0.02, 0.94, 0.90])
-        ax_tb.axis("off")
+    cols = 3
+    margin_left = 0.30
+    margin_right = 0.30
+    margin_top = 1.00
+    margin_bottom = 0.35
+    gap_x = 0.12
+    gap_y = 0.10
 
-        t = ax_tb.table(
-            cellText=cell_text,
-            colLabels=col_labels,
-            colWidths=col_widths,
-            loc="upper center",
-            cellLoc="left",
-        )
-        t.auto_set_font_size(False)
-        t.set_fontsize(7)
-        t.scale(1, 1.3)
-
-        for key, cell in t.get_celld().items():
-            cell.set_edgecolor(COR_CINZA)
-            cell.set_linewidth(0.3)
-            if key[0] == 0:
-                cell.set_text_props(weight="bold", color="white", family="sans-serif", fontsize=8)
-                cell.set_facecolor(COR_AZUL)
-            else:
-                cell.set_facecolor(COR_FUNDO)
-                cell.set_text_props(color=COR_TEXTO, family="sans-serif", fontsize=7)
-                if key[1] == 0:
-                    cell.set_text_props(weight="bold", family="sans-serif", fontsize=7, color=COR_TEXTO)
+    card_w = (fig_w - margin_left - margin_right - gap_x * (cols - 1)) / cols
+    card_h = 1.15
+    usable_h = fig_h - margin_top - margin_bottom
+    rows_per_page = max(1, int((usable_h + gap_y) / (card_h + gap_y)))
+    cards_per_page = rows_per_page * cols
 
     buf = BytesIO()
-    plt.savefig(buf, format="pdf", bbox_inches="tight", dpi=150)
-    plt.close()
+
+    with PdfPages(buf) as pdf:
+        pages = max(1, (n_total + cards_per_page - 1) // cards_per_page)
+
+        for page in range(pages):
+            fig = plt.figure(figsize=(fig_w, fig_h), facecolor=COR_FUNDO)
+
+            fig.text(0.5, 0.975, f"Agendamentos - {hoje_str} ({dia_semana_pt})", fontsize=13,
+                     ha="center", weight="bold", color=COR_VERMELHO, family="sans-serif")
+            fig.text(0.5, 0.952, f"Total: {n_total} agendamento(s)", fontsize=7, ha="center",
+                     color="#7F8C8D", family="sans-serif")
+
+            start_idx = page * cards_per_page
+            end_idx = min(start_idx + cards_per_page, n_total)
+
+            for idx in range(start_idx, end_idx):
+                local = idx - start_idx
+                col = local % cols
+                row = local // cols
+
+                x_inch = margin_left + col * (card_w + gap_x)
+                y_inch = fig_h - margin_top - (row + 1) * card_h - row * gap_y
+
+                row_data = df.iloc[idx]
+
+                ax = fig.add_axes([
+                    x_inch / fig_w,
+                    y_inch / fig_h,
+                    card_w / fig_w,
+                    card_h / fig_h,
+                ])
+                ax.axis("off")
+
+                box = FancyBboxPatch(
+                    (0, 0), 1, 1, boxstyle="round,pad=0.04",
+                    facecolor=COR_FUNDO, edgecolor=COR_CINZA, linewidth=0.8,
+                    transform=ax.transAxes, zorder=0,
+                )
+                ax.add_patch(box)
+
+                nome = str(row_data.get("NOME", "")).strip()
+                horario = str(row_data.get("HORARIO_AGENDAMENTO", "")).strip()
+                placa = str(row_data.get("PLACA", "")).strip()
+                modelo = str(row_data.get("DESCRICAO_MODELO", "")).strip()
+                telefone = str(row_data.get("TELEFONE", "")).strip()
+                quem_agendou = str(row_data.get("QUEM_AGENDOU", "")).strip()
+                express = str(row_data.get("EXPRESS", "")).strip().upper()
+                reclamacoes = str(row_data.get("RECLAMACOES", "")).strip()
+
+                y_pos = 0.90
+                ax.text(0.08, y_pos, nome[:35], fontsize=8, weight="bold",
+                        color=COR_TEXTO, family="sans-serif", verticalalignment="top")
+
+                y_pos -= 0.18
+                if horario:
+                    ax.text(0.08, y_pos, horario, fontsize=9, weight="bold",
+                            color=COR_AZUL, family="sans-serif", verticalalignment="top")
+                if placa:
+                    ax.text(0.45, y_pos, f"|  {placa.upper()}", fontsize=7,
+                            color=COR_TEXTO, family="sans-serif", verticalalignment="top")
+
+                y_pos -= 0.16
+                if modelo:
+                    ax.text(0.08, y_pos, modelo[:30], fontsize=7,
+                            color=COR_TEXTO, family="sans-serif", verticalalignment="top")
+
+                y_pos -= 0.15
+                if telefone:
+                    ax.text(0.08, y_pos, telefone[:38], fontsize=5.5,
+                            color="#7F8C8D", family="sans-serif", verticalalignment="top")
+
+                y_pos -= 0.13
+                if quem_agendou:
+                    ax.text(0.08, y_pos, f"Agendado por: {quem_agendou[:25]}", fontsize=5,
+                            color="#95A5A6", family="sans-serif", verticalalignment="top")
+
+                if express == "S":
+                    badge = FancyBboxPatch(
+                        (0.72, 0.84), 0.25, 0.12, boxstyle="round,pad=0.02",
+                        facecolor=COR_VERMELHO, edgecolor="none",
+                        transform=ax.transAxes, zorder=2,
+                    )
+                    ax.add_patch(badge)
+                    ax.text(0.845, 0.90, "EXPRESS", fontsize=5, weight="bold",
+                            color="white", ha="center", va="center",
+                            family="sans-serif", transform=ax.transAxes)
+
+                if reclamacoes:
+                    ax.text(0.08, 0.05, f"Rec: {reclamacoes[:45]}", fontsize=4.5,
+                            color=COR_CANCELADO, family="sans-serif",
+                            verticalalignment="bottom", style="italic")
+
+            pdf.savefig(fig)
+            plt.close(fig)
+
     buf.seek(0)
     return buf.read()
 
