@@ -201,7 +201,9 @@ def render():
             df_oracle_eventos = pd.DataFrame(result_oracle_chat, columns=columns_oracle_chat, dtype=str).fillna('')
             df_chatwoot_excel = df_chatwoot_excel.merge(df_oracle_eventos[['evento', 'andamento_atendimento', 'termometro','cod_proposta']], on='evento', how='left')
             df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].fillna('')
-            df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('Não classificado')
+            df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('').map(
+                lambda v: {'1': 'Frio', '2': 'Morno', '3': 'Quente'}.get(str(v).strip(), 'Não classificado')
+            )
         except Exception as e:
             st.error("Ops falha ao se comunicar com o NBS, tente aperta R no seu teclado ou recarregar a página")
     
@@ -275,7 +277,7 @@ def render():
         column_config={
             "link_campanha": st.column_config.LinkColumn("Link Campanha", display_text="Abrir"),
             "andamento_atendimento": "Andamento Atendimento",
-            "termometro": "Termômetro"
+            "termometro": "Temperatura"
         }
     )
     
