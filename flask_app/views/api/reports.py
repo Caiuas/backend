@@ -97,6 +97,7 @@ def reports_fechamento_agendamento():
                 pb.DESCRICAO,
                 oa.PLACA,
                 pm.DESCRICAO_MODELO,
+                oa.ano,
                 oa.PRISMA,
                 s.data_comeca, 
                 s.data_fim,
@@ -175,6 +176,7 @@ def reports_fechamento_agendamento():
             'descricao_prisma_box',
             'placa',
             'descricao_modelo',
+            'ano',
             'prisma',
             'data_comeca',
             'data_fim',
@@ -213,6 +215,7 @@ def reports_fechamento_agendamento():
                 'descricao_prisma_box',
                 'placa', 
                 'descricao_modelo', 
+                'ano',
                 'data_comeca', 
                 'numero_os', 
                 'nome_completo_consultor', 
@@ -273,7 +276,7 @@ def reports_fechamento_agendamento():
         
 
         worksheet = workbook.add_worksheet('Agenda')
-        worksheet.merge_range('A1:O1', 'Agenda', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
+        worksheet.merge_range('A1:P1', 'Agenda', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
         worksheet.write('A2', 'EMP', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('B2', 'COD_OS_AGENDA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('C2', 'TIPO_ATENDIMENTO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
@@ -283,16 +286,17 @@ def reports_fechamento_agendamento():
         worksheet.write('G2', 'DESCRICAO_PRISMA_BOX', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))  
         worksheet.write('H2', 'PLACA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         worksheet.write('I2', 'DESCRICAO_MODELO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('J2', 'DATA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('K2', 'NUMERO_OS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('L2', 'CONSULTOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('M2', 'SERVIÇOS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('N2', 'RECLAMACOES', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
-        worksheet.write('O2', 'REVISAO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('J2', 'ANO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('K2', 'DATA', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('L2', 'NUMERO_OS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('M2', 'CONSULTOR', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('N2', 'SERVIÇOS', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('O2', 'RECLAMACOES', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
+        worksheet.write('P2', 'REVISAO', workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'}))
         cont = 0
         for i, row in df.iterrows():
             cont += 1
-            servico = str(row.iloc[12]).lower()
+            servico = str(row.iloc[13]).lower()
             servico = str(servico).replace('ã','a')
             servico = str(servico).replace('kms','')
             servico = str(servico).replace('km','')
@@ -404,16 +408,16 @@ def reports_fechamento_agendamento():
             worksheet.write(f'H{cont+2}', row.iloc[7], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'I{cont+2}', row.iloc[8], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'J{cont+2}', row.iloc[9], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-            if isinstance(row.iloc[9], datetime):
-                worksheet.write_datetime(f'J{cont+2}', row.iloc[9], date_format)
+            if isinstance(row.iloc[10], datetime):
+                worksheet.write_datetime(f'K{cont+2}', row.iloc[10], date_format)
             else:
-                worksheet.write(f'J{cont+2}', row.iloc[9], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'K{cont+2}', row.iloc[10], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+                worksheet.write(f'K{cont+2}', row.iloc[10], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
             worksheet.write(f'L{cont+2}', row.iloc[11], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'M{cont+2}', servico, workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'N{cont+2}', row.iloc[14], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-            worksheet.write(f'O{cont+2}', revisao, workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
-        worksheet.add_table(f'A2:O{cont+2}', {'columns': [{'header': 'COD_EMPRESA'},
+            worksheet.write(f'M{cont+2}', row.iloc[12], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'N{cont+2}', servico, workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'O{cont+2}', row.iloc[15], workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+            worksheet.write(f'P{cont+2}', revisao, workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'}))
+        worksheet.add_table(f'A2:P{cont+2}', {'columns': [{'header': 'COD_EMPRESA'},
                                                         {'header': 'COD_OS_AGENDA'},
                                                         {'header': 'TIPO_ATENDIMENTO'},
                                                         {'header': 'NOME_CLIENTE'},
@@ -422,6 +426,7 @@ def reports_fechamento_agendamento():
                                                         {'header': 'DESCRICAO_PRISMA_BOX'},
                                                         {'header': 'PLACA'},
                                                         {'header': 'DESCRICAO_MODELO'},
+                                                        {'header': 'ANO'},
                                                         {'header': 'DATA'},
                                                         {'header': 'NUMERO_OS'},
                                                         {'header': 'CONSULTOR'},
@@ -433,7 +438,7 @@ def reports_fechamento_agendamento():
                                                         'autofilter': True
                                                         })
         worksheet.set_landscape()
-        worksheet.print_area(f'A1:Q{cont+2}')
+        worksheet.print_area(f'A1:P{cont+2}')
         worksheet.set_column('A:A', 3.30)
         worksheet.set_column('B:B', 7.43)
         worksheet.set_column('C:C', 13.30)
@@ -449,6 +454,7 @@ def reports_fechamento_agendamento():
         worksheet.set_column('M:M', 19.00)
         worksheet.set_column('N:N', 19.00)
         worksheet.set_column('O:O', 10.00)
+        worksheet.set_column('P:P', 10.00)
         workbook.close()
         # retorna o arquivo
         file_memory.seek(0)
