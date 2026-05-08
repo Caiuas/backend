@@ -44,7 +44,7 @@ app.conf.update(
         },
         "sync-propostas-rdstation-every-30s": {
             "task": "tasks.sync_rdstation.sync_propostas_rdstation",
-            "schedule": 30.0,
+            "schedule": 5.0,
         },
         "prospeccao-oficina-hoje-08-00": {
             "task": "tasks.prospeccao_oficina_troca.prospeccao_oficina_hoje",
