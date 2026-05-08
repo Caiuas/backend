@@ -82,6 +82,7 @@ def _fetch_proposta(cursor):
                  WHERE t_email.cod_cliente = c.cod_cliente
                 ) AS EMAILS,
                 CASE
+                    WHEN vp.internet = 'F' THEN 'VENDA DIRETA'
                     WHEN v.novo_usado = 'U' THEN 'Usado'
                     ELSE 'Novo'
                 END NOVO_USADO,
