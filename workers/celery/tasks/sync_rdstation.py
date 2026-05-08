@@ -29,6 +29,8 @@ FIELD_COD_PROPOSTA = "69f3bd4d48260700132d2adc"
 FIELD_CHASSI = "69f3bd8e347954001de63c25"
 FIELD_DATA_PROPOSTA = "69f3bde6faa816001315cfc0"
 FIELD_CIDADE = "69f3be30b9d9320019bbfef7"
+FIELD_NOME_VENDEDOR = "69fde0e09532050020f0ed87"
+FIELD_EMPRESA = "69fde98e62b32c0013411e36"
 
 TOKENS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "rdstation_tokens.json")
 
@@ -42,6 +44,7 @@ def _fetch_proposta(cursor):
                 vp.data_venda,
                 vp.COD_CLIENTE,
                 eu.NOME_COMPLETO NOME_VENDEDOR,
+                eu.COD_EMPRESA,
                 pr.descricao_produto DESCRICAO_PRODUTO,
                 pm.DESCRICAO_MODELO MODELO,
                 COALESCE(ce_veic.DESCRICAO, ce_ped.DESCRICAO, ce_fic.DESCRICAO) AS COR,
@@ -103,7 +106,8 @@ def _fetch_proposta(cursor):
             LEFT JOIN cidades cid_com ON cid_com.cod_cidades = c.COD_CID_COM AND cid_com.uf = c.UF_COM
             LEFT JOIN cidades cid_cob ON cid_cob.cod_cidades = c.COD_CID_COBRANCA AND cid_cob.uf = c.UF_COBRANCA
             WHERE vp.status_proposta NOT IN ('C')
-                AND TRUNC(vp.emissao) >= TO_DATE('2026-05-01', 'YYYY-MM-DD')
+                AND TRUNC(vp.emissao) >= TO_DATE('2026-05-04', 'YYYY-MM-DD')
+                AND eu.NOME_COMPLETO NOT IN ('DIRETORIA SOROCABA','LUIS ROBERTO DE OLIVEIRA')
                 AND csr.id_crm IS NULL
                 AND c.cod_cliente <> '22534303000127'
             ORDER BY vp.emissao
@@ -226,6 +230,26 @@ def _obter_access_token():
     return _refresh_access_token(tokens)
 
 
+def _mapear_empresa(cod_empresa):
+    mapeamento = {
+        11: "HONDA SOROCABA",
+        33: "HONDA INDAIATUBA",
+        111: "LLA",
+    }
+    if cod_empresa in mapeamento:
+        return mapeamento[cod_empresa]
+    return "EMPRESA NAO IDENTIFICADA"
+
+
+def _mapear_user_id(cod_empresa):
+    mapeamento = {
+        11: "654a7269852b02000dad51d7",
+        33: "6823a3b6644f430014250fbd",
+        111: "654a7269852b02000dad51d7",
+    }
+    return mapeamento.get(cod_empresa, "654a7269852b02000dad51d7")
+
+
 def _extrair_tags(proposta):
     tags = ["social", "NBS", "Seguro Auto"]
 
@@ -296,6 +320,8 @@ def _criar_conversao_rdstation(proposta, deal_url, email):
 
 def _criar_deal_rdstation(proposta):
     cod_proposta = proposta['COD_PROPOSTA']
+    cod_empresa = proposta.get('COD_EMPRESA')
+    user_id = _mapear_user_id(cod_empresa)
     modelo = (proposta.get('MODELO') or '').strip()
     data_str = _format_date(proposta.get('DATA_PROPOSTA'))
     nome_cliente = (proposta.get('NOME_CLIENTE') or '').strip()
@@ -330,6 +356,15 @@ def _criar_deal_rdstation(proposta):
     if cidade:
         deal_custom_fields.append({"custom_field_id": FIELD_CIDADE, "value": cidade})
 
+    nome_vendedor = proposta.get('NOME_VENDEDOR')
+    if nome_vendedor:
+        deal_custom_fields.append({"custom_field_id": FIELD_NOME_VENDEDOR, "value": nome_vendedor})
+
+    cod_empresa = proposta.get('COD_EMPRESA')
+    if cod_empresa:
+        empresa_nome = _mapear_empresa(cod_empresa)
+        deal_custom_fields.append({"custom_field_id": FIELD_EMPRESA, "value": empresa_nome})
+
     phones = _split_unique(proposta.get('TELEFONES'))
     emails_raw = _split_unique(proposta.get('EMAILS'))
     emails = _filtrar_emails_validos(emails_raw)
@@ -354,7 +389,7 @@ def _criar_deal_rdstation(proposta):
         "deal": {
             "name": deal_name,
             "deal_stage_id": DEAL_STAGE_ID,
-            "user_id": USER_ID,
+            "user_id": user_id,
             "deal_custom_fields": deal_custom_fields,
         },
         "deal_source": {"_id": DEAL_SOURCE_ID},
