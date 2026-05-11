@@ -46,6 +46,10 @@ app.conf.update(
             "task": "tasks.sync_rdstation.sync_propostas_rdstation",
             "schedule": 5.0,
         },
+        "sync-propostas-rdstation-caiuas-every-30s": {
+            "task": "tasks.sync_rdstation_caiuas.sync_propostas_rdstation_caiuas",
+            "schedule": 5.0,
+        },
         "prospeccao-oficina-hoje-08-00": {
             "task": "tasks.prospeccao_oficina_troca.prospeccao_oficina_hoje",
             "schedule": crontab(hour=8, minute=0, day_of_week='1-6'),
@@ -57,7 +61,7 @@ app.conf.update(
     },
 )
 
-app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.prospeccao_oficina_troca"]
+app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca"]
 
 @app.task(bind=True)
 def debug_task(self):
