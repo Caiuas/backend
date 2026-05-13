@@ -104,7 +104,7 @@ def get_pedidos():
         for row in result:
             pedidos.append({
                 'id_pedido': row[0],
-                'numero_rm': row[1],
+                'numero_rm': str(row[1]).upper(),
                 'created_at': format_date(row[2]),
                 'updated_at': format_date(row[3]),
                 'obs': row[4],
