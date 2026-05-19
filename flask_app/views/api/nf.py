@@ -1,8 +1,11 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 from database import oracle, chatwoot
 from dotenv import load_dotenv
 from datetime import datetime
 from auth import token_required
+from brazilfiscalreport.danfe import Danfe
+import io
+
 load_dotenv()
 
 nf_bp = Blueprint('nf', __name__)
@@ -237,3 +240,69 @@ def download_nf_xml(controle):
             })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@nf_bp.route('/api/nf/download/pdf/<controle>', methods=['GET'])
+@token_required
+def download_nf_pdf(controle):
+    conn_oracle = None
+    cur_oracle = None
+    try:
+        controle_str = str(controle).strip().upper()
+        # Divide a string 'CONTROLE-SERIE-EMPRESA'
+        num_controle, serie, empresa = controle_str.split('-')
+        
+        conn_oracle, cur_oracle = oracle()
+        
+        # 1. Verifica se a venda existe
+        query_venda = """
+            SELECT count(*) FROM vendas v 
+            WHERE v.CONTROLE = :1 AND v.SERIE = :2 AND v.cod_empresa = :3
+        """
+        cur_oracle.execute(query_venda, (num_controle, serie, empresa))
+        if cur_oracle.fetchone()[0] == 0:
+            return jsonify({'status': 'error', 'message': 'Venda não encontrada!'}), 404
+
+        if serie == 'NF':
+            return jsonify({'status': 'error', 'message': 'PDF para NFSe não disponível!'}), 400
+
+        # 2. Busca o XML (CLOB)
+        query_xml = """
+            SELECT nm.xml_nota FROM nfe_movimento nm
+            WHERE nm.numr_controle = :1 AND nm.serie_nfe = :2 AND nm.id_empresa = :3
+        """
+        cur_oracle.execute(query_xml, (num_controle, serie, empresa))
+        r = cur_oracle.fetchone()
+        
+        if not r or r[0] is None:
+            return jsonify({'status': 'error', 'message': 'XML da Nota Fiscal não encontrado!'}), 404
+
+        clob = r[0]
+        try:
+            # Tratamento para JayDeBeApi / JDBC
+            xml_data = clob.getSubString(1, int(clob.length()))
+        except Exception:
+            xml_data = str(clob)
+
+        # --- CORREÇÃO AQUI ---
+        # Gerando o DANFE usando a estrutura da biblioteca brazilfiscalreport
+        danfe = Danfe(xml=xml_data)
+        
+        # Em vez de salvar em arquivo, geramos em um buffer de memória
+        pdf_buffer = io.BytesIO()
+        danfe.output(pdf_buffer)
+        pdf_buffer.seek(0)
+
+        return send_file(
+            pdf_buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'NFE_{num_controle}_{serie}_{empresa}.pdf'
+        )
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Erro interno: {str(e)}'}), 500
+    
+    finally:
+        if cur_oracle: cur_oracle.close()
+        if conn_oracle: conn_oracle.close()
+    
