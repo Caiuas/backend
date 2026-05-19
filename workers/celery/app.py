@@ -58,10 +58,14 @@ app.conf.update(
             "task": "tasks.prospeccao_oficina_troca.prospeccao_oficina_amanha",
             "schedule": crontab(hour=17, minute=0, day_of_week='1-6'),
         },
+        "process-myhonda-leads-every-30s": {
+            "task": "tasks.myhonda_leads.process_myhonda_leads",
+            "schedule": 30.0,
+        },
     },
 )
 
-app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca"]
+app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca", "tasks.myhonda_leads", "tasks.crm_eventos_atraso"]
 
 @app.task(bind=True)
 def debug_task(self):
