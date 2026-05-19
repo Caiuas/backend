@@ -135,32 +135,30 @@ def register_file_processos():
         bucket = request.json.get('bucket') # O nome original do arquivo (ex: "foto.png")
         file_size = request.json.get('file_size') # O tipo do arquivo (ex: "image/png")
         content_type = request.json.get('content_type') # O tamanho do arquivo em bytes
-        id_etapa = request.json.get('id_etapa') # ID da etapa do processo
+        id_processo = request.json.get('id_processo') # ID do processo
         region = request.json.get('region') # Região do bucket (ex: "sa-east-1")
         old_file_name = request.json.get('old_file_name') # O nome original do arquivo (ex: "foto.png")
 
         # Validações básicas
         # Se todas as keys não forem fornecidas, retorna erro
-        if not all([file_key, bucket, file_size, content_type, id_etapa, region]):
-            return jsonify({"error": "file_key, bucket, file_size, content_type, id_etapa and region are required"}), 400
+        if not all([file_key, bucket, file_size, content_type, region]):
+            return jsonify({"error": "file_key, bucket, file_size, content_type, and region are required"}), 400
         
         query = f"""
-            SELECT cvpe.AUTORIZADORES, cvp.RESPONSIBLE  
-            FROM CAIUAS_VEIC_PROC_ETAPAS cvpe
-            LEFT JOIN CAIUAS_VEIC_PROC cvp ON 1=1
-                AND cvp.ID_PROCESSO = cvpe.ID_PROCESSO 
-            WHERE 1=1
-                AND cvpe.ID_ETAPA = {id_etapa}
+            select count(*) from caiuas_veic_proc cvp
+            where 1=1
+                and cvp.id_processo = {id_processo}
+                and cvp.ativo = 1
         """
         conn_oracle, cursor_oracle = oracle()
         cursor_oracle.execute(query)
         result = cursor_oracle.fetchone()
-        if not result:
+        if result[0] == 0:
             cursor_oracle.close()
             conn_oracle.close()
-            return jsonify({"error": "Etapa não encontrada"}), 400
-        autorizadores = result[0]
-        responsavel = str(result[1]).lower() if result[1] else None
+            return jsonify({"message": "Processo finalizado ou inativo"}), 400
+        
+        
         
         query = f"""
             SELECT eu.NOME  
@@ -173,23 +171,11 @@ def register_file_processos():
         if not results:
             cursor_oracle.close()
             conn_oracle.close()
-            return jsonify({"error": "Usuário não encontrado no NBS"}), 400
+            return jsonify({"message": "Usuário não encontrado no NBS"}), 400
         usuarios_list = []
         for row in results:
             usuarios_list.append(str(row[0]).lower())
         
-        autorizadores_list = [a.strip().lower() for a in autorizadores.split(',')] if autorizadores else []
-        quem_tem_permissao = set(autorizadores_list + ([responsavel] if responsavel else []))
-        tem_permissao = False
-        for usuario in usuarios_list:
-            if usuario in quem_tem_permissao:
-                tem_permissao = True
-                break
-        if not tem_permissao:
-            cursor_oracle.close()
-            conn_oracle.close()
-            return jsonify({"error": "Usuário não tem permissão para registrar arquivo nessa etapa"}), 403
-        # gera o caiuas_files_seq
         query = f"""
             SELECT caiuas_files_seq.NEXTVAL FROM dual
         """
@@ -219,48 +205,29 @@ def register_file_processos():
         cursor_oracle.execute(query)
         conn_oracle.commit()
         query = f"""
-            SELECT caiuas_etapa_files_seq.NEXTVAL FROM dual
+            select nvl(max(id_file_proc),0)+1 from CAIUAS_VEIC_PROC_files
         """
         cursor_oracle.execute(query)
-        id_etapa_file = cursor_oracle.fetchone()[0]
+        id_file_proc = cursor_oracle.fetchone()[0]
         query = f"""
-            INSERT INTO CAIUAS_VEIC_PROC_ETAPAS_files (
-                    id_file_etapa, 
-                    id_etapa, 
-                    id_file
+            INSERT INTO caiuas_veic_proc_files (
+                    id_file_proc, 
+                    id_processo, 
+                    responsible,
+                    id_file,
+                    created_at
                 ) VALUES (
-                    {id_etapa_file}, 
-                    {id_etapa}, 
-                    {id_file}
+                    {id_file_proc}, 
+                    {id_processo}, 
+                    '{usuarios_list[0]}',
+                    {id_file},
+                    current_timestamp
                 )
         """
         cursor_oracle.execute(query)
         conn_oracle.commit()
         cursor_oracle.close()
         conn_oracle.close()
-        
-
-
-        # 2. Aqui você pode salvar as informações no banco de dados
-        # Exemplo: Salvar na tabela 'files' com colunas (id, key, name, type, created_at)
-        # db.execute("INSERT INTO files (key, name, type) VALUES (%s, %s, %s)", (file_key, file_name, file_type))
-        
-        # query = f"""
-        #     insert into files (filename, url, file_size, old_filename, created_at) values (
-        #         '{file_key}', 
-        #         'https://processos-caiuas.s3.sa-east-1.amazonaws.com/{file_key}', 
-        #         {file_size}, 
-        #         '{file_name}', 
-        #         now()
-        #     )
-        #     RETURNING id_file
-        # """
-        # conn, cursor = postgres_site()
-        # cursor.execute(query)
-        # id_file = cursor.fetchone()[0]
-        # conn.commit()
-        # cursor.close()
-        # conn.close()
         
         retorno = {}
         retorno['id_file'] = id_file
@@ -273,9 +240,8 @@ def register_file_processos():
 
     except Exception as e:
         print(f"ERRO: {e}")
-        return jsonify({"error": str(e)}), 500
-    
-
+        return jsonify({"message": str(e)}), 500
+      
 @files_bp.route('/api/files/download/<int:id_file>', methods=['GET'])
 @token_required
 def get_presigned_download_url(id_file):
