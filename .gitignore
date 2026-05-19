@@ -194,3 +194,5 @@ workers/celery/data/rdstation_tokens.json
 
 # RDStation MKT tokens
 workers/celery/data/rdstation_tokens.json
+
+workers/celery/data/rdstation_tokens_caiuas.json
