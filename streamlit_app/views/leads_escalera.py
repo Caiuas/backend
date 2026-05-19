@@ -202,8 +202,19 @@ def render():
             df_oracle_eventos = pd.DataFrame(result_oracle_chat, columns=columns_oracle_chat, dtype=str).fillna('')
             df_chatwoot_excel = df_chatwoot_excel.merge(df_oracle_eventos[['evento', 'andamento_atendimento', 'termometro','cod_proposta']], on='evento', how='left')
             df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].fillna('')
-            df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('').map(
-                lambda v: {'1': 'Frio', '2': 'Morno', '3': 'Quente'}.get(str(v).strip(), 'Não classificado')
+            # df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('').map(
+            #     lambda v: {'1': 'Frio', '2': 'Morno', '3': 'Quente'}.get(str(v).strip(), 'Não classificado')
+            # )
+            df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].apply(
+                lambda v: 'Não classificado' if pd.isna(v) or str(v).strip() in ('', 'None') else str(v).strip()
+            )
+            # se andamento vazio e cod_proposta preenchido, considerar como Não classifcado
+            df_chatwoot_excel['termometro'] = df_chatwoot_excel.apply(
+                lambda row: 'Não classificado' if str(row['andamento_atendimento']).strip() == '' and str(row['cod_proposta']).strip() != '' else row['termometro'],
+                axis=1
+            )
+            df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].apply(
+                lambda v: 'Pendente' if pd.isna(v) or str(v).strip() in ('', 'None') else str(v).strip()
             )
 
         except Exception as e:
