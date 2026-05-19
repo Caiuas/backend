@@ -124,17 +124,17 @@
       - ./workers/update_fechamento_crm:/app
     command: "python3 app.py"
 
-  worker_myhonda:
-    build: ./workers/myhonda
-    # mem_limit: 2g
-    container_name: worker_myhonda
-    restart: always
-    tty: true
-    env_file:
-      - .env 
-    volumes:
-      - ./workers/myhonda:/app
-    command: "python3 app.py"
+  # worker_myhonda:
+  #   build: ./workers/myhonda
+  #   # mem_limit: 2g
+  #   container_name: worker_myhonda
+  #   restart: always
+  #   tty: true
+  #   env_file:
+  #     - .env 
+  #   volumes:
+  #     - ./workers/myhonda:/app
+  #   command: "python3 app.py"
 
   worker_envia_pesquisa_whatsapp:
     build: ./workers/envia_pesquisa_whatsapp
