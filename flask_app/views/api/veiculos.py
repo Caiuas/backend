@@ -1620,6 +1620,32 @@ def show_processo(id_processo):
             
             retorno['etapas'].append(etapa_info)
         
+        query = f"""
+            select 
+            cvpef.id_file_proc, cvpef.id_file,
+            cf.id_file, cf.file_key, cf.bucket, cf.file_size, cf.content_type, cf.region, cf.created_at, cf.old_file_name
+            from CAIUAS_VEIC_PROC_FILES cvpef
+            LEFT JOIN caiuas_files cf ON 1=1
+                AND cf.id_file = cvpef.id_file
+            where 1=1
+                and cvpef.id_processo = {id_processo}
+        """
+        cur.execute(query)
+        arquivos = cur.fetchall()
+        retorno['arquivos'] = []
+        for arquivo in arquivos:
+            arquivo_info = {
+                'id_file_proc': arquivo[0],
+                'id_file': arquivo[1],
+                'file_key': arquivo[3],
+                'bucket': arquivo[4],
+                'file_size': arquivo[5],
+                'content_type': arquivo[6],
+                'region': arquivo[7],
+                'created_at': arquivo[8],
+                'old_file_name': arquivo[9]
+            }
+            retorno['arquivos'].append(arquivo_info)
         
         cur.close()
         conn.close()
