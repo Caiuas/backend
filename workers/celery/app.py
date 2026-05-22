@@ -62,10 +62,14 @@ app.conf.update(
             "task": "tasks.myhonda_leads.process_myhonda_leads",
             "schedule": 30.0,
         },
+        "send-wpp-agendamento-every-5s": {
+            "task": "tasks.send_wpp_agendamento.process_send_wpp_agendamento",
+            "schedule": 5.0,
+        },
     },
 )
 
-app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca", "tasks.myhonda_leads", "tasks.crm_eventos_atraso"]
+app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca", "tasks.myhonda_leads", "tasks.crm_eventos_atraso", "tasks.send_wpp_agendamento"]
 
 @app.task(bind=True)
 def debug_task(self):

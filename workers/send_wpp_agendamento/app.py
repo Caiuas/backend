@@ -191,7 +191,7 @@ while True:
                             }
                             }
                         },
-                        "assignee_id": 2
+                        "assignee_id": 117
                         })
                         headers = {
                         'api_access_token': f'{os.getenv("CHATWOOT_TOKEN")}',

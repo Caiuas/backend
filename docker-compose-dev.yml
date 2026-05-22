@@ -23,17 +23,6 @@ services:
       - ./workers/estoque_veiculos_des:/app
     command: "bash -c 'python3 estoque_veiculos.py & python3 agendamentos.py & wait'"
   
-  worker_send_wpp_agendamento:
-    build: ./workers/send_wpp_agendamento
-    container_name: worker_send_wpp_agendamento
-    restart: always
-    # tty: true
-    env_file:
-      - .env 
-    volumes:
-      - ./workers/send_wpp_agendamento:/app
-    command: "python3 app.py"
-
   worker_update_questionario:
     build: ./workers/update_questionario
     container_name: worker_update_questionario
