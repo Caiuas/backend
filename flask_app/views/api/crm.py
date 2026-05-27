@@ -4748,7 +4748,8 @@ def cria_evento_chatwoot():
                 RESPONSAVEL_PELO_EVENTO,
                 TIPO_ATENDIMENTO,
                 COD_PRODUTO,
-                COD_MODELO
+                COD_MODELO,
+                TERMOMETRO
             ) VALUES(
                 11,
                 {id_evento},
@@ -4769,7 +4770,8 @@ def cria_evento_chatwoot():
                 {f"'{responsavel_pelo_evento}'" if responsavel_pelo_evento else 'null'},
                 null,
                 {cod_produto},
-                {cod_modelo}
+                {cod_modelo},
+                1
             )
         """
         cur_oracle.execute(query)
@@ -4869,6 +4871,135 @@ def cria_evento_chatwoot():
         }), 201
         
         
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@crm_bp.route('/api/crm/evento_chatwoot_novo', methods=['POST'])
+def cria_evento_chatwoot_novo():
+    try:
+        data = request.get_json()
+        
+        conversation_id = data.get('id', None)
+        inbox_id = data['contact_inbox']['inbox_id'] if 'contact_inbox' in data and 'inbox_id' in data['contact_inbox'] else None
+        nome_cliente = data['meta']['sender']['name'] if 'meta' in data and 'sender' in data['meta'] and 'name' in data['meta']['sender'] else None
+        phone = data['meta']['sender']['phone_number'] if 'meta' in data and 'sender' in data['meta'] and 'phone_number' in data['meta']['sender'] else None
+        
+        if phone and len(phone) > 3:
+            phone = phone[3:]
+        # Parâmetros fixos para criação do evento
+        cod_andamento = 2
+        cod_produto = 110589
+        cod_modelo = 116748
+        cod_tipo_evento = 829
+        cod_midia = 80  # Mídia padrão
+        
+        conn_oracle, cur_oracle = oracle()
+        query = "SELECT seq_crm_COD_EVENTO.nextval FROM dual"
+        cur_oracle.execute(query)
+        row = cur_oracle.fetchone()
+        id_evento = row[0]
+        # Inserir evento
+        query = f"""
+            INSERT INTO crm_eventos(
+                COD_EMPRESA,
+                COD_EVENTO,
+                COD_TIPO_EVENTO,
+                COD_PRIORIDADE,
+                NOME_CLIENTE_AVULSO,
+                FONE_CLIENTE_AVULSO,
+                cod_midia,
+                data_criacao,
+                cod_cliente_honda,
+                DESC_EVENTO,
+                CRIOU_O_EVENTO,
+                DATA_EVENTO,
+                OBS_memo,
+                COD_ANDAMENTO,
+                COD_CLIENTE,
+                STATUS,
+                RESPONSAVEL_PELO_EVENTO,
+                TIPO_ATENDIMENTO,
+                COD_PRODUTO,
+                COD_MODELO,
+                TERMOMETRO
+            ) VALUES(
+                11,
+                {id_evento},
+                {cod_tipo_evento},
+                2,
+                '{nome_cliente if nome_cliente else "Cliente Chatwoot"}',
+                '{phone if phone else ""}',
+                {cod_midia},
+                SYSDATE,
+                seq_cod_cliente_honda.nextval,
+                'Evento criado via Chatwoot',
+                'NBS',
+                SYSDATE,
+                'Evento criado via integração Chatwoot',
+                {cod_andamento},
+                1,
+                'P',
+                null,
+                null,
+                {cod_produto},
+                {cod_modelo},
+                1
+            )
+        """
+        cur_oracle.execute(query)
+        # Inserir ação do evento
+        query = f"""
+            INSERT INTO crm_acoes(
+                cod_empresa,
+                cod_evento,
+                responsavel,
+                tipo_acao,
+                data,
+                observacao,
+                status,
+                cod_acao,
+                quem_criou
+            ) VALUES (
+                11,
+                {id_evento},
+                'NBS',
+                1,
+                SYSDATE,
+                'Evento criado automaticamente pelo Chatwoot',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                'NBS'
+            )
+        """
+        cur_oracle.execute(query)
+        query = f"""
+            insert into caiuas_crm_eventos_chatwoot (cod_empresa,cod_evento,conversation_id, inbox_id)
+            values (
+                11,
+                {id_evento},
+                '{conversation_id}',
+                '{inbox_id}'
+            )
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+        conn, cur = chatwoot()
+        query = f"""
+            update conversations
+            set custom_attributes = jsonb_set(
+                COALESCE(custom_attributes, '{{}}'::jsonb),
+                '{{evento_nbs}}',
+                '"https://app.caiuas.com.br/crm/eventos/11{id_evento}"'
+            )
+            where id = {conversation_id}
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'status': 'success', 'message': 'Evento criado com sucesso'}), 201
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
