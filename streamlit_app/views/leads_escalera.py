@@ -45,7 +45,8 @@ def render():
         c.custom_attributes->>'evento_nbs' AS link_crm,
         u.name AS responsavel,
         c.custom_attributes,
-        entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' as source_id
+        entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' as source_id,
+        c.status
     FROM messages m
     LEFT JOIN whatsapp_raw_payloads wrp ON wrp.source_id = m.source_id
     CROSS JOIN LATERAL jsonb_array_elements(wrp.payload->'entry') AS entry
@@ -164,7 +165,7 @@ def render():
         else:
             st.info("Nenhum dado para exibir o gráfico no período.")
 
-    df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','source_id','link_crm','link_chat']].copy()
+    df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','source_id','link_crm','link_chat','status']].copy()
     df_chatwoot_excel['evento'] = df_chatwoot_excel['link_crm'].apply(lambda x: x.split('?')[0] if x.strip() != '' else '')
     df_chatwoot_excel['evento'] = df_chatwoot_excel['evento'].apply(lambda x: x.split('/')[-1] if x.strip() != '' else '')
 
@@ -216,17 +217,28 @@ def render():
             df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].apply(
                 lambda v: 'Pendente' if pd.isna(v) or str(v).strip() in ('', 'None') else str(v).strip()
             )
-
         except Exception as e:
             st.error("Ops falha ao se comunicar com o NBS, tente aperta R no seu teclado ou recarregar a página"            )
+    else:
+        df_chatwoot_excel['andamento_atendimento'] = ''
+        df_chatwoot_excel['termometro'] = 'Não classificado'
 
-        except Exception as e:
-            st.error("Ops falha ao se comunicar com o NBS, tente aperta R no seu teclado ou recarregar a página")
+    if 'termometro' not in df_chatwoot_excel.columns:
+        df_chatwoot_excel['termometro'] = 'Não classificado'
+    if 'andamento_atendimento' not in df_chatwoot_excel.columns:
+        df_chatwoot_excel['andamento_atendimento'] = ''
+
+    # Regras de descarte vindas do contato no Chatwoot.
+    status_col = df_chatwoot_excel.get('status', pd.Series('', index=df_chatwoot_excel.index))
+    link_crm_col = df_chatwoot_excel.get('link_crm', pd.Series('', index=df_chatwoot_excel.index))
+    mask_status_descartado = status_col.apply(lambda v: str(v).strip() in ('1', '1.0'))
+    mask_sem_evento_nbs = link_crm_col.apply(lambda v: pd.isna(v) or str(v).strip() in ('', 'None'))
+    df_chatwoot_excel.loc[mask_status_descartado & mask_sem_evento_nbs, 'termometro'] = 'Descartado'
 
     st.subheader("Campanhas (Chatwoot)")
     total_linhas_chatwoot = len(df_chatwoot)
     excel_buffer_chatwoot = io.BytesIO()
-    df_export = df_chatwoot_excel.drop(columns=['link_crm', 'link_chat'], errors='ignore').copy()
+    df_export = df_chatwoot_excel.drop(columns=['link_crm', 'link_chat', 'status'], errors='ignore').copy()
 
     if 'created_at' in df_export.columns:
         df_export['created_at'] = pd.to_datetime(df_export['created_at'], errors='coerce').dt.tz_localize(None)
@@ -283,8 +295,6 @@ def render():
     )
     if 'andamento_atendimento' not in df_chatwoot_excel.columns:
         df_chatwoot_excel['andamento_atendimento'] = ''
-    if 'termometro' not in df_chatwoot_excel.columns:
-        df_chatwoot_excel['termometro'] = ''
 
     st.dataframe(
         df_chatwoot_excel[['conversation_id','responsavel', 'created_at', 'link_campanha', 'andamento_atendimento', 'termometro']],
