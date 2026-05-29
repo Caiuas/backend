@@ -3,7 +3,7 @@ RUN apt update -y
 RUN apt install -y python3
 RUN apt install -y python3-pip
 RUN apt install -y python-is-python3
-RUN apt install -y python3.12-venv
+RUN apt install -y python3-venv
 WORKDIR /app
 RUN python -m venv .venv
 ENV PATH="/app/.venv/bin:$PATH"
