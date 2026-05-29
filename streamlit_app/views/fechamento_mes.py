@@ -7,7 +7,7 @@ import pandas as pd
 EMAILS_FECHAMENTO_MES = [
     "pablo.ti@caiuas.com.br",
     "marcelotcf@caiuas.com.br",
-    "cristiane.aguilar@caiuas.com.br"
+    "cristiane.aguilar@caiuas.com.br","nathalli.pereira@caiuas.com.br",
 ]
 
 def get_dados_propostas(primeiro_dia, ultimo_dia, cod_empresa=None):

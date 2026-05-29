@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 EMAILS_ESCALERA = [
     "pablo.ti@caiuas.com.br",
     "rafael@escaleraconsultoria.com.br",
-    "cristiane.aguilar@caiuas.com.br"
+    "cristiane.aguilar@caiuas.com.br","nathalli.pereira@caiuas.com.br",
 ]
 
 

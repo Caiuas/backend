@@ -19,7 +19,7 @@ import plotly.graph_objects as go
 EMAILS_ACOMPANHAMENTO_DIARIO = [
     "welder@caiuas.com.br",
     "admilson@caiuas.com.br",
-    "cristiane.aguilar@caiuas.com.br",
+    "cristiane.aguilar@caiuas.com.br","nathalli.pereira@caiuas.com.br",
     "pablo.ti@caiuas.com.br",
     "marcelotcf@caiuas.com.br"
 ]
