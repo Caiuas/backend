@@ -13,8 +13,8 @@ crm_bp = Blueprint('crm', __name__)
 ALLOWED_DATA_VISITA_EMAILS = [
     'pablo.ti@caiuas.com.br',
     'cristiane.aguilar@caiuas.com.br',
-    # 'mirela.novaga@caiuas.com.br',
-    # 'isadora.fraga@caiuas.com.br'
+    'mirela.novaga@caiuas.com.br',
+    'isadora.fraga@caiuas.com.br'
 ]
 
 def processar_obs_memo(obs_memo):
@@ -3482,10 +3482,10 @@ def crm_eventos_showroom_agenda_visita(id_evento):
         quem_alterou = cur_oracle.fetchone()[0]
         
         # Verificar permissão para alterar data_visita
-        if 'data_visita' in data and email not in ALLOWED_DATA_VISITA_EMAILS:
-            cur_oracle.close()
-            conn_oracle.close()
-            return jsonify({'status': 'error', 'message': 'Sem permissão para alterar data_visita'}), 403
+        # if 'data_visita' in data and email not in ALLOWED_DATA_VISITA_EMAILS:
+        #     cur_oracle.close()
+        #     conn_oracle.close()
+        #     return jsonify({'status': 'error', 'message': 'Sem permissão para alterar data_visita'}), 403
 
         observacoes = []
         updates = [f"quem_remarcou = '{quem_alterou}'"]
