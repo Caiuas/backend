@@ -1,9 +1,10 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 from database import oracle, chatwoot
 from dotenv import load_dotenv
 from datetime import datetime
 from auth import token_required
 import re
+from io import BytesIO
 load_dotenv()
 
 crm_bp = Blueprint('crm', __name__)
@@ -636,6 +637,329 @@ def list_crm_eventos():
                 conn_oracle.close()
             except Exception:
                 pass
+
+@crm_bp.route('/api/crm/eventos_exportar', methods=['GET'])
+@token_required
+def exportar_eventos():
+    # exporta os mesmos eventos da listagem da rota list_crm_eventos para excel sem paginação
+    conn_oracle = None
+    cur_oracle = None
+    try:
+        import pandas as pd
+
+        list_status = ['P', 'E', 'D', 'V', 'A', 'R', 'CP']
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        status = request.args.get('status', None)
+        tipo_evento = request.args.get('tipo_evento', None)
+        initial_date = request.args.get('initial_date', None)
+        final_date = request.args.get('final_date', None)
+        created_at_min = request.args.get('created_at_min', None)
+        created_at_max = request.args.get('created_at_max', None)
+        search = request.args.get('search', None)
+        responsible = request.args.get('responsible', None)
+        cod_empresa = request.args.get('cod_empresa', None)
+        pendente_autorizacao = request.args.get('pendente_autorizacao', None)
+
+        filter_pendente_autorizacao = ''
+        if pendente_autorizacao is not None:
+            filter_pendente_autorizacao = " and ced.authorization_date is null and ced.cod_evento is not null "
+
+        empresas_permitidas = ['11', '33', '111']
+        filter_empresa = ''
+        if cod_empresa:
+            empresas_lista = [e.strip() for e in cod_empresa.split(',') if e.strip()]
+            for e in empresas_lista:
+                if e not in empresas_permitidas:
+                    return jsonify({'status': 'error', 'message': f'Empresa inválida: {e}. Permitidas: 11, 33, 111'}), 400
+            empresas_in = ','.join(empresas_lista)
+            filter_empresa = f' AND eu.COD_EMPRESA IN ({empresas_in}) '
+
+        filter_created_at = ''
+        if created_at_min and created_at_max:
+            try:
+                datetime.strptime(created_at_min, '%Y-%m-%d')
+                datetime.strptime(created_at_max, '%Y-%m-%d')
+                filter_created_at = f" AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{created_at_min}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{created_at_max}', 'YYYY-MM-DD') "
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data de criação inválida. Use o formato YYYY-MM-DD'}), 400
+
+        filter_tipo_evento = ''
+        if tipo_evento:
+            tipo_evento = tipo_evento.split(',')
+            for te in tipo_evento:
+                if not te.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Tipo de evento inválido: {te}'}), 400
+            tipo_evento = ",".join(tipo_evento)
+            filter_tipo_evento = f" AND ce.COD_TIPO_EVENTO IN ({tipo_evento}) "
+
+        filter_initial_date = ''
+        filter_final_date = ''
+        if initial_date:
+            try:
+                datetime.strptime(initial_date, '%Y-%m-%d')
+                filter_initial_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD') "
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data inicial inválida. Use o formato YYYY-MM-DD'}), 400
+
+        if final_date:
+            try:
+                datetime.strptime(final_date, '%Y-%m-%d')
+                filter_final_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')"
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data final inválida. Use o formato YYYY-MM-DD'}), 400
+
+        filter_status = ''
+        if status:
+            status = status.split(',')
+            for s in status:
+                if s not in list_status:
+                    return jsonify({'status': 'error', 'message': f'Status inválido: {s}'}), 400
+            status = "','".join(status)
+            status = f"('{status}')"
+            status = status.replace("''", "'")
+            status = status.replace("'(", "(")
+            status = status.replace(")'", ")")
+            filter_status = f""" AND (
+                                CASE
+                                    WHEN ce.cod_motivo_perda IS NOT NULL AND ce.status = 'E' THEN 'CP'
+                                    ELSE ce.status
+                                END
+                            ) IN {status}"""
+
+        if search:
+            search = search.replace("'", "''").lower()
+            filter_search = f"""
+                AND (
+                    LOWER(ce.RESPONSAVEL_PELO_EVENTO) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.NOME_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(c.NOME) LIKE '%{search.lower()}%'
+                    OR LOWER(c.EMAIL_NFE) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.EMAIL_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.FONE_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_CEL,c.TELEFONE_CEL)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_RES,c.TELEFONE_RES)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_COM,c.TELEFONE_COM)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_FAX,c.TELEFONE_FAX)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST)) LIKE '%{search.lower()}%'
+                    OR LOWER(pm.DESCRICAO_MODELO) LIKE '%{search.lower()}%'
+                    OR TO_CHAR(ce.COD_EVENTO) = '{search}'
+                )
+            """
+
+        query = f"""
+            SELECT saf.COD_ACESSO
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+
+        if filter_responsavel == '' and responsible:
+            lista_usuarios = [usuario.strip().upper() for usuario in responsible.split(',') if usuario.strip()]
+            if len(lista_usuarios) == 0:
+                return jsonify({'status': 'error', 'message': 'Responsável inválido'}), 400
+            for usuario in lista_usuarios:
+                if not re.match(r'^[A-Z0-9_]+$', usuario):
+                    return jsonify({'status': 'error', 'message': f'Responsável inválido: {usuario}'}), 400
+
+            usuarios_in = "','".join(lista_usuarios)
+            query = f"""
+                SELECT upper(eu.NOME) AS usuario
+                FROM empresas_usuarios eu
+                WHERE 1=1
+                    AND NVL(eu.DEMITIDO, 'N') <> 'S'
+                    AND upper(eu.NOME) IN ('{usuarios_in}')
+                GROUP BY upper(eu.NOME)
+            """
+            cur_oracle.execute(query)
+            usuarios_encontrados = {row[0] for row in cur_oracle.fetchall()}
+            usuarios_nao_encontrados = [usuario for usuario in lista_usuarios if usuario not in usuarios_encontrados]
+            if len(usuarios_nao_encontrados) > 0:
+                usuarios_nao_encontrados_str = ','.join(usuarios_nao_encontrados)
+                return jsonify({'status': 'error', 'message': f'Responsável não encontrado: {usuarios_nao_encontrados_str}'}), 400
+
+            filter_responsavel = f" AND upper(eu.NOME) IN ('{usuarios_in}') "
+
+        query = f"""
+            SELECT
+                CASE
+                    WHEN ce.cod_motivo_perda IS NOT null AND ce.status = 'E' THEN 'CP'
+                    ELSE ce.status
+                END status,
+                TO_CHAR(ce.DATA_CRIACAO, 'YYYY-MM-DD HH24:MI:SS') AS DATA_CRIACAO,
+                TO_CHAR(
+                    CASE
+                        WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+                        ELSE ce.data_novo_contato
+                    END, 'YYYY-MM-DD HH24:MI:SS'
+                ) AS data_contato,
+                ce.COD_EVENTO,
+                ce.COD_EMPRESA,
+                cet.DESC_TIPO_EVENTO,
+                ca.ANDAMENTO,
+                ce.COD_CLIENTE,
+                CASE
+                    WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO
+                    ELSE c.NOME
+                END nome_cliente,
+                concat(c.PREFIXO_CEL,c.TELEFONE_CEL) tel_cel,
+                ce.fone_cliente_avulso,
+                ce.email_cliente_avulso,
+                c.EMAIL_NFE,
+                ce.TERMOMETRO,
+                ce.OBS_MEMO,
+                cmp.desc_motivo motivo_perda,
+                cd.descricao_descarte,
+                ce.RESPONSAVEL_PELO_EVENTO,
+                eu.NOME_COMPLETO RESPONSAVEL_NOME_COMPLETO,
+                pm.descricao_modelo,
+                concat(c.PREFIXO_RES,c.TELEFONE_RES) tel_residencial,
+                concat(c.PREFIXO_COM,c.TELEFONE_COM) tel_comercial,
+                concat(c.PREFIXO_FAX,c.TELEFONE_FAX) tel_fax,
+                concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp,
+                ce.data_agendada,
+                ce.data_visita,
+                CASE
+                    WHEN (
+                        CASE
+                            WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+                            ELSE ce.data_novo_contato
+                        END
+                    ) < SYSDATE THEN 'ATRASADO'
+                    WHEN TRUNC(
+                        CASE
+                            WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+                            ELSE ce.data_novo_contato
+                        END
+                    ) > TRUNC(SYSDATE) THEN 'FUTURO'
+                    ELSE 'TRABALHANDO'
+                END AS status_atendimento
+            FROM CRM_EVENTOS ce
+            LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+            LEFT JOIN CRM_ANDAMENTO ca ON ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+            LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA
+            LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
+            LEFT JOIN CRM_EVENTOS_TIPO cet ON cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+            LEFT JOIN CRM_DESCARTES cd on cd.COD_DESCARTE = ce.COD_DESCARTE
+            LEFT JOIN CRM_MOTIVO_PERDAS cmp ON cmp.cod_motivo_perda = ce.cod_motivo_perda
+            LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+            LEFT JOIN caiuas_crm_eventos_descartados ced ON ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
+            WHERE 1 = 1
+                {filter_tipo_evento}
+                {filter_responsavel}
+                {filter_status}
+                {filter_search if search else ''}
+                {filter_initial_date}
+                {filter_final_date}
+                {filter_created_at}
+                {filter_empresa}
+                {filter_pendente_autorizacao}
+            ORDER BY 3 asc
+        """
+
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            return jsonify({'status': 'error', 'message': 'Não tem eventos showroom no período'}), 404
+
+        def mapear_termometro(valor):
+            if valor is None:
+                return 'Não informado'
+            valor_str = str(valor).strip()
+            mapa = {
+                '1': 'Frio',
+                '2': 'Morno',
+                '3': 'Quente',
+                '4': 'Super quente'
+            }
+            if valor_str == '' or valor_str.lower() == 'null':
+                return 'Não informado'
+            return mapa.get(valor_str, valor)
+
+        def formatar_obs_para_excel(obs_memo):
+            observacoes = processar_obs_memo(obs_memo)
+            if len(observacoes) == 0:
+                return ''
+            return '\n\n'.join([
+                f"[{obs.get('data', '')}] {obs.get('usuario', '')}: {obs.get('observacao', '')}"
+                for obs in observacoes
+            ])
+
+        dados = []
+        for row in rows:
+            evento_crm = f"{row[4]}{row[3]}"
+            dados.append({
+                'evento_crm': evento_crm,
+                'link_nbs': f"https://app.caiuas.com.br/crm/eventos/{evento_crm}",
+                'status': row[0],
+                'data_criacao': row[1],
+                'data_contato': row[2],
+                'cod_evento': row[3],
+                'cod_empresa': row[4],
+                'desc_tipo_evento': row[5],
+                'andamento': row[6],
+                'cod_cliente': row[7],
+                'nome_cliente': row[8],
+                'tel_cel': row[9],
+                'fone_cliente_avulso': row[10],
+                'email_cliente_avulso': row[11],
+                'email_nfe': row[12],
+                'termometro': mapear_termometro(row[13]),
+                'obs_memo': formatar_obs_para_excel(row[14]),
+                'motivo_perda': row[15],
+                'descricao_descarte': row[16],
+                'responsavel_pelo_evento': row[17],
+                'responsavel_nome_completo': row[18],
+                'descricao_modelo': row[19],
+                'tel_residencial': row[20],
+                'tel_comercial': row[21],
+                'tel_fax': row[22],
+                'tel_whatsapp': row[23],
+                'data_agendada': row[24],
+                'data_visita': row[25],
+                'status_atendimento': row[26]
+            })
+
+        df = pd.DataFrame(dados)
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='eventos')
+        output.seek(0)
+
+        data_arquivo = datetime.now().strftime('%Y%m%d_%H%M%S')
+        nome_arquivo = f'crm_eventos_{data_arquivo}.xlsx'
+        return send_file(
+            output,
+            as_attachment=True,
+            download_name=nome_arquivo,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        if cur_oracle:
+            try:
+                cur_oracle.close()
+            except Exception:
+                pass
+        if conn_oracle:
+            try:
+                conn_oracle.close()
+            except Exception:
+                pass
+    
 
 @crm_bp.route('/api/crm/eventos_descartados', methods=['GET'])
 @token_required
