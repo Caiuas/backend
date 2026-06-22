@@ -31,6 +31,7 @@ from views.leads_escalera import EMAILS_ESCALERA
 from views.acompanhamento_chat import EMAILS_ACOMPANHAMENTO_CHAT
 from views.acompanhamento_pos_vendas import EMAILS_POS_VENDAS
 from views.acompanhamento_diario import EMAILS_ACOMPANHAMENTO_DIARIO
+from views.acompanhamento_crm import EMAILS_ACOMPANHAMENTO_CRM
 from views.propostas import EMAILS_PRPOSTAS
 from views.fechamento_mes import EMAILS_FECHAMENTO_MES
 from views.ciclo_veiculos import EMAILS_POS_VENDAS2
@@ -105,6 +106,7 @@ else:
         menus_disponiveis.append("Obsolescência de estoque")
     if tem_acesso(email_usuario, EMAILS_CRM):
         menus_disponiveis.append("CRM")
+    if tem_acesso(email_usuario, EMAILS_ACOMPANHAMENTO_CRM):
         menus_disponiveis.append("Acompanhamento CRM")
     if tem_acesso(email_usuario, EMAILS_BASE_CLIENTES):
         menus_disponiveis.append("Base Clientes/Veículos")
