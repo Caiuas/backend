@@ -246,6 +246,7 @@ def list_crm_eventos():
         email = token_data.get('email').strip().lower()
         status = request.args.get('status', None)
         tipo_evento = request.args.get('tipo_evento', None)
+        cod_modelo = request.args.get('cod_modelo', None)
         initial_date = request.args.get('initial_date', None)
         final_date = request.args.get('final_date', None)
         created_at_min = request.args.get('created_at_min', None)
@@ -257,6 +258,15 @@ def list_crm_eventos():
         limit = int(request.args.get('limit', 100))
         pendente_autorizacao = request.args.get('pendente_autorizacao', None)
         retorno = {}
+        
+        filter_modelo = ''
+        if cod_modelo:
+            list_cod_modelo = [cod.strip() for cod in cod_modelo.split(',') if cod.strip()]
+            for cod in list_cod_modelo:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de modelo inválido: {cod}'}), 400
+            cod_modelo_in = ','.join(list_cod_modelo)
+            filter_modelo = f" AND ce.COD_MODELO IN ({cod_modelo_in}) "
         
         filter_pendente_autorizacao = ''
         if pendente_autorizacao is not None:
@@ -433,18 +443,16 @@ def list_crm_eventos():
                 LEFT JOIN caiuas_crm_eventos_descartados ced ON ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
                 WHERE
                     1 = 1
-                    --AND ce.COD_TIPO_EVENTO IN (785)
                     {filter_responsavel}
                     {filter_status}
                     {filter_search if search else ''}
-                    --{filter_initial_date}
-                    --{filter_final_date}
+                    {filter_initial_date}
+                    {filter_final_date}
                     {filter_tipo_evento}
                     {filter_created_at}
                     {filter_empresa}
+                    {filter_modelo}
                     {filter_pendente_autorizacao}
-                    --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
-                    --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
         """
         # return query
         cur_oracle.execute(query)
@@ -522,10 +530,13 @@ def list_crm_eventos():
 			                ) > TRUNC(SYSDATE) THEN 'FUTURO'
 			                -- Caso contrário, é para hoje (de agora até o fim do dia)
 			                ELSE 'TRABALHANDO'
-			            END AS status_atendimento
+			            END AS status_atendimento,
+                        eu2.NOME_COMPLETO AS CRIOU_O_EVENTO_NOME_COMPLETO,
+                        eu2.nome AS CRIOU_O_EVENTO
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+                    LEFT JOIN EMPRESAS_USUARIOS eu2 ON eu2.nome = ce.CRIOU_O_EVENTO
                     LEFT JOIN CRM_ANDAMENTO ca ON ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
                     LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
                     LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
@@ -536,7 +547,6 @@ def list_crm_eventos():
                     LEFT JOIN caiuas_crm_eventos_descartados ced ON ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
                     WHERE
                         1 = 1
-                        --AND ce.COD_TIPO_EVENTO IN (785)
                         {filter_tipo_evento}
                         {filter_responsavel}
                         {filter_status}
@@ -545,9 +555,8 @@ def list_crm_eventos():
                         {filter_final_date}
                         {filter_created_at}
                         {filter_empresa}
+                        {filter_modelo}
                         {filter_pendente_autorizacao}
-                        --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD')
-                        --AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')
                     ORDER BY
                         3 asc
                 ) t
@@ -621,7 +630,9 @@ def list_crm_eventos():
                 'tel_whatsapp': row[23],
                 'data_agendada': data_agendada_iso if row[24] else None,
                 'data_visita': data_visita_iso if row[25] else None,
-                'status_atendimento': row[26]
+                'status_atendimento': row[26],
+                'criou_o_evento': row[27],
+                'criou_o_evento_nome_completo': row[28]
             })
         return jsonify(retorno), 200
     except Exception as e:
@@ -638,6 +649,422 @@ def list_crm_eventos():
             except Exception:
                 pass
 
+@crm_bp.route('/api/crm/eventos_ofi', methods=['GET'])
+@token_required
+def list_crm_eventos_ofi():
+    conn_oracle = None
+    cur_oracle = None
+    try:
+        now = datetime.now().strftime("%Y-%m-%d")
+        list_status = ['P','E','D','V','A','R','CP']
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        status = request.args.get('status', None)
+        tipo_evento = request.args.get('tipo_evento', None)
+        cod_modelo = request.args.get('cod_modelo', None)
+        initial_date = request.args.get('initial_date', None)
+        final_date = request.args.get('final_date', None)
+        created_at_min = request.args.get('created_at_min', None)
+        created_at_max = request.args.get('created_at_max', None)
+        current_page = int(request.args.get('current_page', 1))
+        search = request.args.get('search', None)
+        responsible = request.args.get('responsible', None)
+        cod_empresa = request.args.get('cod_empresa', None)
+        limit = int(request.args.get('limit', 100))
+        pendente_autorizacao = request.args.get('pendente_autorizacao', None)
+        retorno = {}
+        
+        filter_modelo = ''
+        if cod_modelo:
+            list_cod_modelo = [cod.strip() for cod in cod_modelo.split(',') if cod.strip()]
+            for cod in list_cod_modelo:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de modelo inválido: {cod}'}), 400
+            cod_modelo_in = ','.join(list_cod_modelo)
+            filter_modelo = f" AND ce.COD_MODELO IN ({cod_modelo_in}) "
+        
+        filter_pendente_autorizacao = ''
+        if pendente_autorizacao is not None:
+            filter_pendente_autorizacao = " and ced.authorization_date is null and ced.cod_evento is not null "
+        
+        empresas_permitidas = ['11', '33', '111']
+        filter_empresa = ''
+        if cod_empresa:
+            empresas_lista = [e.strip() for e in cod_empresa.split(',') if e.strip()]
+            for e in empresas_lista:
+                if e not in empresas_permitidas:
+                    return jsonify({'status': 'error', 'message': f'Empresa inválida: {e}. Permitidas: 11, 33, 111'}), 400
+            empresas_in = ','.join(empresas_lista)
+            filter_empresa = f' AND eu.COD_EMPRESA IN ({empresas_in}) '
+
+        filter_created_at = ''
+        if created_at_min and created_at_max:
+            try:
+                datetime.strptime(created_at_min, '%Y-%m-%d')
+                datetime.strptime(created_at_max, '%Y-%m-%d')
+                # se data de periodo for maior que um mês retorne erro
+                # if (datetime.strptime(created_at_max, '%Y-%m-%d') - datetime.strptime(created_at_min, '%Y-%m-%d')).days > 31:
+                #     return jsonify({'status': 'error', 'message': 'O período de criação não pode ser maior que 31 dias'}), 400
+                filter_created_at = f" AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{created_at_min}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{created_at_max}', 'YYYY-MM-DD') "
+                
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data de criação inválida. Use o formato YYYY-MM-DD'}), 400
+        
+        filter_tipo_evento = ''
+        if tipo_evento:
+            tipo_evento = tipo_evento.split(',')
+            for te in tipo_evento:
+                if not te.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Tipo de evento inválido: {te}'}), 400
+            tipo_evento = ",".join(tipo_evento)
+            filter_tipo_evento = f" AND ce.COD_TIPO_EVENTO IN ({tipo_evento}) "
+        
+        filter_initial_date = ''
+        filter_final_date = ''
+        if initial_date:
+            try:
+                datetime.strptime(initial_date, '%Y-%m-%d')
+                filter_initial_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD') "
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data inicial inválida. Use o formato YYYY-MM-DD'}), 400
+        
+        if final_date:
+            try:
+                datetime.strptime(final_date, '%Y-%m-%d')
+                filter_final_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')"
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data final inválida. Use o formato YYYY-MM-DD'}), 400
+        
+        
+        filter_status = ''
+        if status:
+            status = status.split(',')
+            for s in status:
+                if s not in list_status:
+                    return jsonify({'status': 'error', 'message': f'Status inválido: {s}'}), 400
+            status = "','".join(status)
+            status = f"('{status}')"
+            status = status.replace("''","'")
+            status = status.replace("'(","(")
+            status = status.replace(")'",")")
+            filter_status = f""" AND (
+                                CASE
+                                    WHEN ce.cod_motivo_perda IS NOT NULL AND ce.status = 'E' THEN 'CP'
+                                    ELSE ce.status
+                                END
+                            ) IN {status}"""
+        
+        if search:
+            search = search.replace("'", "''").lower()
+            filter_search = f"""
+                AND (
+                    LOWER(ce.RESPONSAVEL_PELO_EVENTO) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.NOME_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(c.NOME) LIKE '%{search.lower()}%'
+                    OR LOWER(c.EMAIL_NFE) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.EMAIL_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(ce.FONE_CLIENTE_AVULSO) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_CEL,c.TELEFONE_CEL)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_RES,c.TELEFONE_RES)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_COM,c.TELEFONE_COM)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_FAX,c.TELEFONE_FAX)) LIKE '%{search.lower()}%'
+                    OR LOWER(concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST)) LIKE '%{search.lower()}%'
+                    OR LOWER(pm.DESCRICAO_MODELO) LIKE '%{search.lower()}%'
+                    OR TO_CHAR(ce.COD_EVENTO) = '{search}'
+                    
+                )
+            """
+        
+        
+        
+        query = f"""
+            SELECT saf.COD_ACESSO 
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = '80320'
+            GROUP BY saf.COD_ACESSO
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        filter_responsavel = ''
+        if len(rows) == 0:
+            filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+        if filter_responsavel == '' and responsible:
+            lista_usuarios = [usuario.strip().upper() for usuario in responsible.split(',') if usuario.strip()]
+            if len(lista_usuarios) == 0:
+                return jsonify({'status': 'error', 'message': 'Responsável inválido'}), 400
+            for usuario in lista_usuarios:
+                if not re.match(r'^[A-Z0-9_]+$', usuario):
+                    return jsonify({'status': 'error', 'message': f'Responsável inválido: {usuario}'}), 400
+
+            usuarios_in = "','".join(lista_usuarios)
+            query = f"""
+                SELECT upper(eu.NOME) AS usuario
+                FROM empresas_usuarios eu
+                WHERE 1=1
+                    AND NVL(eu.DEMITIDO, 'N') <> 'S'
+                    AND upper(eu.NOME) IN ('{usuarios_in}')
+                GROUP BY upper(eu.NOME)
+            """
+            cur_oracle.execute(query)
+            usuarios_encontrados = {row[0] for row in cur_oracle.fetchall()}
+            usuarios_nao_encontrados = [usuario for usuario in lista_usuarios if usuario not in usuarios_encontrados]
+            if len(usuarios_nao_encontrados) > 0:
+                usuarios_nao_encontrados_str = ','.join(usuarios_nao_encontrados)
+                return jsonify({'status': 'error', 'message': f'Responsável não encontrado: {usuarios_nao_encontrados_str}'}), 400
+
+            filter_responsavel = f" AND upper(eu.NOME) IN ('{usuarios_in}') "
+        
+        query = f"""
+                SELECT
+                    COUNT(CASE 
+                        WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) < TRUNC(SYSDATE) 
+                        THEN 1 
+                    END) AS ATRASADO,
+                    COUNT(CASE 
+                        WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) = TRUNC(SYSDATE) 
+                        THEN 1 
+                    END) AS HOJE,
+                    COUNT(CASE 
+                        WHEN TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) > TRUNC(SYSDATE) 
+                        THEN 1 
+                    END) AS FUTURO
+                FROM
+                    CRM_EVENTOS ce
+                LEFT JOIN EMPRESAS_USUARIOS eu ON
+                    1 = 1
+                    AND eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+                LEFT JOIN CRM_ANDAMENTO ca ON
+                    1 = 1
+                    AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+                LEFT JOIN MIDIA m ON
+                    1=1
+                    AND m.COD_MIDIA = ce.COD_MIDIA 
+                LEFT JOIN clientes c ON
+                    1 = 1
+                    AND ce.COD_CLIENTE = c.COD_CLIENTE
+                LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+                    AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+                LEFT JOIN CRM_DESCARTES cd on 1=1
+                    and cd.COD_DESCARTE = ce.COD_DESCARTE
+                LEFT JOIN CRM_MOTIVO_PERDAS cmp ON 1=1
+                    AND cmp.cod_motivo_perda = ce.cod_motivo_perda
+                LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+                LEFT JOIN caiuas_crm_eventos_descartados ced ON ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
+                WHERE
+                    1 = 1
+                    {filter_responsavel}
+                    {filter_status}
+                    {filter_search if search else ''}
+                    {filter_initial_date}
+                    {filter_final_date}
+                    {filter_tipo_evento}
+                    {filter_created_at}
+                    {filter_empresa}
+                    {filter_modelo}
+                    {filter_pendente_autorizacao}
+        """
+        return query
+        cur_oracle.execute(query)
+        r = cur_oracle.fetchone()
+        atrasado = r[0]
+        hoje = r[1]
+        futuro = r[2]
+        total = atrasado + hoje + futuro
+        if total == 0:
+            return jsonify({'status': 'error', 'message': 'Não tem eventos showroom no período'}), 404
+        offset = (current_page - 1) * limit
+        total_pages = (total + limit - 1) // limit
+        start_row = (current_page - 1) * limit + 1
+        end_row = current_page * limit
+        if current_page > total_pages:
+            return jsonify({'status': 'error', 'message': 'Página inválida'}), 400
+        query =f"""
+            SELECT *
+            FROM (
+                SELECT t.*, ROWNUM AS rn
+                FROM (
+                    -- Sua query original com ORDER BY aqui dentro
+                    SELECT
+                        CASE
+                            WHEN ce.cod_motivo_perda IS NOT null AND ce.status = 'E' THEN 'CP'
+                            ELSE ce.status
+                        END status,
+                        TO_CHAR(ce.DATA_CRIACAO, 'YYYY-MM-DD HH24:MI:SS') AS DATA_CRIACAO,
+                        TO_CHAR(
+                            CASE
+                                WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+                                ELSE ce.data_novo_contato
+                            END, 'YYYY-MM-DD HH24:MI:SS'
+                        ) AS data_contato,
+                        ce.COD_EVENTO,
+                        ce.COD_EMPRESA,
+                        cet.DESC_TIPO_EVENTO,
+                        ca.ANDAMENTO,
+                        ce.COD_CLIENTE,
+                        CASE
+                            WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO 
+                            ELSE c.NOME 
+                        END nome_cliente,
+                        concat(c.PREFIXO_CEL,c.TELEFONE_CEL) tel_cel,
+                        ce.fone_cliente_avulso,
+                        ce.email_cliente_avulso,
+                        c.EMAIL_NFE,
+                        ce.TERMOMETRO,
+                        ce.OBS_MEMO,
+                        cmp.desc_motivo motivo_perda,
+                        cd.descricao_descarte,
+                        ce.RESPONSAVEL_PELO_EVENTO,
+                        eu.NOME_COMPLETO RESPONSAVEL_NOME_COMPLETO,
+                        pm.descricao_modelo,
+                        concat(c.PREFIXO_RES,c.TELEFONE_RES) tel_residencial,
+                        concat(c.PREFIXO_COM,c.TELEFONE_COM) tel_comercial,
+                        concat(c.PREFIXO_FAX,c.TELEFONE_FAX) tel_fax,
+                        concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp,
+                        ce.data_agendada,
+                        ce.data_visita,
+                        CASE
+			                -- Se a data/hora do contato for anterior a data/hora atual, está ATRASADO
+			                WHEN (
+			                    CASE
+			                        WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+			                        ELSE ce.data_novo_contato
+			                    END
+			                ) < SYSDATE THEN 'ATRASADO'
+			                -- Se a data do contato (ignorando a hora) for maior que a data de hoje, é Futuro
+			                WHEN TRUNC(
+			                    CASE
+			                        WHEN ce.data_novo_contato IS NULL THEN ce.data_evento
+			                        ELSE ce.data_novo_contato
+			                    END
+			                ) > TRUNC(SYSDATE) THEN 'FUTURO'
+			                -- Caso contrário, é para hoje (de agora até o fim do dia)
+			                ELSE 'TRABALHANDO'
+			            END AS status_atendimento,
+                        eu2.NOME_COMPLETO AS CRIOU_O_EVENTO_NOME_COMPLETO,
+                        eu2.nome AS CRIOU_O_EVENTO
+                    FROM
+                        CRM_EVENTOS ce
+                    LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+                    LEFT JOIN EMPRESAS_USUARIOS eu2 ON eu2.nome = ce.CRIOU_O_EVENTO
+                    LEFT JOIN CRM_ANDAMENTO ca ON ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+                    LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
+                    LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
+                    LEFT JOIN CRM_EVENTOS_TIPO cet ON cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+                    LEFT JOIN CRM_DESCARTES cd on cd.COD_DESCARTE = ce.COD_DESCARTE
+                    LEFT JOIN CRM_MOTIVO_PERDAS cmp ON cmp.cod_motivo_perda = ce.cod_motivo_perda
+                    LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
+                    LEFT JOIN caiuas_crm_eventos_descartados ced ON ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
+                    WHERE
+                        1 = 1
+                        {filter_tipo_evento}
+                        {filter_responsavel}
+                        {filter_status}
+                        {filter_search if search else ''}
+                        {filter_initial_date}
+                        {filter_final_date}
+                        {filter_created_at}
+                        {filter_empresa}
+                        {filter_modelo}
+                        {filter_pendente_autorizacao}
+                    ORDER BY
+                        3 asc
+                ) t
+            )
+            WHERE
+                rn BETWEEN {start_row} AND {end_row}
+        """
+        # return query
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        retorno['total_eventos'] = total
+        retorno['total_pages'] = total_pages
+        retorno['current_page'] = current_page
+        retorno['limit'] = limit
+        retorno['total_atrasados'] = atrasado
+        retorno['total_hoje'] = hoje
+        retorno['total_futuros'] = futuro
+        retorno['eventos'] = []
+        for row in rows:
+            if row[1]:  # data_criacao
+                try:
+                    data_criacao_obj = datetime.strptime(row[1], '%Y-%m-%d %H:%M:%S')
+                    data_criacao_iso = data_criacao_obj.isoformat()
+                except:
+                    data_criacao_iso = row[1]  # fallback para string original
+            
+            if row[2]:  # data_contato
+                try:
+                    data_contato_obj = datetime.strptime(row[2], '%Y-%m-%d %H:%M:%S')
+                    data_contato_iso = data_contato_obj.isoformat()
+                except:
+                    data_contato_iso = row[2]  # fallback para string original
+            if row[24]:  # data_agendada
+                try:
+                    data_agendada_obj = datetime.strptime(row[24], '%Y-%m-%d %H:%M:%S')
+                    data_agendada_iso = data_agendada_obj.isoformat()
+                except:
+                    data_agendada_iso = row[24]  # fallback para string original
+            if row[25]:  # data_visita
+                try:
+                    data_visita_obj = datetime.strptime(row[25], '%Y-%m-%d %H:%M:%S')
+                    data_visita_iso = data_visita_obj.isoformat()
+                except:
+                    data_visita_iso = row[25]  # fallback para string original
+            obs_memo_processado = processar_obs_memo(row[14])
+
+            retorno['eventos'].append({  
+                'status': row[0],
+                'data_criacao': data_criacao_iso,
+                'data_contato': data_contato_iso,
+                'cod_evento': row[3],
+                'cod_empresa': row[4],
+                'desc_tipo_evento': row[5],
+                'andamento': row[6],
+                'cod_cliente': row[7],
+                'nome_cliente': row[8],
+                'tel_cel': row[9],
+                'fone_cliente_avulso': row[10],
+                'email_cliente_avulso': row[11],
+                'email_nfe': row[12],
+                'termometro': row[13],
+                'obs_memo': obs_memo_processado,
+                'motivo_perda': row[15],
+                'descricao_descarte': row[16],
+                'responsavel_pelo_evento': row[17],
+                'responsavel_nome_completo': row[18],
+                'descricao_modelo': row[19],
+                'tel_residencial': row[20],
+                'tel_comercial': row[21],
+                'tel_fax': row[22],
+                'tel_whatsapp': row[23],
+                'data_agendada': data_agendada_iso if row[24] else None,
+                'data_visita': data_visita_iso if row[25] else None,
+                'status_atendimento': row[26],
+                'criou_o_evento': row[27],
+                'criou_o_evento_nome_completo': row[28]
+            })
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        if cur_oracle:
+            try:
+                cur_oracle.close()
+            except Exception:
+                pass
+        if conn_oracle:
+            try:
+                conn_oracle.close()
+            except Exception:
+                pass
+
+
 @crm_bp.route('/api/crm/eventos_exportar', methods=['GET'])
 @token_required
 def exportar_eventos():
@@ -646,6 +1073,8 @@ def exportar_eventos():
     cur_oracle = None
     try:
         import pandas as pd
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+        from openpyxl.utils import get_column_letter
 
         list_status = ['P', 'E', 'D', 'V', 'A', 'R', 'CP']
         token_data = request.token_data
@@ -831,6 +1260,7 @@ def exportar_eventos():
                 concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST) tel_whatsapp,
                 ce.data_agendada,
                 ce.data_visita,
+                ce.cod_proposta,
                 CASE
                     WHEN (
                         CASE
@@ -929,13 +1359,39 @@ def exportar_eventos():
                 'tel_whatsapp': row[23],
                 'data_agendada': row[24],
                 'data_visita': row[25],
-                'status_atendimento': row[26]
+                'cod_proposta': row[26],
+                'status_atendimento': row[27]
             })
 
         df = pd.DataFrame(dados)
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='eventos')
+
+            worksheet = writer.sheets['eventos']
+
+            # Ajusta largura das colunas com base no maior conteúdo de cada coluna.
+            for col_idx, col_name in enumerate(df.columns, start=1):
+                col_values = df[col_name].fillna('').astype(str)
+                max_value_len = col_values.map(
+                    lambda value: max((len(line) for line in value.splitlines()), default=0)
+                ).max()
+                max_len = max(len(str(col_name)), max_value_len)
+                worksheet.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 80)
+
+            # Cria uma tabela do Excel contendo todos os dados exportados.
+            last_col = get_column_letter(len(df.columns))
+            last_row = len(df) + 1
+            table_ref = f"A1:{last_col}{last_row}"
+            excel_table = Table(displayName='Eventos', ref=table_ref)
+            excel_table.tableStyleInfo = TableStyleInfo(
+                name='TableStyleMedium2',
+                showFirstColumn=False,
+                showLastColumn=False,
+                showRowStripes=True,
+                showColumnStripes=False
+            )
+            worksheet.add_table(excel_table)
         output.seek(0)
 
         data_arquivo = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -960,7 +1416,6 @@ def exportar_eventos():
             except Exception:
                 pass
     
-
 @crm_bp.route('/api/crm/eventos_descartados', methods=['GET'])
 @token_required
 def list_eventos_descartados():
@@ -1022,6 +1477,28 @@ def list_eventos_descartados():
             LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
             WHERE 1=1
                 AND cced.authorization_date IS NULL
+                and ce.cod_tipo_evento in (
+                    829,
+                    831,
+                    795,
+                    793,
+                    797,
+                    799,
+                    833,
+                    837,
+                    819,
+                    821,
+                    825,
+                    785,
+                    807,
+                    827,
+                    835,
+                    815,
+                    817,
+                    823,
+                    810,
+                    812
+                )
                 {filter_responsavel}
             ORDER BY cced.created_at DESC
         """
@@ -1120,6 +1597,28 @@ def list_eventos_contato_perdido():
                 AND ce.cod_motivo_perda IS NOT NULL
                 AND ce.status = 'E'
                 AND cce.authorization_date IS NULL
+                and ce.cod_tipo_evento in (
+                    829,
+                    831,
+                    795,
+                    793,
+                    797,
+                    799,
+                    833,
+                    837,
+                    819,
+                    821,
+                    825,
+                    785,
+                    807,
+                    827,
+                    835,
+                    815,
+                    817,
+                    823,
+                    810,
+                    812
+                )
                 {filter_responsavel}
             ORDER BY cce.created_at DESC
         """
@@ -1748,7 +2247,9 @@ def contato_perdido(id_evento):
 
 ALLOWED_REMOVER_DESCARTE_EMAILS = [
     'cristiane.aguilar@caiuas.com.br',
-    'pablo.ti@caiuas.com.br'
+    'pablo.ti@caiuas.com.br',
+    'guilherme.machado@caiuas.com.br',
+    'wheverllyn.costa@caiuas.com.br'
 ]
 
 @crm_bp.route('/api/crm/eventos/remover_descarte/<int:id_evento>', methods=['PUT'])
@@ -2427,10 +2928,13 @@ def show_crm_eventos(id_evento):
                         ce.COD_EMPRESA_ANTERIOR, 
                         ce.COD_EVENTO_ANTERIOR,
                         vp.cod_proposta,
-                        ce.NOME_CLIENTE_AVULSO
+                        ce.NOME_CLIENTE_AVULSO,
+                        eu2.NOME AS NOME_QUEM_CRIOU,
+                        eu2.NOME_COMPLETO AS NOME_COMPLETO_QUEM_CRIOU
                     FROM
                         CRM_EVENTOS ce
                     LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
+                    LEFT JOIN EMPRESAS_USUARIOS eu2 ON eu2.nome = ce.CRIOU_O_EVENTO
                     LEFT JOIN CRM_ANDAMENTO ca ON ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
                     LEFT JOIN MIDIA m ON m.COD_MIDIA = ce.COD_MIDIA 
                     LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
@@ -2513,7 +3017,9 @@ def show_crm_eventos(id_evento):
             'cod_empresa_anterior': row[31],
             'cod_evento_anterior': row[32],
             'cod_proposta': row[33],
-            'nome_cliente_avulso': row[34]
+            'nome_cliente_avulso': row[34],
+            'nome_quem_criou': row[35],
+            'nome_completo_quem_criou': row[36]
         }
         query = f"""
             SELECT
@@ -4537,6 +5043,25 @@ def crm_eventos_muda_tipo_evento(id_evento):
         if not cod_tipo_evento or not str(cod_tipo_evento).isdigit():
             return jsonify({'status': 'error', 'message': 'Código do tipo de evento é obrigatório'}), 400
         cod_tipo_evento = int(cod_tipo_evento)
+
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+            SELECT saf.COD_ACESSO
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIl) = '{email}'
+                AND saf.COD_ACESSO = 'CC001'
+            GROUP BY saf.COD_ACESSO
+        """
+        cur_oracle.execute(query)
+        rows = cur_oracle.fetchall()
+        if len(rows) == 0:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Não tem acesso a altera tipo de evento - CC001'}), 403
         
         query = f"""
             SELECT cod_empresa,eu.nome 
@@ -4549,7 +5074,6 @@ def crm_eventos_muda_tipo_evento(id_evento):
             GROUP BY eu.COD_EMPRESA, eu.nome
             ORDER BY eu.cod_empresa
         """
-        conn_oracle, cur_oracle = oracle()
         cur_oracle.execute(query)
         rows = cur_oracle.fetchall()
         quem_criou = rows[0][1]
@@ -5142,7 +5666,7 @@ def cria_evento_chatwoot():
             query = f"""
                 SELECT additional_attributes, custom_attributes 
                 FROM conversations 
-                WHERE id = {conversation_id}
+                WHERE display_id = {conversation_id}
             """
             cur_chatwoot.execute(query)
             row = cur_chatwoot.fetchone()
@@ -5174,7 +5698,7 @@ def cria_evento_chatwoot():
                     UPDATE conversations 
                     SET additional_attributes = '{additional_json}',
                         custom_attributes = '{custom_json}'
-                    WHERE id = {conversation_id}
+                    WHERE display_id = {conversation_id}
                 """
                 cur_chatwoot.execute(query)
                 conn_chatwoot.commit()
