@@ -33,6 +33,7 @@ from views.acompanhamento_pos_vendas import EMAILS_POS_VENDAS
 from views.acompanhamento_diario import EMAILS_ACOMPANHAMENTO_DIARIO
 from views.propostas import EMAILS_PRPOSTAS
 from views.fechamento_mes import EMAILS_FECHAMENTO_MES
+from views.ciclo_veiculos import EMAILS_POS_VENDAS2
 from utils.auth import realizar_login, validar_token, check_authentication
 from views import inicio
 from views import estoque_de_pecas
@@ -48,8 +49,10 @@ from views import leads_escalera
 from views import acompanhamento_chat
 from views import acompanhamento_pos_vendas
 from views import acompanhamento_diario
+from views import acompanhamento_crm
 from views import propostas
 from views import fechamento_mes
+from views import ciclo_veiculos
 
 # 1. Configuração da página
 st.set_page_config(page_title="Caiuás - Acesso Rápido",layout="wide")
@@ -102,6 +105,7 @@ else:
         menus_disponiveis.append("Obsolescência de estoque")
     if tem_acesso(email_usuario, EMAILS_CRM):
         menus_disponiveis.append("CRM")
+        menus_disponiveis.append("Acompanhamento CRM")
     if tem_acesso(email_usuario, EMAILS_BASE_CLIENTES):
         menus_disponiveis.append("Base Clientes/Veículos")
     if tem_acesso(email_usuario, EMAILS_HAMADA):
@@ -120,6 +124,8 @@ else:
         menus_disponiveis.append("Propostas")
     if tem_acesso(email_usuario, EMAILS_FECHAMENTO_MES):
         menus_disponiveis.append("Fechamento Mês")
+    if tem_acesso(email_usuario, EMAILS_POS_VENDAS2):
+        menus_disponiveis.append("Ciclo de veículos")
 
     if not menus_disponiveis:
         st.warning("Seu usuário não possui acesso a nenhum menu. Entre em contato com o administrador.")
@@ -140,6 +146,7 @@ else:
         "Estoque de peças": estoque_de_pecas.render,
         "Obsolescência de estoque": obsolescencia_de_estoque.render,
         "CRM": crm.render,
+        "Acompanhamento CRM": acompanhamento_crm.render,
         "Fluxo de loja": fluxo_de_loja.render,
         "RECEPCAO": recepcao.render,
         "Veículos": veiculos.render,
@@ -152,6 +159,7 @@ else:
         "Acompanhamento Diário": acompanhamento_diario.render,
         "Propostas": propostas.render,
         "Fechamento Mês": fechamento_mes.render,
+        "Ciclo de veículos": ciclo_veiculos.render,
     }
 
     if menu in menu_handlers:
