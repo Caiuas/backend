@@ -246,6 +246,7 @@ def list_crm_eventos():
         email = token_data.get('email').strip().lower()
         status = request.args.get('status', None)
         tipo_evento = request.args.get('tipo_evento', None)
+        cod_midia = request.args.get('cod_midia', None)
         cod_modelo = request.args.get('cod_modelo', None)
         initial_date = request.args.get('initial_date', None)
         final_date = request.args.get('final_date', None)
@@ -258,6 +259,15 @@ def list_crm_eventos():
         limit = int(request.args.get('limit', 100))
         pendente_autorizacao = request.args.get('pendente_autorizacao', None)
         retorno = {}
+        
+        filter_cod_midia = ''
+        if cod_midia:
+            list_cod_midia = [cod.strip() for cod in cod_midia.split(',') if cod.strip()]
+            for cod in list_cod_midia:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de mídia inválido: {cod}'}), 400
+            cod_midia_in = ','.join(list_cod_midia)
+            filter_cod_midia = f" AND ce.COD_MIDIA IN ({cod_midia_in}) "
         
         filter_modelo = ''
         if cod_modelo:
@@ -453,6 +463,7 @@ def list_crm_eventos():
                     {filter_empresa}
                     {filter_modelo}
                     {filter_pendente_autorizacao}
+                    {filter_cod_midia}
         """
         # return query
         cur_oracle.execute(query)
@@ -557,6 +568,7 @@ def list_crm_eventos():
                         {filter_empresa}
                         {filter_modelo}
                         {filter_pendente_autorizacao}
+                        {filter_cod_midia}
                     ORDER BY
                         3 asc
                 ) t
@@ -1064,7 +1076,6 @@ def list_crm_eventos_ofi():
             except Exception:
                 pass
 
-
 @crm_bp.route('/api/crm/eventos_exportar', methods=['GET'])
 @token_required
 def exportar_eventos():
@@ -1275,7 +1286,8 @@ def exportar_eventos():
                         END
                     ) > TRUNC(SYSDATE) THEN 'FUTURO'
                     ELSE 'TRABALHANDO'
-                END AS status_atendimento
+                END AS status_atendimento,
+                m.descricao as descricao_midia
             FROM CRM_EVENTOS ce
             LEFT JOIN EMPRESAS_USUARIOS eu ON eu.nome = ce.RESPONSAVEL_PELO_EVENTO
             LEFT JOIN CRM_ANDAMENTO ca ON ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
@@ -1346,6 +1358,7 @@ def exportar_eventos():
                 'fone_cliente_avulso': row[10],
                 'email_cliente_avulso': row[11],
                 'email_nfe': row[12],
+                'descricao_midia': row[28],
                 'termometro': mapear_termometro(row[13]),
                 'obs_memo': formatar_obs_para_excel(row[14]),
                 'motivo_perda': row[15],
@@ -2249,7 +2262,10 @@ ALLOWED_REMOVER_DESCARTE_EMAILS = [
     'cristiane.aguilar@caiuas.com.br',
     'pablo.ti@caiuas.com.br',
     'guilherme.machado@caiuas.com.br',
-    'wheverllyn.costa@caiuas.com.br'
+    'wheverllyn.costa@caiuas.com.br',
+    'mirela.novaga@caiuas.com.br',
+    'stefany.araujo@caiuas.com.br',
+    'nathalli.pereira@caiuas.com.br'
 ]
 
 @crm_bp.route('/api/crm/eventos/remover_descarte/<int:id_evento>', methods=['PUT'])
@@ -5493,13 +5509,16 @@ def list_responsaveis():
 @crm_bp.route('/api/crm/evento_chatwoot', methods=['POST'])
 def cria_evento_chatwoot():
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         
         conversation_id = data.get('id', None)
-        inbox_id = data['contact_inbox']['inbox_id'] if 'contact_inbox' in data and 'inbox_id' in data['contact_inbox'] else None
-        nome_cliente = data['meta']['sender']['name'] if 'meta' in data and 'sender' in data['meta'] and 'name' in data['meta']['sender'] else None
-        phone = data['meta']['sender']['phone_number'] if 'meta' in data and 'sender' in data['meta'] and 'phone_number' in data['meta']['sender'] else None
-        assignee = data['meta']['assignee']['id'] if 'meta' in data and 'assignee' in data['meta'] and 'id' in data['meta']['assignee'] else None
+        inbox_id = data['contact_inbox']['inbox_id'] if 'contact_inbox' in data and data['contact_inbox'] and 'inbox_id' in data['contact_inbox'] else None
+        nome_cliente = data['meta']['sender']['name'] if 'meta' in data and data['meta'] and 'sender' in data['meta'] and data['meta']['sender'] and 'name' in data['meta']['sender'] else None
+        phone = data['meta']['sender']['phone_number'] if 'meta' in data and data['meta'] and 'sender' in data['meta'] and data['meta']['sender'] and 'phone_number' in data['meta']['sender'] else None
+        assignee = data['meta']['assignee']['id'] if 'meta' in data and data['meta'] and 'assignee' in data['meta'] and data['meta']['assignee'] and 'id' in data['meta']['assignee'] else None
+        custom_attributes = data.get('custom_attributes') or {}
+        email = custom_attributes.get('email_do_formulario')
+        veiculo_interesse = custom_attributes.get('veiculo_interesse') or custom_attributes.get('veiculo_de_interesse')
         
         # Verificar evento_nbs no nível raiz e dentro de meta
         evento_nbs = None
@@ -5564,6 +5583,57 @@ def cria_evento_chatwoot():
         cod_modelo = 116748
         cod_tipo_evento = 829
         cod_midia = 80  # Mídia padrão
+        veiculos_modelos = [
+                            {
+                                "COD_MODELO" : 116741,
+                                "DESCRICAO_MODELO" : "HRV"
+                            },
+                            {
+                                "COD_MODELO" : 116742,
+                                "DESCRICAO_MODELO" : "CITY SEDAN"
+                            },
+                            {
+                                "COD_MODELO" : 116743,
+                                "DESCRICAO_MODELO" : "CITY HATCH"
+                            },
+                            {
+                                "COD_MODELO" : 116744,
+                                "DESCRICAO_MODELO" : "WRV"
+                            },
+                            {
+                                "COD_MODELO" : 116745,
+                                "DESCRICAO_MODELO" : "CIVIC HIBRIDO"
+                            },
+                            {
+                                "COD_MODELO" : 116746,
+                                "DESCRICAO_MODELO" : "CR-V"
+                            },
+                            {
+                                "COD_MODELO" : 116747,
+                                "DESCRICAO_MODELO" : "ZRV"
+                            },
+                            {
+                                "COD_MODELO" : 116748,
+                                "DESCRICAO_MODELO" : "OUTROS"
+                            },
+                            {
+                                "COD_MODELO" : 116749,
+                                "DESCRICAO_MODELO" : "SEMINOVOS"
+                            },
+                            {
+                                "COD_MODELO" : 116750,
+                                "DESCRICAO_MODELO" : "ACCORD"
+                            },
+                            {
+                                "COD_MODELO" : 116751,
+                                "DESCRICAO_MODELO" : "CIVIC"
+                            }
+                        ]
+        if veiculo_interesse:
+            for veiculo in veiculos_modelos:
+                if veiculo_interesse and veiculo_interesse.strip().upper() == veiculo['DESCRICAO_MODELO']:
+                    cod_modelo = veiculo['COD_MODELO']
+                    break
         
         # Criar evento no NBS
         conn_oracle, cur_oracle = oracle()
@@ -5597,7 +5667,8 @@ def cria_evento_chatwoot():
                 TIPO_ATENDIMENTO,
                 COD_PRODUTO,
                 COD_MODELO,
-                TERMOMETRO
+                TERMOMETRO,
+                EMAIL_CLIENTE_AVULSO
             ) VALUES(
                 11,
                 {id_evento},
@@ -5619,7 +5690,8 @@ def cria_evento_chatwoot():
                 null,
                 {cod_produto},
                 {cod_modelo},
-                1
+                1,
+                '{email if email else ""}'
             )
         """
         cur_oracle.execute(query)
@@ -5981,7 +6053,7 @@ def muda_proposta_evento(id_evento):
 
         vendedor_email = rows[0][1]
         cod_cliente_proposta = rows[0][2]
-        emails_permitidos = {'pablo.ti@caiuas.com.br', 'cristiane.aguilar@caiuas.com.br'}
+        emails_permitidos = {'pablo.ti@caiuas.com.br', 'cristiane.aguilar@caiuas.com.br','nathalli.pereira@caiuas.com.br'}
         if vendedor_email and str(vendedor_email).strip().lower() != email and email not in emails_permitidos:
             cur_oracle.close()
             conn_oracle.close()
