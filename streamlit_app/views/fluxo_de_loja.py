@@ -195,7 +195,11 @@ def render():
         LEFT JOIN VEICULOS_PROPOSTAS vp ON 1=1
             AND vp.COD_PROPOSTA = ce.COD_PROPOSTA
         WHERE 1=1
-            AND ce.COD_TIPO_EVENTO IN (819,821,815,817,810,812)
+            AND ce.COD_TIPO_EVENTO IN (819,821,815,817,810,812,829,
+                795,
+                793,
+                797,
+                799)
             AND ce.status <> 'D'
             AND TRUNC(ce.DATA_VISITA) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_VISITA) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
     """
