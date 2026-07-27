@@ -141,13 +141,13 @@
     image: backend-flask_app
     # mem_limit: 2g
     container_name: worker_update_campanhas
-    restart: always
-    # tty: true
+    # restart: always
+    tty: true
     env_file:
       - .env 
     volumes:
       - ./workers/update_campanhas:/app
-    command: "python3 app.py"
+    # command: "python3 app.py"
 
   rabbitmq:
     image: rabbitmq:3.13-management
