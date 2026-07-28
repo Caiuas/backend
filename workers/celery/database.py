@@ -35,14 +35,14 @@ def oracle():
 def chatwoot():
     driver_class = "org.postgresql.Driver"
     jdbc_url = f"jdbc:postgresql://{os.getenv('CHATWOOT_HOST')}:{os.getenv('CHATWOOT_PORT')}/{os.getenv('CHATWOOT_DATABASE')}"
-    conn = jaydebeapi.connect(
-        driver_class,
-        jdbc_url,
-        [os.getenv("CHATWOOT_USERNAME"), os.getenv("CHATWOOT_PASSWORD")],
-        JDBC_JARS,
-    )
+    driver_args = [
+        "jdbc/oracle-jdbc-11.jar",
+        "jdbc/postgresql-42.7.5.jar"
+    ]
+    conn = jaydebeapi.connect(driver_class, jdbc_url, [os.getenv('CHATWOOT_USERNAME'), os.getenv('CHATWOOT_PASSWORD')], driver_args)
     conn.jconn.setAutoCommit(False)
-    return conn, conn.cursor()
+    cur = conn.cursor()
+    return conn, cur
 
 
 def postgres_site():
