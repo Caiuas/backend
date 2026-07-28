@@ -3,7 +3,7 @@ from database import oracle, chatwoot
 from dotenv import load_dotenv
 from datetime import datetime
 from auth import token_required
-from brazilfiscalreport.danfe import Danfe
+from brazilfiscalreport.danfe import Danfe, DanfeConfig, InvoiceDisplay
 import io
 
 load_dotenv()
@@ -285,7 +285,7 @@ def download_nf_pdf(controle):
 
         # --- CORREÇÃO AQUI ---
         # Gerando o DANFE usando a estrutura da biblioteca brazilfiscalreport
-        danfe = Danfe(xml=xml_data)
+        danfe = Danfe(xml=xml_data, config=DanfeConfig(invoice_display=InvoiceDisplay.FULL_DETAILS))
         
         # Em vez de salvar em arquivo, geramos em um buffer de memória
         pdf_buffer = io.BytesIO()
