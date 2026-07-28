@@ -66,10 +66,14 @@ app.conf.update(
             "task": "tasks.send_wpp_agendamento.process_send_wpp_agendamento",
             "schedule": 5.0,
         },
+        "ads-fluxo-loja-diario-12-00": {
+            "task": "tasks.ads_fluxo_loja_runner.run_ads_fluxo_loja_module",
+            "schedule": crontab(hour=12, minute=0),
+        },
     },
 )
 
-app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca", "tasks.myhonda_leads", "tasks.crm_eventos_atraso", "tasks.send_wpp_agendamento"]
+app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca", "tasks.myhonda_leads", "tasks.crm_eventos_atraso", "tasks.send_wpp_agendamento", "tasks.ads_fluxo_loja_runner"]
 
 @app.task(bind=True)
 def debug_task(self):
