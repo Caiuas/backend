@@ -1,14 +1,15 @@
 import os
+import re
 import logging
 import datetime
 import requests
 from io import BytesIO
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.gridspec import GridSpec
+from matplotlib.patches import FancyBboxPatch
+from PIL import Image
 import numpy as np
 from app import app
 from database import oracle
