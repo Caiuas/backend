@@ -18,7 +18,7 @@ import plotly.graph_objects as go
 
 EMAILS_POS_VENDAS = [
     "pablo.ti@caiuas.com.br",
-    "cristiane.aguilar@caiuas.com.br","nathalli.pereira@caiuas.com.br",
+    "cristiane.aguilar@caiuas.com.br","debora.horvath@caiuas.com.br",
 ]
 
 
