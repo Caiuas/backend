@@ -20,7 +20,8 @@ EMAILS_CRM_SHOWROOM = [
     "pablo.ti@caiuas.com.br",
     "cristiane.aguilar@caiuas.com.br","nathalli.pereira@caiuas.com.br",
     "cristiane.aguilar@caiuas.com.br","nathalli.pereira@caiuas.com.br",
-    "franciele.mayer@caiuas.com.br"
+    "franciele.mayer@caiuas.com.br",
+    "gabrieli.auditoria@caiuas.com.br"
 ]
 
 
@@ -314,11 +315,24 @@ def render():
     df_retorno['DATA_CRIACAO'] = df_retorno['DATA_CRIACAO'].dt.strftime('%Y-%m-%d').fillna('-')
     df_retorno = df_retorno.fillna('-')
     df_retorno['LINK'] = df_retorno['COD_EVENTO'].apply(lambda x: f"https://app.caiuas.com.br/crm/eventos/{x}")
+
+    atendimentos_por_vendedor = (
+        df.groupby(['RESPONSAVEL', 'VEICULO'])['COD_EVENTO']
+        .count()
+        .reset_index()
+        .rename(columns={
+            'RESPONSAVEL': 'RESPONSAVEL',
+            'VEICULO': 'VEICULO',
+            'COD_EVENTO': 'QUANTIDADE'
+        })
+        .sort_values(['RESPONSAVEL', 'QUANTIDADE', 'VEICULO'], ascending=[True, False, True])
+    )
     
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name="Primeira passagem")
         df_retorno.to_excel(writer, index=False, sheet_name="Retornos")
+        atendimentos_por_vendedor.to_excel(writer, index=False, sheet_name="Atendimentos por vendedor")
     excel_buffer.seek(0)
     st.download_button(
         label="Download da planilha de eventos",
