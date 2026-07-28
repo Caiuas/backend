@@ -5638,7 +5638,8 @@ def cria_evento_chatwoot():
         inbox_id = data['contact_inbox']['inbox_id'] if 'contact_inbox' in data and data['contact_inbox'] and 'inbox_id' in data['contact_inbox'] else None
         nome_cliente = data['meta']['sender']['name'] if 'meta' in data and data['meta'] and 'sender' in data['meta'] and data['meta']['sender'] and 'name' in data['meta']['sender'] else None
         phone = data['meta']['sender']['phone_number'] if 'meta' in data and data['meta'] and 'sender' in data['meta'] and data['meta']['sender'] and 'phone_number' in data['meta']['sender'] else None
-        assignee = data['meta']['assignee']['id'] if 'meta' in data and data['meta'] and 'assignee' in data['meta'] and data['meta']['assignee'] and 'id' in data['meta']['assignee'] else None
+        # assignee = data['meta']['assignee']['id'] if 'meta' in data and data['meta'] and 'assignee' in data['meta'] and data['meta']['assignee'] and 'id' in data['meta']['assignee'] else None
+        assignee = data['meta']['assignee']['id'] if 'meta' in data else None
         custom_attributes = data.get('custom_attributes') or {}
         email = custom_attributes.get('email_do_formulario')
         veiculo_interesse = custom_attributes.get('veiculo_interesse') or custom_attributes.get('veiculo_de_interesse')
