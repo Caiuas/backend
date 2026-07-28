@@ -185,12 +185,15 @@ def render():
                 WHEN ce.TERMOMETRO = 3 THEN 'Quente'
                 ELSE 'Não classificado'
             END AS termometro,
-            ce.COD_PROPOSTA
+            ce.COD_PROPOSTA,
+            M.DESCRICAO AS descricao_midia
         FROM crm_eventos ce
         LEFT JOIN empresas_usuarios eu ON 1=1
             AND eu.nome = ce.RESPONSAVEL_PELO_EVENTO
         LEFT JOIN CRM_ANDAMENTO ca ON 1=1
             AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+        LEFT JOIN midia m ON 1=1
+            AND m.cod_midia = ce.cod_midia
         WHERE concat(ce.COD_EMPRESA, ce.COD_EVENTO) IN ({in_clause})
         """
         try:
@@ -201,7 +204,11 @@ def render():
             cur_oracle_chat.close()
             conn_oracle_chat.close()
             df_oracle_eventos = pd.DataFrame(result_oracle_chat, columns=columns_oracle_chat, dtype=str).fillna('')
-            df_chatwoot_excel = df_chatwoot_excel.merge(df_oracle_eventos[['evento', 'andamento_atendimento', 'termometro','cod_proposta']], on='evento', how='left')
+            df_chatwoot_excel = df_chatwoot_excel.merge(
+                df_oracle_eventos[['evento', 'andamento_atendimento', 'termometro', 'cod_proposta', 'descricao_midia']],
+                on='evento',
+                how='left'
+            )
             df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].fillna('')
             # df_chatwoot_excel['termometro'] = df_chatwoot_excel['termometro'].fillna('').map(
             #     lambda v: {'1': 'Frio', '2': 'Morno', '3': 'Quente'}.get(str(v).strip(), 'Não classificado')
@@ -217,16 +224,22 @@ def render():
             df_chatwoot_excel['andamento_atendimento'] = df_chatwoot_excel['andamento_atendimento'].apply(
                 lambda v: 'Pendente' if pd.isna(v) or str(v).strip() in ('', 'None') else str(v).strip()
             )
+            df_chatwoot_excel['descricao_midia'] = df_chatwoot_excel['descricao_midia'].apply(
+                lambda v: '' if pd.isna(v) or str(v).strip() in ('', 'None') else str(v).strip()
+            )
         except Exception as e:
             st.error("Ops falha ao se comunicar com o NBS, tente aperta R no seu teclado ou recarregar a página"            )
     else:
         df_chatwoot_excel['andamento_atendimento'] = ''
         df_chatwoot_excel['termometro'] = 'Não classificado'
+        df_chatwoot_excel['descricao_midia'] = ''
 
     if 'termometro' not in df_chatwoot_excel.columns:
         df_chatwoot_excel['termometro'] = 'Não classificado'
     if 'andamento_atendimento' not in df_chatwoot_excel.columns:
         df_chatwoot_excel['andamento_atendimento'] = ''
+    if 'descricao_midia' not in df_chatwoot_excel.columns:
+        df_chatwoot_excel['descricao_midia'] = ''
 
     # Regras de descarte vindas do contato no Chatwoot.
     status_col = df_chatwoot_excel.get('status', pd.Series('', index=df_chatwoot_excel.index))
@@ -244,40 +257,44 @@ def render():
         df_export['created_at'] = pd.to_datetime(df_export['created_at'], errors='coerce').dt.tz_localize(None)
 
     with pd.ExcelWriter(excel_buffer_chatwoot, engine='xlsxwriter') as writer:
-        df_export.to_excel(writer, index=False, sheet_name="Chatwoot", startrow=1)
         workbook = writer.book
-        worksheet = writer.sheets["Chatwoot"]
-
-        worksheet.set_row(0, 50)
-        try:
-            worksheet.insert_image('A1', 'logo.png', {'x_scale': 0.6, 'y_scale': 0.6, 'x_offset': 5, 'y_offset': 5})
-        except Exception:
-            pass
-
-        title_format = workbook.add_format({
-            'bold': True,
-            'font_size': 32,
-            'align': 'center',
-            'valign': 'vcenter',
-            'font_name': 'Calibri'
-        })
-
-        max_col_index = len(df_export.columns) - 1
-        if max_col_index >= 1:
-            worksheet.merge_range(0, 1, 0, max_col_index, 'Leads Caiuás', title_format)
+        if df_export.empty:
+            worksheet = workbook.add_worksheet("Chatwoot")
+            worksheet.write('A1', 'Sem conversões no periodo')
         else:
-            worksheet.write(0, 1, 'Leads Caiuás', title_format)
+            df_export.to_excel(writer, index=False, sheet_name="Chatwoot", startrow=1)
+            worksheet = writer.sheets["Chatwoot"]
 
-        datetime_format = workbook.add_format({'num_format': 'dd/mm/yyyy hh:mm'})
+            worksheet.set_row(0, 50)
+            try:
+                worksheet.insert_image('A1', 'logo.png', {'x_scale': 0.6, 'y_scale': 0.6, 'x_offset': 5, 'y_offset': 5})
+            except Exception:
+                pass
 
-        for i, col in enumerate(df_export.columns):
-            max_len = max(df_export[col].astype(str).map(len).max(), len(str(col))) + 2
-            if col == 'created_at':
-                worksheet.set_column(i, i, max(max_len, 18), datetime_format)
+            title_format = workbook.add_format({
+                'bold': True,
+                'font_size': 32,
+                'align': 'center',
+                'valign': 'vcenter',
+                'font_name': 'Calibri'
+            })
+
+            max_col_index = len(df_export.columns) - 1
+            if max_col_index >= 1:
+                worksheet.merge_range(0, 1, 0, max_col_index, 'Leads Caiuás', title_format)
             else:
-                worksheet.set_column(i, i, max_len)
+                worksheet.write(0, 1, 'Leads Caiuás', title_format)
 
-        if not df_export.empty:
+            datetime_format = workbook.add_format({'num_format': 'dd/mm/yyyy hh:mm'})
+
+            for i, col in enumerate(df_export.columns):
+                series_len = df_export[col].fillna('').astype(str).map(len)
+                max_len = int(max(series_len.max() if not series_len.empty else 0, len(str(col))) + 2)
+                if col == 'created_at':
+                    worksheet.set_column(i, i, max(max_len, 18), datetime_format)
+                else:
+                    worksheet.set_column(i, i, max_len)
+
             max_row, max_col = df_export.shape
             column_settings = [{'header': str(col)} for col in df_export.columns]
             worksheet.add_table(1, 0, max_row + 1, max_col - 1, {
