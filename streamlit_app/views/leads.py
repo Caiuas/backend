@@ -110,7 +110,16 @@ def render():
         and p.cod_proposta = ce.cod_proposta
         and p.status_proposta not in ('C','R')
     WHERE 1=1
-        AND ce.cod_tipo_evento in ('829','831','795','793','797','799','819','821','785','807','815','817','810','812')
+        AND ce.cod_tipo_evento in (
+        '793',
+	'795',
+	'797',
+	'799',
+	'815',
+	'817',
+	'829',
+	'831'
+        )
         AND trunc(ce.DATA_CRIACAO) >= TO_DATE('{data_inicial_hamada}', 'YYYY-MM-DD')
         AND trunc(ce.DATA_CRIACAO) <= TO_DATE('{data_final_hamada}', 'YYYY-MM-DD')
         
