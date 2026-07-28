@@ -61,7 +61,8 @@ def render():
                 WHEN cev.TERMOMETRO = 2 THEN 'Morno'
                 WHEN cev.TERMOMETRO = 3 THEN 'Quente'
                 ELSE 'Não classificado'
-            END AS termometro
+            END AS termometro,
+            cet.desc_tipo_evento tipo_evento
         FROM VEICULOS_PROPOSTAS vp 
         LEFT JOIN produtos pr ON 1=1
             AND pr.COD_PRODUTO = vp.COD_PRODUTO  
@@ -107,7 +108,10 @@ def render():
             AND cev.status <> 'D'
             AND cev.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
         LEFT JOIN crm_andamento ca ON ca.COD_ANDAMENTO = cev.COD_ANDAMENTO
+        left join CRM_EVENTOS_TIPO cet on 1=1
+            and cet.COD_TIPO_EVENTO = cev.COD_TIPO_EVENTO
         WHERE 1=1
+            and vp.vendedor <> 'DIRETORIA'
             AND vp.status_proposta = 'A'
             AND TRUNC(vp.EMISSAO) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
         ORDER BY pm.DESCRICAO_MODELO
@@ -159,7 +163,8 @@ def render():
                 WHEN cev2.TERMOMETRO = 2 THEN 'Morno'
                 WHEN cev2.TERMOMETRO = 3 THEN 'Quente'
                 ELSE 'Não classificado'
-            END AS termometro
+            END AS termometro,
+            cet.desc_tipo_evento tipo_evento
         FROM veiculos v 
         LEFT JOIN produtos pr ON 1=1
             AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -195,7 +200,10 @@ def render():
             AND cev2.status <> 'D'
             AND cev2.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
         LEFT JOIN crm_andamento ca2 ON ca2.COD_ANDAMENTO = cev2.COD_ANDAMENTO
+        left join CRM_EVENTOS_TIPO cet on 1=1
+            and cet.COD_TIPO_EVENTO = cev2.COD_TIPO_EVENTO
         WHERE v.status = 'V'
+            and vp.vendedor <> 'DIRETORIA'
             AND vp.status_proposta = 'V'
             --AND v.cod_proposta <> 0
             --AND v.cod_proposta IS NOT NULL
@@ -235,7 +243,8 @@ def render():
         'STATUS': 'Status',
         'ANDAMENTO': 'Andamento',
         'TERMOMETRO': 'Temperatura',
-        'LINK_EVENTO': 'Evento NBS'
+        'LINK_EVENTO': 'Evento NBS',
+        'TIPO_EVENTO': 'Tipo Evento',
     })
     import io
     from openpyxl import load_workbook
