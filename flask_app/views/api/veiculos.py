@@ -1067,6 +1067,8 @@ def list_processos():
 		            AND eu.nome = cvp.responsible
             where 1=1
                     {filter_user}
+                    {search}
+
         """
         cur.execute(query)
         total = cur.fetchone()[0]
@@ -1104,6 +1106,7 @@ def list_processos():
 		AND eu.nome = cvp.responsible
             where 1=1
                 {filter_user}
+                {search}
             order by cvp.updated_at desc
         """
         cur.execute(query)
@@ -1805,6 +1808,113 @@ def reabre_processo(id_processo):
         
         retorno = {}
         retorno['message'] = 'Processo reaberto com sucesso'
+        
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/veiculos/processos/transferir', methods=['PUT'])
+@token_required
+def transfere_processo():
+    try:
+        data = request.json
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        id_processo = data.get('id_processo', None)
+        id_novo_processo = data.get('id_novo_processo', None)
+        
+        if not id_processo or not id_novo_processo:
+            return jsonify({'status': 'error', 'message': 'id_processo e id_novo_processo são obrigatórios'}), 400
+        
+        conn, cur = oracle()
+
+        query = f"""
+            select eu.nome
+            from empresas_usuarios eu
+            where 1=1
+                and lower(eu.EMAIl) = '{email}'
+            order by eu.cod_empresa
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 404
+        
+        nome_responsavel = rows[0][0]
+        
+        query = f"""
+            SELECT cod_proposta
+            from caiuas_veic_proc
+            where 1=1
+                and id_processo = {id_processo}
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) != 1:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 400
+        cod_proposta_atual = rows[0][0]
+        
+        query = f"""
+            SELECT cod_proposta
+            from caiuas_veic_proc
+            where 1=1
+                and id_processo = {id_novo_processo}
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) != 1:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 400
+        cod_proposta_novo = rows[0][0]
+        
+        query = f"""
+            update CAIUAS_VEIC_PROC_FILES set id_processo = {id_novo_processo}
+            where id_processo = {id_processo}
+        """
+        cur.execute(query)
+
+        query = f"""
+            update caiuas_veic_proc_chat set id_processo = {id_novo_processo}
+            where id_processo = {id_processo}
+        """
+        cur.execute(query)
+
+        query = f"""
+            insert into caiuas_veic_proc_chat (id_processo, message, cod_proposta, responsible)
+            values ({id_novo_processo}, 'Processo transferido da proposta {cod_proposta_atual} para a proposta {cod_proposta_novo}', '{cod_proposta_novo}', '{nome_responsavel}')
+        """
+        cur.execute(query)
+
+        query = f"""
+            DELETE FROM CAIUAS_VEIC_PROC_ETAPAS_AUT 
+            WHERE id_etapa IN (SELECT id_etapa FROM CAIUAS_VEIC_PROC_ETAPAS
+            WHERE ID_PROCESSo = {id_processo})
+        """
+        cur.execute(query)
+
+        query = f"""
+            delete from CAIUAS_VEIC_PROC_ETAPAS
+            where id_processo = {id_processo}
+        """
+        cur.execute(query)
+        
+        query = f"""
+            delete from caiuas_veic_proc
+            where id_processo = {id_processo}
+        """
+        cur.execute(query)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        retorno = {}
+        retorno['message'] = 'Processo transferido com sucesso'
         
         return jsonify(retorno), 200
     except Exception as e:
