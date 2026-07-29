@@ -194,7 +194,9 @@ def get_veiculos_aguardando_faturamento():
                     WHEN c.COD_CID_COM <> NULL THEN cid_com.DESCRICAO
                     WHEN c.COD_CID_RES <> NULL THEN cid_res.DESCRICAO 
                     ELSE cid_cob.DESCRICAO 
-                END cidade
+                END cidade,
+                cvp.ID_PROCESSO,
+                cvp.status
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
                 AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -225,6 +227,8 @@ def get_veiculos_aguardando_faturamento():
             LEFT JOIN cidades cid_cob ON 1=1
                 AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
                 AND cid_cob.uf = c.UF_COBRANCA 
+            left join caiuas_veic_proc cvp on 1=1
+                and cvp.cod_proposta = vp.cod_proposta
             WHERE v.status = 'E'
                 AND v.cod_proposta <> 0
                 AND v.cod_proposta IS NOT null
@@ -277,7 +281,9 @@ def get_veiculos_aguardando_faturamento():
                 'novo_usado': row[13],
                 'cidade': row[14],
                 'andamento': None,
-                'usado': None
+                'usado': None,
+                'id_processo': row[15] if row[15] else None,
+                'status_processo': row[16] if row[16] else 'Não Iniciado',
             }
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
@@ -412,7 +418,9 @@ def veiculos_faturados():
                     WHEN c.COD_CID_RES <> NULL THEN cid_res.DESCRICAO 
                     ELSE cid_cob.DESCRICAO 
                 END cidade,
-                vp.DATA_VENDA
+                vp.DATA_VENDA,
+                cvp.ID_PROCESSO,
+                cvp.status
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
                 AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -447,6 +455,8 @@ def veiculos_faturados():
             LEFT JOIN cidades cid_cob ON 1=1
                 AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
                 AND cid_cob.uf = c.UF_COBRANCA 
+            left join caiuas_veic_proc cvp on 1=1
+                and cvp.cod_proposta = vp.cod_proposta
             WHERE v.status = 'V'
                 and v.cod_cliente <> '22534303000127'
                 AND TRUNC(vp.DATA_VENDA) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
@@ -503,7 +513,9 @@ def veiculos_faturados():
                 'cidade': row[15],
                 'andamento': None,
                 'usado': None,
-                'data_venda': format_date(row[16])
+                'data_venda': format_date(row[16]),
+                'id_processo': row[17] if row[17] else None,
+                'status_processo': row[18] if row[18] else 'Não Iniciado',
             }
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
@@ -1151,11 +1163,14 @@ def create_processos():
     try:
         cod_cliente = request.json.get('cod_cliente', None)
         tipo = request.json.get('tipo', None)
+        cod_proposta = request.json.get('cod_proposta', None)
         token_data = request.token_data
         if not cod_cliente or not tipo:
             return jsonify({'status': 'error', 'message': 'cod_cliente e tipo são obrigatórios'}), 400
         if tipo not in [1, 2, 3]:
             return jsonify({'status': 'error', 'message': 'tipo inválido. Valores permitidos: 1, 2, 3'}), 400
+        if not cod_proposta:
+            return jsonify({'status': 'error', 'message': 'cod_proposta é obrigatório'}), 400
         email = token_data.get('email').strip().lower()
         conn, cur = oracle()
         query = f"""
@@ -1191,7 +1206,7 @@ def create_processos():
         new_id = cur.fetchone()[0]
         
         query = f"""
-            INSERT INTO caiuas_veic_proc (id_processo, cod_cliente, tipo, status, responsible, created_at, updated_at, ativo)
+            INSERT INTO caiuas_veic_proc (id_processo, cod_cliente, tipo, status, responsible, created_at, updated_at, ativo,cod_proposta)
             SELECT 
                 {new_id},
                 '{cod_cliente}',
@@ -1200,7 +1215,8 @@ def create_processos():
                 x.nome,
                 SYSDATE,
                 SYSDATE,
-                1
+                1,
+                '{cod_proposta}'
             FROM (
                 -- Subquery para buscar o usuário e ordenar
                 SELECT eu.nome
