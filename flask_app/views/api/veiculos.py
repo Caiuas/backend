@@ -1028,12 +1028,12 @@ def list_processos():
         cod_acesso = '50190'
         
         if search:
+            search_term = search.strip().lower()
             search = f""" 
-                AND (lower(c.NOME) LIKE ('%{search.lower()}%') 
-                OR lower(cvp.responsible) LIKE ('%{search.lower()}%')) 
-                or cvp.cod_proposta = '{search}'
-                or lower(eu.nome_completo) LIKE ('%{search.lower()}%')
-                """
+                AND LOWER(c.NOME || ' ' || cvp.responsible || ' ' || cvp.cod_proposta || ' ' || eu.nome_completo) LIKE '%{search_term}%'
+            """
+        else:
+            search = ""
         
         query = f"""
             SELECT saf2.COD_ACESSO 
