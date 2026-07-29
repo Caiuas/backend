@@ -2182,4 +2182,199 @@ def list_propostas():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
+@veiculos_bp.route('/api/veiculos/propostas/<cod_proposta>', methods=['GET'])
+@token_required
+def get_proposta_details(cod_proposta):
+    try:
+        cod_proposta = int(cod_proposta)
+        if not cod_proposta:
+            return jsonify({'status': 'error', 'message': 'Código da proposta inválido'}), 400
+        
+        query = f"""
+            SELECT
+                vp.COD_PROPOSTA,
+                vp.STATUS_PROPOSTA,
+                vp.EMISSAO,
+                pm.DESCRICAO_MODELO,
+                v.CHASSI_COMPLETO,
+                v.NOVO_USADO,
+                v.COR_EXTERNA,
+                CASE 
+                    WHEN ce.descricao IS NOT NULL THEN ce.descricao
+                    ELSE ce2.DESCRICAO
+                END cor_externa,
+                vp.INTERNET,
+                c.NOME,
+                c.COD_CLIENTE cpf_cnpj,
+                c.email_nfe,
+                concat(c.PREFIXO_RES, c.TELEFONE_RES) AS tel_residencial,
+                concat(c.PREFIXO_COM, c.TELEFONE_COM) AS tel_comercial,
+                concat(c.PREFIXO_FAX, c.TELEFONE_FAX) AS tel_fax,
+                concat(c.PREFIXO_MSG_TXT_INST, c.NUMERO_MSG_TXT_INST) AS tel_whatsapp,
+                vp.PRECO_BASICO ,
+                vp.DESCONTO ,
+                vp.VALOR_PROPOSTA ,
+                vp.DESCONTO_INCONDICIONAL ,
+                vpo.OBSERVACAO,
+                eu.NOME_COMPLETO vendedor 
+            FROM veiculos_propostas vp
+            LEFT JOIN clientes c ON 1=1
+                AND c.COD_CLIENTE = vp.cod_cliente
+            LEFT JOIN PRODUTOS_MODELOS pm ON 1=1
+                AND pm.COD_PRODUTO = vp.COD_PRODUTO 
+                AND pm.cod_modelo = vp.COD_MODELO
+            LEFT JOIN veiculos v ON 1=1
+                AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO
+            LEFT JOIN prop_ficticia_dados pfd ON 1=1
+                AND pfd.COD_FICTICIO = vp.COD_FICTICIO
+            LEFT JOIN CORES_EXTERNAS ce ON 1=1
+                AND ce.COR_EXTERNA = v.COR_EXTERNA
+            LEFT JOIN CORES_EXTERNAS ce2 ON 1=1
+                AND ce2.COR_EXTERNA = pfd.COR_EXTERNA 
+            LEFT JOIN VEICULOS_PROPOSTAS_OBS vpo ON 1=1
+                AND vpo.COD_PROPOSTA = vp.COD_PROPOSTA 
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+	            AND eu.NOME = vp.VENDEDOR 
+            WHERE 1=1
+                AND vp.COD_PROPOSTA = '{cod_proposta}'
+                AND vp.STATUS_PROPOSTA IS not null
+        """
+        
+        conn, cur = oracle()
+        cur.execute(query)
+        r = cur.fetchall()
+        if len(r) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Proposta não encontrada'}), 404
+        proposta = {
+            'cod_proposta': r[0][0],
+            'status_proposta': r[0][1],
+            'emissao': r[0][2],
+            'descricao_modelo': r[0][3],
+            'chassi_completo': r[0][4],
+            'novo_usado': r[0][5],
+            'cor_externa': r[0][6],
+            'cor_externa_descricao': r[0][7],
+            'internet': r[0][8],
+            'nome': r[0][9],
+            'cpf_cnpj': r[0][10],
+            'email_nfe': r[0][11],
+            'tel_residencial': r[0][12],
+            'tel_comercial': r[0][13],
+            'tel_fax': r[0][14],
+            'tel_whatsapp': r[0][15],
+            'preco_basico': float(r[0][16]) if r[0][16] else None,
+            'desconto': float(r[0][17]) if r[0][17] else None,
+            'valor_proposta': float(r[0][18]) if r[0][18] else None,
+            'desconto_incondicional': float(r[0][19]) if r[0][19] else None,
+            'observacao': r[0][20],
+            'vendedor': r[0][21]
+        }
+        # se internet = F e novo_usado = N tipo_proposta = Frotista
+        # se internet = N e novo_usado = N tipo_proposta = Novo
+        # se internet = N e novo_usado = U tipo_proposta = Usado
+        # se internet = F e novo_usado = U tipo_proposta = Indefinido
+        if proposta['internet'] == 'F' and proposta['novo_usado'] == 'N':
+            proposta['tipo_proposta'] = 'Frotista'
+        elif proposta['internet'] == 'N' and proposta['novo_usado'] == 'N':
+            proposta['tipo_proposta'] = 'Novo'
+        elif proposta['internet'] == 'N' and proposta['novo_usado'] == 'U':
+            proposta['tipo_proposta'] = 'Usado'
+        elif proposta['internet'] == 'F' and proposta['novo_usado'] == 'U':
+            proposta['tipo_proposta'] = 'Indefinido'
+        
+        query = f"""
+        SELECT vop.OBSERVACAO FROM VEICULOS_OBS_PROPOSTA vop 
+        WHERE 1=1
+            AND vop.COD_PROPOSTA = {cod_proposta}
+        """
+        cur.execute(query)
+        r = cur.fetchall()
+        proposta['observacoes'] = []
+        for row in r:
+            if row[0] not in proposta['observacoes']:
+                proposta['observacoes'].append(row[0])
+        # converta o observacoes em string
+        for obs in proposta['observacoes']:
+            if obs and proposta['observacao'] and obs in proposta['observacao']:
+                proposta['observacao'] = proposta['observacao'].replace(obs, '')
+        # se proposta['observacao'] for vazio substitua pelo valor de observacoes
+        if proposta['observacao'] is None or proposta['observacao'] == '':
+            proposta['observacao'] = proposta['observacoes']
+        
+        query = f"""
+            SELECT fp.descricao descricao_forma_pgto, 
+            vfp.VALOR, vfp.OBS, vfp.COD_CLIENTE_TROCO beneficiario,
+            vfp.COD_AVALIACAO
+            FROM VEIC_FORMAS_PAGAMENTO vfp 
+            LEFT JOIN FORMA_PGTO fp ON 1=1
+                AND fp.COD_FORMA_PGTO = vfp.COD_FORMA_PGTO 
+                AND fp.COD_EMPRESA = vfp.COD_EMPRESA 
+            WHERE 1=1
+                AND vfp.COD_PROPOSTA = '{cod_proposta}'
+        """
+        cur.execute(query)
+        r_formas = cur.fetchall()
+        proposta['formas_pagamento'] = []
+        for row in r_formas:
+            avaliacao = None
+            if row[4]:
+                query = f"""
+                    SELECT 
+                        fu.CHASSI_COMPLETO, 
+                        fu.PLACA,
+                        fu.ANO_MOD, 
+                        pm.DESCRICAO_MODELO, 
+                        ce.DESCRICAO cor_externa, 
+                        fu.DATA_AVALIACAO, 
+                        fu.data_aprovacao, 
+                        eu.NOME_COMPLETO quem_avaliou,
+                        fu.nome_do_cliente,
+                        fu.avaliacao_sistema,
+                        fu.quanto_cliente_quer,
+                        fu.avaliacao_aprovada
+                    FROM FU_USADOS fu
+                    LEFT JOIN PRODUTOS_MODELOS pm ON 1=1
+                        AND pm.COD_PRODUTO = fu.COD_PRODUTO 
+                        AND pm.COD_MODELO = fu.COD_MODELO 
+                    LEFT JOIN cores_externas ce ON 1=1
+                        AND ce.COR_EXTERNA = fu.COR_EXTERNA 
+                    LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                        AND eu.nome = fu.QUEM_AVALIOU 
+                    WHERE 1=1
+                        AND fu.COD_AVALIACAO = '{row[4]}'
+                """
+                cur.execute(query)
+                r_aval = cur.fetchall()
+                if r_aval:
+                    avaliacao = {
+                        'chassi_completo': r_aval[0][0],
+                        'placa': r_aval[0][1],
+                        'ano_mod': r_aval[0][2],
+                        'descricao_modelo': r_aval[0][3],
+                        'cor_externa': r_aval[0][4],
+                        'data_avaliacao': r_aval[0][5],
+                        'data_aprovacao': r_aval[0][6],
+                        'quem_avaliou': r_aval[0][7],
+                        'nome_do_cliente': r_aval[0][8],
+                        'avaliacao_sistema': float(r_aval[0][9]) if r_aval[0][9] else None,
+                        'quanto_cliente_quer': float(r_aval[0][10]) if r_aval[0][10] else None,
+                        'avaliacao_aprovada': float(r_aval[0][11]) if r_aval[0][11] else None,
+                    }
+            proposta['formas_pagamento'].append({
+                'descricao_forma_pgto': row[0],
+                'valor': float(row[1]) if row[1] else None,
+                'obs': row[2],
+                'beneficiario': row[3],
+                'avaliacao': avaliacao
+            })        
+        
+        cur.close()
+        conn.close()
+        return jsonify(proposta), 200
     
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+        
+        
