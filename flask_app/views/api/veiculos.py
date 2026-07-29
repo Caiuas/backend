@@ -1663,6 +1663,27 @@ def show_processo(id_processo):
             }
             retorno['arquivos'].append(arquivo_info)
         
+        query = f"""
+            SELECT message, cod_proposta, created_at, responsible, eu.nome_completo
+            FROM caiuas_veic_proc_chat
+            left join empresas_usuarios eu on eu.NOME = caiuas_veic_proc_chat.responsible
+            WHERE id_processo = {id_processo}
+            ORDER BY CREATED_AT ASC
+        """
+        cur.execute(query)
+        chat_messages = cur.fetchall()
+        retorno['chat_messages'] = []
+        for chat_message in chat_messages:
+            chat_message_info = {
+                'message': chat_message[0],
+                'cod_proposta': chat_message[1],
+                'created_at': chat_message[2],
+                'responsible': chat_message[3],
+                'name_responsible': chat_message[4]
+            }
+            retorno['chat_messages'].append(chat_message_info)
+
+
         cur.close()
         conn.close()
         
@@ -1855,6 +1876,43 @@ def finaliza_processo(id_processo):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
+@veiculos_bp.route('/api/veiculos/processos/chat', methods=['POST'])
+@token_required
+def add_chat_processo():
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        id_processo = request.json.get('id_processo', None)
+        mensagem = request.json.get('message', None)
+        cod_proposta = request.json.get('cod_proposta', None)
+        conn, cur = oracle()
+        query = f"""
+            SELECT eu.NOME
+            FROM empresas_usuarios eu
+            WHERE lower(eu.EMAIL) = '{email}'
+            order by eu.cod_empresa
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+        
+        query = f"""
+            INSERT INTO caiuas_veic_proc_chat 
+            (responsible, id_processo, cod_proposta, message)
+            VALUES ('{rows[0][0]}', '{id_processo}', '{cod_proposta}', '{mensagem}')
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+        retorno = {}
+        retorno['message'] = 'Chat adicionado com sucesso'
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400 
 
 @veiculos_bp.route('/api/veiculos/processos/autorizar', methods=['POST'])
 @token_required
