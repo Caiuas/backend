@@ -1,10 +1,11 @@
-from flask import Blueprint, jsonify, request, Response
+from flask import Blueprint, jsonify, request, Response, send_file
 from database import oracle, chatwoot
 from dotenv import load_dotenv
 from datetime import datetime
 import pandas as pd
 import io
 import xlsxwriter
+from auth import token_required
 load_dotenv()
 
 reports_bp = Blueprint('reports', __name__)
@@ -1011,3 +1012,191 @@ def reports_faturamento_veiculos():
         
     except Exception as e:
         return jsonify({'message': str(e)}), 400
+
+@reports_bp.route('/api/reports/passagens_oficina', methods=['GET'])
+@token_required
+def reports_passagens_oficina():
+    try:
+        initial_date = request.args.get('initial_date')
+        final_date = request.args.get('final_date')
+        if not initial_date or not final_date:
+            return jsonify({'message': 'Initial and final dates are required.'}), 400
+        
+        try:
+            initial_date = datetime.strptime(initial_date, '%Y-%m-%d')
+            final_date = datetime.strptime(final_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+        
+        if (final_date - initial_date).days > 30:
+            return jsonify({'message': 'Não pode pesquisar mais de 30 dias'}), 400
+        
+        initial_date_str = initial_date.strftime('%Y-%m-%d')
+        final_date_str = final_date.strftime('%Y-%m-%d')
+        
+        query = f"""
+            SELECT
+                os.COD_EMPRESA, 
+                os.NUMERO_OS, 
+                eu.NOME_COMPLETO consultor,   
+                os.TIPO,
+                ot.DESCRICAO tipo_os,
+                c.NOME cliente, 
+                os.DATA_EMISSAO, 
+                (
+                    SELECT LISTAGG(upper(s.DESCRICAO_SERVICO), ', ') WITHIN GROUP (ORDER BY s.DESCRICAO_SERVICO)
+                    FROM OS_SERVICOS oos 
+                    LEFT JOIN servicos s ON s.COD_SERVICO = oos.COD_SERVICO 
+                    WHERE oos.NUMERO_OS = os.NUMERO_OS 
+                        AND oos.COD_EMPRESA = os.COD_EMPRESA 
+                ) AS DESCRICAO_SERVICOS
+            FROM os os
+            LEFT JOIN OS_DADOS_VEICULOS odv 
+                ON odv.COD_EMPRESA = os.COD_EMPRESA 
+            AND odv.NUMERO_OS = os.NUMERO_OS 
+            LEFT JOIN CLIENTES c 
+                ON c.COD_CLIENTE = os.cod_cliente
+            LEFT JOIN os_tipos ot ON 1=1
+                AND ot.TIPO = os.TIPO 
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = os.CONSULTOR_RECEPCAO 
+            WHERE os.NUMERO_OS > 0
+                AND os.STATUS_OS <> 2 
+                AND os.COMPLEMENTO = 'N'
+            AND trunc(os.DATA_EMISSAO) >= to_date('{initial_date_str}', 'YYYY-MM-DD')
+            AND trunc(os.DATA_EMISSAO) <= to_date('{final_date_str}', 'YYYY-MM-DD')
+            ORDER BY os.DATA_EMISSAO
+        """
+        conn_oracle, cur_oracle = oracle()
+        cur_oracle.execute(query)
+        result = cur_oracle.fetchall()
+        cur_oracle.close()
+        conn_oracle.close()
+        if len(result) == 0:
+            return jsonify({'message': 'Não tem passagens de oficina no período.'}), 404
+        df = pd.DataFrame(result, columns=[
+            'cod_empresa',
+            'numero_os',
+            'consultor',
+            'tipo',
+            'tipo_os',
+            'cliente',
+            'data_emissao',
+            'descricao_servicos'
+        ])
+        
+        file_memory = io.BytesIO()
+        workbook = xlsxwriter.Workbook(file_memory, {'in_memory': True})
+        cell_format = workbook.add_format({'border': 1, 'bg_color': 'white', 'font_size': 10, 'valign': 'vcenter'})
+        header_format = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter'})
+        date_format = workbook.add_format({'border': 1, 'bg_color': 'white', 'num_format': 'dd/mm/yyyy', 'font_size': 10, 'valign': 'vcenter'})
+        worksheet = workbook.add_worksheet('Passagens de Oficina')
+        worksheet.merge_range('A1:I1', 'Passagens de Oficina - Detalhe', workbook.add_format({'bold': True, 'font_size': 26, 'align': 'center', 'valign': 'vcenter'})) 
+        worksheet.write('A2', 'COD_EMPRESA', header_format)
+        worksheet.write('B2', 'NUMERO_OS', header_format)
+        worksheet.write('C2', 'CONSULTOR', header_format)
+        worksheet.write('D2', 'TIPO', header_format)
+        worksheet.write('E2', 'TIPO_OS', header_format)
+        worksheet.write('F2', 'CLIENTE', header_format)
+        worksheet.write('G2', 'DATA_EMISSAO', header_format)
+        worksheet.write('H2', 'DESCRICAO_SERVICOS', header_format)
+        worksheet.write('I2', 'Tipo de revisão', header_format)
+        cont = 0
+        for index, row in df.iterrows():
+            servico = str(row['descricao_servicos']).lower()
+            servico = str(servico).replace('ã', 'a')
+            servico = str(servico).replace('kms', '')
+            servico = str(servico).replace('km', '')
+            servico = str(servico).replace(' mil ', '.000')
+            servico = ' '.join(servico.split())
+            tipo_revisao = 'Não'
+            if 'revisao' in servico or 'revisão' in servico:
+                tipo_revisao = 'Sim'
+                if '10.000' in servico or 'revisao de 10.000' in servico:
+                    tipo_revisao = '10.000'
+                if '20.000' in servico or 'revisao de 20.000' in servico:
+                    tipo_revisao = '20.000'
+                if '30.000' in servico or 'revisao de 30.000' in servico:
+                    tipo_revisao = '30.000'
+                if '40.000' in servico or 'revisao de 40.000' in servico:
+                    tipo_revisao = '40.000'
+                if '50.000' in servico or 'revisao de 50.000' in servico:
+                    tipo_revisao = '50.000'
+                if '60.000' in servico or 'revisao de 60.000' in servico:
+                    tipo_revisao = '60.000'
+                if '70.000' in servico or 'revisao de 70.000' in servico:
+                    tipo_revisao = '70.000'
+                if '80.000' in servico or 'revisao de 80.000' in servico:
+                    tipo_revisao = '80.000'
+                if '90.000' in servico or 'revisao de 90.000' in servico:
+                    tipo_revisao = '90.000'
+                if '100.000' in servico or 'revisao de 100.000' in servico:
+                    tipo_revisao = '100.000'
+                if '110.000' in servico or 'revisao de 110.000' in servico:
+                    tipo_revisao = '110.000'
+                if '120.000' in servico or 'revisao de 120.000' in servico:
+                    tipo_revisao = '120.000'
+                if '130.000' in servico or 'revisao de 130.000' in servico:
+                    tipo_revisao = '130.000'
+                if '140.000' in servico or 'revisao de 140.000' in servico:
+                    tipo_revisao = '140.000'
+                if '150.000' in servico or 'revisao de 150.000' in servico:
+                    tipo_revisao = '150.000'
+                if '160.000' in servico or 'revisao de 160.000' in servico:
+                    tipo_revisao = '160.000'
+                if '170.000' in servico or 'revisao de 170.000' in servico:
+                    tipo_revisao = '170.000'
+                if '180.000' in servico or 'revisao de 180.000' in servico:
+                    tipo_revisao = '180.000'
+                if 'recall' in servico:
+                    tipo_revisao = 'RECALL'
+            data_emissao = row['data_emissao']
+            if pd.notna(data_emissao):
+                if isinstance(data_emissao, datetime):
+                    worksheet.write_datetime(cont + 2, 6, data_emissao, date_format)
+                else:
+                    try:
+                        worksheet.write_datetime(cont + 2, 6, datetime.strptime(str(data_emissao)[:19], '%Y-%m-%d %H:%M:%S'), date_format)
+                    except ValueError:
+                        worksheet.write(cont + 2, 6, str(data_emissao)[:10], cell_format)
+            else:
+                worksheet.write(cont + 2, 6, '', cell_format)
+            worksheet.write(cont + 2, 0, row['cod_empresa'], cell_format)
+            worksheet.write(cont + 2, 1, row['numero_os'], cell_format)
+            worksheet.write(cont + 2, 2, row['consultor'], cell_format)
+            worksheet.write(cont + 2, 3, row['tipo'], cell_format)
+            worksheet.write(cont + 2, 4, row['tipo_os'], cell_format)
+            worksheet.write(cont + 2, 5, row['cliente'], cell_format)
+            worksheet.write(cont + 2, 7, row['descricao_servicos'], cell_format)
+            worksheet.write(cont + 2, 8, tipo_revisao, cell_format)
+            cont += 1
+        worksheet.add_table(f'A2:I{cont+2}', {'columns': [
+            {'header': 'COD_EMPRESA'},
+            {'header': 'NUMERO_OS'},
+            {'header': 'CONSULTOR'},
+            {'header': 'TIPO'},
+            {'header': 'TIPO_OS'},
+            {'header': 'CLIENTE'},
+            {'header': 'DATA_EMISSAO'},
+            {'header': 'DESCRICAO_SERVICOS'},
+            {'header': 'TIPO_DE_REVISAO'},
+        ], 'name': 'Passagens_Oficina', 'autofilter': True})
+        worksheet.set_landscape()
+        worksheet.set_paper(9)
+        worksheet.set_column('A:A', 12.00)
+        worksheet.set_column('B:B', 14.00)
+        worksheet.set_column('C:C', 24.00)
+        worksheet.set_column('D:D', 10.00)
+        worksheet.set_column('E:E', 14.00)
+        worksheet.set_column('F:F', 28.00)
+        worksheet.set_column('G:G', 14.00)
+        worksheet.set_column('H:H', 60.00)
+        worksheet.set_column('I:I', 14.00)
+        worksheet.print_area(f'A1:I{cont+2}')
+        worksheet.fit_to_pages(1, 0)
+        workbook.close()
+        file_memory.seek(0)
+        return send_file(file_memory, download_name='passagens_de_oficina.xlsx', as_attachment=True)
+    except Exception as e:
+        return jsonify({'message': str(e)}), 400
+    
