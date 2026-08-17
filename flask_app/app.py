@@ -19,6 +19,7 @@ from views.api.oficina import oficina_bp
 from views.api.nf import nf_bp
 from views.api.files import files_bp
 from views.api.pecas import pecas_bp
+from views.api.mcp import mcp_bp
 load_dotenv()
 
 app = Flask(__name__)
@@ -40,6 +41,7 @@ app.register_blueprint(oficina_bp)
 app.register_blueprint(nf_bp)
 app.register_blueprint(files_bp)
 app.register_blueprint(pecas_bp)
+app.register_blueprint(mcp_bp)
 
 
 def token_required(f):
