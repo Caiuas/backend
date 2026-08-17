@@ -98,7 +98,7 @@ def render():
     try:
         query_detalhe = """
         SELECT
-            c.id AS conversation_id,
+            c.display_id AS conversation_id,
             c.account_id,
             COALESCE(u.name, 'Sem Responsável (Fila)') AS responsavel,
             c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo' AS data_inicio,
