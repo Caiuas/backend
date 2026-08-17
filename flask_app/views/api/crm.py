@@ -1444,9 +1444,189 @@ def exportar_eventos():
 @crm_bp.route('/api/crm/eventos_descartados', methods=['GET'])
 @token_required
 def list_eventos_descartados():
+    conn_oracle = None
+    cur_oracle = None
     try:
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
+
+        status = request.args.get('status', None)
+        tipo_evento = request.args.get('tipo_evento', None) or request.args.get('cod_tipo_evento', None)
+        cod_midia = request.args.get('cod_midia', None)
+        cod_modelo = request.args.get('cod_modelo', None)
+        initial_date = request.args.get('initial_date', None)
+        final_date = request.args.get('final_date', None)
+        created_at_min = request.args.get('created_at_min', None)
+        created_at_max = request.args.get('created_at_max', None)
+        data_criacao = request.args.get('data_criacao', None)
+        search = request.args.get('search', None)
+        responsible = request.args.get('responsible', None) or request.args.get('responsavel', None) or request.args.get('responsavel_pelo_evento', None)
+        cod_empresa = request.args.get('cod_empresa', None)
+        cod_andamento = request.args.get('cod_andamento', None)
+        cod_cliente = request.args.get('cod_cliente', None)
+        nome_cliente = request.args.get('nome_cliente', None) or request.args.get('nome_cliente_avulso', None)
+        telefone = request.args.get('telefone', None) or request.args.get('fone_cliente_avulso', None)
+        email_cliente = request.args.get('email', None) or request.args.get('email_cliente_avulso', None)
+        cod_produto = request.args.get('cod_produto', None)
+        observacao = request.args.get('observacao', None) or request.args.get('obsercacao', None)
+
+        list_status = ['P', 'E', 'D', 'V', 'A', 'R', 'CP']
+
+        filter_cod_midia = ''
+        if cod_midia:
+            list_cod_midia = [cod.strip() for cod in str(cod_midia).split(',') if cod.strip()]
+            for cod in list_cod_midia:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de mídia inválido: {cod}'}), 400
+            filter_cod_midia = f" AND ce.COD_MIDIA IN ({','.join(list_cod_midia)}) "
+
+        filter_modelo = ''
+        if cod_modelo:
+            list_cod_modelo = [cod.strip() for cod in str(cod_modelo).split(',') if cod.strip()]
+            for cod in list_cod_modelo:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de modelo inválido: {cod}'}), 400
+            filter_modelo = f" AND ce.COD_MODELO IN ({','.join(list_cod_modelo)}) "
+
+        empresas_permitidas = ['11', '33', '111']
+        filter_empresa = ''
+        if cod_empresa:
+            empresas_lista = [e.strip() for e in str(cod_empresa).split(',') if e.strip()]
+            for e in empresas_lista:
+                if e not in empresas_permitidas:
+                    return jsonify({'status': 'error', 'message': f'Empresa inválida: {e}. Permitidas: 11, 33, 111'}), 400
+            filter_empresa = f' AND cced.cod_empresa IN ({",".join(empresas_lista)}) '
+
+        filter_created_at = ''
+        if created_at_min and created_at_max:
+            try:
+                datetime.strptime(created_at_min, '%Y-%m-%d')
+                datetime.strptime(created_at_max, '%Y-%m-%d')
+                filter_created_at = f" AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{created_at_min}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{created_at_max}', 'YYYY-MM-DD') "
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data de criação inválida. Use o formato YYYY-MM-DD'}), 400
+        elif data_criacao:
+            try:
+                data_criacao_clean = data_criacao.split('T')[0]
+                datetime.strptime(data_criacao_clean, '%Y-%m-%d')
+                filter_created_at = f" AND TRUNC(ce.DATA_CRIACAO) = TO_DATE('{data_criacao_clean}', 'YYYY-MM-DD') "
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data de criação inválida. Use o formato YYYY-MM-DD'}), 400
+
+        DEFAULT_TIPOS_EVENTO = '829,831,795,793,797,799,833,837,819,821,825,785,807,827,835,815,817,823,810,812'
+        if tipo_evento:
+            tipo_evento_list = [te.strip() for te in str(tipo_evento).split(',') if te.strip()]
+            for te in tipo_evento_list:
+                if not te.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Tipo de evento inválido: {te}'}), 400
+            filter_tipo_evento = f" AND ce.COD_TIPO_EVENTO IN ({','.join(tipo_evento_list)}) "
+        else:
+            filter_tipo_evento = f" AND ce.COD_TIPO_EVENTO IN ({DEFAULT_TIPOS_EVENTO}) "
+
+        filter_initial_date = ''
+        filter_final_date = ''
+        if initial_date:
+            try:
+                datetime.strptime(initial_date, '%Y-%m-%d')
+                filter_initial_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) >= TO_DATE('{initial_date}', 'YYYY-MM-DD') "
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data inicial inválida. Use o formato YYYY-MM-DD'}), 400
+
+        if final_date:
+            try:
+                datetime.strptime(final_date, '%Y-%m-%d')
+                filter_final_date = f" AND TRUNC(CASE WHEN ce.data_novo_contato IS NULL THEN ce.data_evento ELSE ce.data_novo_contato END) <= TO_DATE('{final_date}', 'YYYY-MM-DD')"
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data final inválida. Use o formato YYYY-MM-DD'}), 400
+
+        filter_status = ''
+        if status:
+            status_list = [s.strip() for s in str(status).split(',') if s.strip()]
+            for s in status_list:
+                if s not in list_status:
+                    return jsonify({'status': 'error', 'message': f'Status inválido: {s}'}), 400
+            status_in = "','".join(status_list)
+            status_in = f"('{status_in}')".replace("''", "'").replace("'(", "(").replace(")'", ")")
+            filter_status = f""" AND (
+                                CASE
+                                    WHEN ce.cod_motivo_perda IS NOT NULL AND ce.status = 'E' THEN 'CP'
+                                    ELSE ce.status
+                                END
+                            ) IN {status_in}"""
+
+        filter_search = ''
+        if search:
+            search_escaped = search.replace("'", "''").lower()
+            filter_search = f"""
+                AND (
+                    LOWER(ce.RESPONSAVEL_PELO_EVENTO) LIKE '%{search_escaped}%'
+                    OR LOWER(ce.NOME_CLIENTE_AVULSO) LIKE '%{search_escaped}%'
+                    OR LOWER(c.NOME) LIKE '%{search_escaped}%'
+                    OR LOWER(c.EMAIL_NFE) LIKE '%{search_escaped}%'
+                    OR LOWER(ce.EMAIL_CLIENTE_AVULSO) LIKE '%{search_escaped}%'
+                    OR LOWER(ce.FONE_CLIENTE_AVULSO) LIKE '%{search_escaped}%'
+                    OR LOWER(concat(c.PREFIXO_CEL,c.TELEFONE_CEL)) LIKE '%{search_escaped}%'
+                    OR LOWER(concat(c.PREFIXO_RES,c.TELEFONE_RES)) LIKE '%{search_escaped}%'
+                    OR LOWER(concat(c.PREFIXO_COM,c.TELEFONE_COM)) LIKE '%{search_escaped}%'
+                    OR LOWER(concat(c.PREFIXO_FAX,c.TELEFONE_FAX)) LIKE '%{search_escaped}%'
+                    OR LOWER(concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST)) LIKE '%{search_escaped}%'
+                    OR LOWER(pm.DESCRICAO_MODELO) LIKE '%{search_escaped}%'
+                    OR TO_CHAR(ce.COD_EVENTO) = '{search_escaped}'
+                )
+            """
+
+        filter_andamento = ''
+        if cod_andamento:
+            list_cod_andamento = [cod.strip() for cod in str(cod_andamento).split(',') if cod.strip()]
+            for cod in list_cod_andamento:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de andamento inválido: {cod}'}), 400
+            andamento_in = ','.join(list_cod_andamento)
+            filter_andamento = f" AND (ca.COD_ANDAMENTO IN ({andamento_in}) OR ce.COD_ANDAMENTO IN ({andamento_in})) "
+
+        filter_cliente = ''
+        if cod_cliente:
+            list_cod_cliente = [cod.strip() for cod in str(cod_cliente).split(',') if cod.strip()]
+            for cod in list_cod_cliente:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de cliente inválido: {cod}'}), 400
+            filter_cliente = f" AND ce.COD_CLIENTE IN ({','.join(list_cod_cliente)}) "
+
+        filter_nome_cliente = ''
+        if nome_cliente:
+            nome_cliente_escaped = nome_cliente.replace("'", "''").lower()
+            filter_nome_cliente = f" AND (LOWER(ce.NOME_CLIENTE_AVULSO) LIKE '%{nome_cliente_escaped}%' OR LOWER(c.NOME) LIKE '%{nome_cliente_escaped}%') "
+
+        filter_telefone = ''
+        if telefone:
+            telefone_escaped = telefone.replace("'", "''").lower()
+            filter_telefone = f""" AND (
+                LOWER(ce.FONE_CLIENTE_AVULSO) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_CEL,c.TELEFONE_CEL)) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_RES,c.TELEFONE_RES)) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_COM,c.TELEFONE_COM)) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_FAX,c.TELEFONE_FAX)) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST)) LIKE '%{telefone_escaped}%'
+            ) """
+
+        filter_email_cliente = ''
+        if email_cliente:
+            email_cliente_escaped = email_cliente.replace("'", "''").lower()
+            filter_email_cliente = f" AND (LOWER(ce.EMAIL_CLIENTE_AVULSO) LIKE '%{email_cliente_escaped}%' OR LOWER(c.EMAIL_NFE) LIKE '%{email_cliente_escaped}%') "
+
+        filter_produto = ''
+        if cod_produto:
+            list_cod_produto = [cod.strip() for cod in str(cod_produto).split(',') if cod.strip()]
+            for cod in list_cod_produto:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de produto inválido: {cod}'}), 400
+            filter_produto = f" AND ce.COD_PRODUTO IN ({','.join(list_cod_produto)}) "
+
+        filter_observacao = ''
+        if observacao:
+            observacao_escaped = observacao.replace("'", "''").lower()
+            filter_observacao = f" AND LOWER(ce.OBS_MEMO) LIKE '%{observacao_escaped}%' "
+
         conn_oracle, cur_oracle = oracle()
 
         acesso_query = f"""
@@ -1465,6 +1645,29 @@ def list_eventos_descartados():
         filter_responsavel = ''
         if len(acesso_rows) == 0:
             filter_responsavel = f" AND lower(eu.EMAIl) = '{email}' "
+
+        if filter_responsavel == '' and responsible:
+            lista_usuarios = [usuario.strip().upper() for usuario in responsible.split(',') if usuario.strip()]
+            if len(lista_usuarios) == 0:
+                return jsonify({'status': 'error', 'message': 'Responsável inválido'}), 400
+            for usuario in lista_usuarios:
+                if not re.match(r'^[A-Z0-9_]+$', usuario):
+                    return jsonify({'status': 'error', 'message': f'Responsável inválido: {usuario}'}), 400
+            usuarios_in = "','".join(lista_usuarios)
+            user_check_query = f"""
+                SELECT upper(eu.NOME) AS usuario
+                FROM empresas_usuarios eu
+                WHERE 1=1
+                    AND NVL(eu.DEMITIDO, 'N') <> 'S'
+                    AND upper(eu.NOME) IN ('{usuarios_in}')
+                GROUP BY upper(eu.NOME)
+            """
+            cur_oracle.execute(user_check_query)
+            usuarios_encontrados = {row[0] for row in cur_oracle.fetchall()}
+            usuarios_nao_encontrados = [u for u in lista_usuarios if u not in usuarios_encontrados]
+            if len(usuarios_nao_encontrados) > 0:
+                return jsonify({'status': 'error', 'message': f'Responsável não encontrado: {",".join(usuarios_nao_encontrados)}'}), 400
+            filter_responsavel = f" AND upper(eu.NOME) IN ('{usuarios_in}') "
 
         query = f"""
             SELECT
@@ -1502,29 +1705,23 @@ def list_eventos_descartados():
             LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
             WHERE 1=1
                 AND cced.authorization_date IS NULL
-                and ce.cod_tipo_evento in (
-                    829,
-                    831,
-                    795,
-                    793,
-                    797,
-                    799,
-                    833,
-                    837,
-                    819,
-                    821,
-                    825,
-                    785,
-                    807,
-                    827,
-                    835,
-                    815,
-                    817,
-                    823,
-                    810,
-                    812
-                )
+                {filter_tipo_evento}
                 {filter_responsavel}
+                {filter_status}
+                {filter_search}
+                {filter_initial_date}
+                {filter_final_date}
+                {filter_created_at}
+                {filter_empresa}
+                {filter_modelo}
+                {filter_cod_midia}
+                {filter_andamento}
+                {filter_cliente}
+                {filter_nome_cliente}
+                {filter_telefone}
+                {filter_email_cliente}
+                {filter_produto}
+                {filter_observacao}
             ORDER BY cced.created_at DESC
         """
         cur_oracle.execute(query)
@@ -1553,36 +1750,55 @@ def list_eventos_descartados():
                 'data_criacao_evento': row[18],
                 'descricao_modelo': row[19]
             })
-        cur_oracle.close()
-        conn_oracle.close()
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        if cur_oracle:
+            try:
+                cur_oracle.close()
+            except Exception:
+                pass
+        if conn_oracle:
+            try:
+                conn_oracle.close()
+            except Exception:
+                pass
 
 @crm_bp.route('/api/crm/eventos_contato_perdido', methods=['GET'])
 @token_required
 def list_eventos_contato_perdido():
+    conn_oracle = None
+    cur_oracle = None
     try:
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
 
         status = request.args.get('status', None)
-        tipo_evento = request.args.get('tipo_evento', None)
+        tipo_evento = request.args.get('tipo_evento', None) or request.args.get('cod_tipo_evento', None)
         cod_midia = request.args.get('cod_midia', None)
         cod_modelo = request.args.get('cod_modelo', None)
         initial_date = request.args.get('initial_date', None)
         final_date = request.args.get('final_date', None)
         created_at_min = request.args.get('created_at_min', None)
         created_at_max = request.args.get('created_at_max', None)
+        data_criacao = request.args.get('data_criacao', None)
         search = request.args.get('search', None)
-        responsible = request.args.get('responsible', None)
+        responsible = request.args.get('responsible', None) or request.args.get('responsavel', None) or request.args.get('responsavel_pelo_evento', None)
         cod_empresa = request.args.get('cod_empresa', None)
+        cod_andamento = request.args.get('cod_andamento', None)
+        cod_cliente = request.args.get('cod_cliente', None)
+        nome_cliente = request.args.get('nome_cliente', None) or request.args.get('nome_cliente_avulso', None)
+        telefone = request.args.get('telefone', None) or request.args.get('fone_cliente_avulso', None)
+        email_cliente = request.args.get('email', None) or request.args.get('email_cliente_avulso', None)
+        cod_produto = request.args.get('cod_produto', None)
+        observacao = request.args.get('observacao', None) or request.args.get('obsercacao', None)
 
         list_status = ['P', 'E', 'D', 'V', 'A', 'R', 'CP']
 
         filter_cod_midia = ''
         if cod_midia:
-            list_cod_midia = [cod.strip() for cod in cod_midia.split(',') if cod.strip()]
+            list_cod_midia = [cod.strip() for cod in str(cod_midia).split(',') if cod.strip()]
             for cod in list_cod_midia:
                 if not cod.isdigit():
                     return jsonify({'status': 'error', 'message': f'Código de mídia inválido: {cod}'}), 400
@@ -1590,7 +1806,7 @@ def list_eventos_contato_perdido():
 
         filter_modelo = ''
         if cod_modelo:
-            list_cod_modelo = [cod.strip() for cod in cod_modelo.split(',') if cod.strip()]
+            list_cod_modelo = [cod.strip() for cod in str(cod_modelo).split(',') if cod.strip()]
             for cod in list_cod_modelo:
                 if not cod.isdigit():
                     return jsonify({'status': 'error', 'message': f'Código de modelo inválido: {cod}'}), 400
@@ -1599,7 +1815,7 @@ def list_eventos_contato_perdido():
         empresas_permitidas = ['11', '33', '111']
         filter_empresa = ''
         if cod_empresa:
-            empresas_lista = [e.strip() for e in cod_empresa.split(',') if e.strip()]
+            empresas_lista = [e.strip() for e in str(cod_empresa).split(',') if e.strip()]
             for e in empresas_lista:
                 if e not in empresas_permitidas:
                     return jsonify({'status': 'error', 'message': f'Empresa inválida: {e}. Permitidas: 11, 33, 111'}), 400
@@ -1613,10 +1829,17 @@ def list_eventos_contato_perdido():
                 filter_created_at = f" AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{created_at_min}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{created_at_max}', 'YYYY-MM-DD') "
             except ValueError:
                 return jsonify({'status': 'error', 'message': 'Data de criação inválida. Use o formato YYYY-MM-DD'}), 400
+        elif data_criacao:
+            try:
+                data_criacao_clean = data_criacao.split('T')[0]
+                datetime.strptime(data_criacao_clean, '%Y-%m-%d')
+                filter_created_at = f" AND TRUNC(ce.DATA_CRIACAO) = TO_DATE('{data_criacao_clean}', 'YYYY-MM-DD') "
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Data de criação inválida. Use o formato YYYY-MM-DD'}), 400
 
         DEFAULT_TIPOS_EVENTO = '829,831,795,793,797,799,833,837,819,821,825,785,807,827,835,815,817,823,810,812'
         if tipo_evento:
-            tipo_evento_list = tipo_evento.split(',')
+            tipo_evento_list = [te.strip() for te in str(tipo_evento).split(',') if te.strip()]
             for te in tipo_evento_list:
                 if not te.isdigit():
                     return jsonify({'status': 'error', 'message': f'Tipo de evento inválido: {te}'}), 400
@@ -1642,7 +1865,7 @@ def list_eventos_contato_perdido():
 
         filter_status = ''
         if status:
-            status_list = status.split(',')
+            status_list = [s.strip() for s in str(status).split(',') if s.strip()]
             for s in status_list:
                 if s not in list_status:
                     return jsonify({'status': 'error', 'message': f'Status inválido: {s}'}), 400
@@ -1676,6 +1899,58 @@ def list_eventos_contato_perdido():
                 )
             """
 
+        filter_andamento = ''
+        if cod_andamento:
+            list_cod_andamento = [cod.strip() for cod in str(cod_andamento).split(',') if cod.strip()]
+            for cod in list_cod_andamento:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de andamento inválido: {cod}'}), 400
+            andamento_in = ','.join(list_cod_andamento)
+            filter_andamento = f" AND (ca.COD_ANDAMENTO IN ({andamento_in}) OR ce.COD_ANDAMENTO IN ({andamento_in})) "
+
+        filter_cliente = ''
+        if cod_cliente:
+            list_cod_cliente = [cod.strip() for cod in str(cod_cliente).split(',') if cod.strip()]
+            for cod in list_cod_cliente:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de cliente inválido: {cod}'}), 400
+            filter_cliente = f" AND ce.COD_CLIENTE IN ({','.join(list_cod_cliente)}) "
+
+        filter_nome_cliente = ''
+        if nome_cliente:
+            nome_cliente_escaped = nome_cliente.replace("'", "''").lower()
+            filter_nome_cliente = f" AND (LOWER(ce.NOME_CLIENTE_AVULSO) LIKE '%{nome_cliente_escaped}%' OR LOWER(c.NOME) LIKE '%{nome_cliente_escaped}%') "
+
+        filter_telefone = ''
+        if telefone:
+            telefone_escaped = telefone.replace("'", "''").lower()
+            filter_telefone = f""" AND (
+                LOWER(ce.FONE_CLIENTE_AVULSO) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_CEL,c.TELEFONE_CEL)) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_RES,c.TELEFONE_RES)) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_COM,c.TELEFONE_COM)) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_FAX,c.TELEFONE_FAX)) LIKE '%{telefone_escaped}%'
+                OR LOWER(concat(c.PREFIXO_MSG_TXT_INST,c.NUMERO_MSG_TXT_INST)) LIKE '%{telefone_escaped}%'
+            ) """
+
+        filter_email_cliente = ''
+        if email_cliente:
+            email_cliente_escaped = email_cliente.replace("'", "''").lower()
+            filter_email_cliente = f" AND (LOWER(ce.EMAIL_CLIENTE_AVULSO) LIKE '%{email_cliente_escaped}%' OR LOWER(c.EMAIL_NFE) LIKE '%{email_cliente_escaped}%') "
+
+        filter_produto = ''
+        if cod_produto:
+            list_cod_produto = [cod.strip() for cod in str(cod_produto).split(',') if cod.strip()]
+            for cod in list_cod_produto:
+                if not cod.isdigit():
+                    return jsonify({'status': 'error', 'message': f'Código de produto inválido: {cod}'}), 400
+            filter_produto = f" AND ce.COD_PRODUTO IN ({','.join(list_cod_produto)}) "
+
+        filter_observacao = ''
+        if observacao:
+            observacao_escaped = observacao.replace("'", "''").lower()
+            filter_observacao = f" AND LOWER(ce.OBS_MEMO) LIKE '%{observacao_escaped}%' "
+
         conn_oracle, cur_oracle = oracle()
 
         acesso_query = f"""
@@ -1703,7 +1978,7 @@ def list_eventos_contato_perdido():
                 if not re.match(r'^[A-Z0-9_]+$', usuario):
                     return jsonify({'status': 'error', 'message': f'Responsável inválido: {usuario}'}), 400
             usuarios_in = "','".join(lista_usuarios)
-            query = f"""
+            user_check_query = f"""
                 SELECT upper(eu.NOME) AS usuario
                 FROM empresas_usuarios eu
                 WHERE 1=1
@@ -1711,7 +1986,7 @@ def list_eventos_contato_perdido():
                     AND upper(eu.NOME) IN ('{usuarios_in}')
                 GROUP BY upper(eu.NOME)
             """
-            cur_oracle.execute(query)
+            cur_oracle.execute(user_check_query)
             usuarios_encontrados = {row[0] for row in cur_oracle.fetchall()}
             usuarios_nao_encontrados = [u for u in lista_usuarios if u not in usuarios_encontrados]
             if len(usuarios_nao_encontrados) > 0:
@@ -1766,6 +2041,13 @@ def list_eventos_contato_perdido():
                 {filter_empresa}
                 {filter_modelo}
                 {filter_cod_midia}
+                {filter_andamento}
+                {filter_cliente}
+                {filter_nome_cliente}
+                {filter_telefone}
+                {filter_email_cliente}
+                {filter_produto}
+                {filter_observacao}
             ORDER BY cce.created_at DESC
         """
         cur_oracle.execute(query)
@@ -1794,11 +2076,20 @@ def list_eventos_contato_perdido():
                 'data_criacao_evento': row[18],
                 'descricao_modelo': row[19]
             })
-        cur_oracle.close()
-        conn_oracle.close()
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        if cur_oracle:
+            try:
+                cur_oracle.close()
+            except Exception:
+                pass
+        if conn_oracle:
+            try:
+                conn_oracle.close()
+            except Exception:
+                pass
 
 @crm_bp.route('/api/crm/eventos_encerrados', methods=['GET'])
 @token_required
