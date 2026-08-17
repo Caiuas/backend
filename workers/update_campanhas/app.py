@@ -255,7 +255,7 @@ def main():
         while True:
             try:
                 log_debug("main: iniciando ciclo")
-                total_lidas, total_processadas, total_atualizadas = processa_lote(conn_chatwoot, cur_chatwoot)
+                # total_lidas, total_processadas, total_atualizadas = processa_lote(conn_chatwoot, cur_chatwoot)
                 total_atend_lidas, total_atend_atualizadas = processa_lote_atendimento(conn_chatwoot, cur_chatwoot)
                 log_debug("main: realizando commit")
                 conn_chatwoot.commit()
