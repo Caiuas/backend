@@ -17,6 +17,18 @@ ALLOWED_DATA_VISITA_EMAILS = [
     'isadora.fraga@caiuas.com.br'
 ]
 
+ALLOWED_REMOVER_DESCARTE_EMAILS = [
+    'cristiane.aguilar@caiuas.com.br',
+    'pablo.ti@caiuas.com.br',
+    'guilherme.machado@caiuas.com.br',
+    'wheverllyn.costa@caiuas.com.br',
+    'mirela.novaga@caiuas.com.br',
+    'stefany.araujo@caiuas.com.br',
+    'nathalli.pereira@caiuas.com.br',
+    'fabiane.zanzin@caiuas.com.br',
+    'paulo.rocha@caiuas.com.br'
+]
+
 def processar_obs_memo(obs_memo):
     """
     Processa o campo obs_memo e retorna uma lista de dicionários
@@ -2378,18 +2390,6 @@ def contato_perdido(id_evento):
                 conn_oracle.close()
             except Exception:
                 pass
-
-ALLOWED_REMOVER_DESCARTE_EMAILS = [
-    'cristiane.aguilar@caiuas.com.br',
-    'pablo.ti@caiuas.com.br',
-    'guilherme.machado@caiuas.com.br',
-    'wheverllyn.costa@caiuas.com.br',
-    'mirela.novaga@caiuas.com.br',
-    'stefany.araujo@caiuas.com.br',
-    'nathalli.pereira@caiuas.com.br',
-    'fabiane.zanzin@caiuas.com.br',
-    'paulo.rocha@caiuas.com.br'
-]
 
 @crm_bp.route('/api/crm/eventos/remover_descarte/<int:id_evento>', methods=['PUT'])
 @token_required
