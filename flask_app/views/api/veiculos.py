@@ -2163,6 +2163,18 @@ def autorizar_etapa():
                 WHERE id_processo = {id_processo}
             """
             cur.execute(query)
+
+            query = f"""
+                INSERT INTO caiuas_veic_proc_chat (id_processo, message, cod_proposta, responsible)
+                SELECT
+                    {id_processo},
+                    '{usuario_nbs} removeu a autorização da etapa {nome_etapa}',
+                    cod_proposta,
+                    '{usuario_nbs}'
+                FROM caiuas_veic_proc
+                WHERE id_processo = {id_processo}
+            """
+            cur.execute(query)
             conn.commit()
             
             
