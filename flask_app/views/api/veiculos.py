@@ -168,8 +168,50 @@ def get_veiculos_estoque():
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
 @veiculos_bp.route('/api/veiculos/aguardando_faturamento', methods=['GET'])
+@token_required
 def get_veiculos_aguardando_faturamento():
     try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+        cod_acesso = '50190'
+        conn_oracle, cur_oracle = oracle()
+
+        query = f"""
+            SELECT saf.COD_ACESSO
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO
+            WHERE eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIL) = '{email}'
+                AND saf.COD_ACESSO = '{cod_acesso}'
+            GROUP BY saf.COD_ACESSO
+        """
+        cur_oracle.execute(query)
+        possui_acesso = cur_oracle.fetchone() is not None
+        filtro_vendedor = ''
+
+        if not possui_acesso:
+            query_nome = f"""
+                SELECT eu.nome
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO
+                WHERE eu.DEMITIDO <> 'S'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY eu.COD_EMPRESA, eu.nome
+                ORDER BY eu.cod_empresa
+            """
+            cur_oracle.execute(query_nome)
+            usuarios = [row[0] for row in cur_oracle.fetchall()]
+
+            if not usuarios:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+
+            vendedores = ', '.join(f"'{usuario}'" for usuario in usuarios)
+            filtro_vendedor = f"AND vp.VENDEDOR IN ({vendedores})"
+
         query = f"""
             SELECT 
                 v.COD_PROPOSTA, 
@@ -232,9 +274,9 @@ def get_veiculos_aguardando_faturamento():
             WHERE v.status = 'E'
                 AND v.cod_proposta <> 0
                 AND v.cod_proposta IS NOT null
+                {filtro_vendedor}
             ORDER BY pm.DESCRICAO_MODELO
         """
-        conn_oracle, cur_oracle = oracle()
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
         
@@ -391,6 +433,43 @@ def veiculos_faturados():
             cur_oracle.close()
             conn_oracle.close()
             return jsonify({'status': 'error', 'message': 'Usuário não autorizado - 50113'}), 403
+
+        query = f"""
+            SELECT saf.COD_ACESSO
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO
+            WHERE eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIL) = '{email}'
+                AND saf.COD_ACESSO = '50190'
+            GROUP BY saf.COD_ACESSO
+        """
+        cur_oracle.execute(query)
+        possui_acesso_total = cur_oracle.fetchone() is not None
+        filtro_vendedor = ''
+
+        if not possui_acesso_total:
+            query_nome = f"""
+                SELECT eu.nome
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO
+                WHERE eu.DEMITIDO <> 'S'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY eu.COD_EMPRESA, eu.nome
+                ORDER BY eu.cod_empresa
+            """
+            cur_oracle.execute(query_nome)
+            usuarios = [row[0] for row in cur_oracle.fetchall()]
+
+            if not usuarios:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+
+            vendedores = ', '.join(f"'{usuario}'" for usuario in usuarios)
+            filtro_vendedor = f"AND vp.VENDEDOR IN ({vendedores})"
+
         query = f"""
             SELECT 
                 v.COD_PROPOSTA, 
@@ -460,6 +539,7 @@ def veiculos_faturados():
             WHERE v.status = 'V'
                 and v.cod_cliente <> '22534303000127'
                 AND TRUNC(vp.DATA_VENDA) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
+                {filtro_vendedor}
             ORDER BY pm.DESCRICAO_MODELO
         """
         cur_oracle.execute(query)
