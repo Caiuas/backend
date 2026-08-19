@@ -2068,7 +2068,7 @@ def autorizar_etapa():
         
         # 3. Busca os autorizadores da etapa
         query = f"""
-            SELECT cvpe.AUTORIZADORES, cvpe.ID_PROCESSO
+            SELECT cvpe.AUTORIZADORES, cvpe.ID_PROCESSO, cvpe.NOME_ETAPA
             FROM CAIUAS_VEIC_PROC_ETAPAS cvpe
             WHERE cvpe.ID_ETAPA = {id_etapa}
         """
@@ -2082,6 +2082,7 @@ def autorizar_etapa():
         
         autorizadores = result[0]
         id_processo = result[1]
+        nome_etapa = result[2]
         
         if not autorizadores:
             cur.close()
@@ -2164,6 +2165,8 @@ def autorizar_etapa():
             cur.execute(query)
             conn.commit()
             
+            
+            
             cur.close()
             conn.close()
             
@@ -2238,6 +2241,18 @@ def autorizar_etapa():
         query = f"""
             UPDATE caiuas_veic_proc
             SET updated_at = SYSDATE
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+
+        query = f"""
+            INSERT INTO caiuas_veic_proc_chat (id_processo, message, cod_proposta, responsible)
+            SELECT
+                {id_processo},
+                '{usuario_nbs} autorizou a etapa {nome_etapa}',
+                cod_proposta,
+                '{usuario_nbs}'
+            FROM caiuas_veic_proc
             WHERE id_processo = {id_processo}
         """
         cur.execute(query)
