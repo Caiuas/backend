@@ -1722,10 +1722,12 @@ def show_processo(id_processo):
         query = f"""
             select 
             cvpef.id_file_proc, cvpef.id_file,
-            cf.id_file, cf.file_key, cf.bucket, cf.file_size, cf.content_type, cf.region, cf.created_at, cf.old_file_name
+            cf.id_file, cf.file_key, cf.bucket, cf.file_size, cf.content_type, cf.region, cf.created_at, cf.old_file_name, cvpe.NOME_ETAPA
             from CAIUAS_VEIC_PROC_FILES cvpef
             LEFT JOIN caiuas_files cf ON 1=1
                 AND cf.id_file = cvpef.id_file
+            LEFT JOIN CAIUAS_VEIC_PROC_ETAPAS cvpe ON 1=1
+                AND cvpe.ID_ETAPA = cvpef.ID_ETAPA
             where 1=1
                 and cvpef.id_processo = {id_processo}
         """
@@ -1742,7 +1744,8 @@ def show_processo(id_processo):
                 'content_type': arquivo[6],
                 'region': arquivo[7],
                 'created_at': arquivo[8],
-                'old_file_name': arquivo[9]
+                'old_file_name': arquivo[9],
+                'nome_etapa': arquivo[10]
             }
             retorno['arquivos'].append(arquivo_info)
         

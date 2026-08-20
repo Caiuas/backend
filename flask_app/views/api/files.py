@@ -242,6 +242,99 @@ def register_file_processos():
         print(f"ERRO: {e}")
         return jsonify({"message": str(e)}), 500
       
+@files_bp.route('/api/files/classifica_processo', methods=['POST'])
+@token_required
+def classifica_processo():
+    """Vincula (ou remove) uma etapa a um arquivo do processo, exigindo autorização completa da etapa."""
+    try:
+        id_file = request.json.get('id_file')
+        id_etapa = request.json.get('id_etapa')
+
+        if id_file is None:
+            return jsonify({"error": "id_file is required"}), 400
+
+        try:
+            id_file = int(id_file)
+            if id_etapa is not None:
+                id_etapa = int(id_etapa)
+        except (ValueError, TypeError):
+            return jsonify({"error": "id_file and id_etapa must be integers"}), 400
+
+        conn, cur = oracle()
+
+        # id_etapa nulo -> remove a classificação atual do arquivo
+        if id_etapa is None:
+            query = f"""
+                UPDATE caiuas_veic_proc_files
+                SET id_etapa = NULL
+                WHERE id_file = {id_file}
+            """
+            cur.execute(query)
+            conn.commit()
+            cur.close()
+            conn.close()
+            return jsonify({
+                "id_file": id_file,
+                "id_etapa": None,
+                "message": "Classificação removida com sucesso"
+            }), 200
+
+        # Só permite classificar se a etapa ainda NÃO estiver totalmente autorizada
+        query = f"""
+            SELECT autorizadores
+            FROM CAIUAS_VEIC_PROC_ETAPAS
+            WHERE id_etapa = {id_etapa}
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+
+        if not result:
+            cur.close()
+            conn.close()
+            return jsonify({"error": "Etapa não encontrada"}), 404
+
+        autorizadores = result[0]
+        if not autorizadores:
+            cur.close()
+            conn.close()
+            return jsonify({"error": "Etapa não possui autorizadores configurados"}), 400
+
+        autorizadores_list = [a.strip().upper() for a in autorizadores.split(',') if a.strip()]
+        total_autorizadores = len(autorizadores_list)
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC_ETAPAS_AUT
+            WHERE id_etapa = {id_etapa}
+        """
+        cur.execute(query)
+        total_autorizacoes = cur.fetchone()[0]
+
+        if total_autorizacoes >= total_autorizadores:
+            cur.close()
+            conn.close()
+            return jsonify({"message": "Etapa já está autorizada, não é possível classificar"}), 400
+
+        query = f"""
+            UPDATE caiuas_veic_proc_files
+            SET id_etapa = {id_etapa}
+            WHERE id_file = {id_file}
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "id_file": id_file,
+            "id_etapa": id_etapa,
+            "message": "Arquivo classificado com sucesso"
+        }), 200
+
+    except Exception as e:
+        print(f"ERRO: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @files_bp.route('/api/files/download/<int:id_file>', methods=['GET'])
 @token_required
 def get_presigned_download_url(id_file):
