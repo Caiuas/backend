@@ -214,12 +214,12 @@ def get_veiculos_aguardando_faturamento():
 
         query = f"""
             SELECT 
-                v.COD_PROPOSTA, 
+                vp.COD_PROPOSTA, 
                 vp.EMISSAO data_proposta, 
                 vp.VENDEDOR cod_vendedor, 
                 eu.NOME_COMPLETO nome_vendedor, 
                 pm.DESCRICAO_MODELO modelo, 
-                ce.DESCRICAO cor, 
+                COALESCE(ce.DESCRICAO, ce2.DESCRICAO) cor, 
                 v.ANO_MODELO, 
                 v.CHASSI_COMPLETO, 
                 e.NOME empresa, 
@@ -232,25 +232,24 @@ def get_veiculos_aguardando_faturamento():
                     ELSE
                         'Novo'
                 END novo_usado,
-                CASE
-                    WHEN c.COD_CID_COM <> NULL THEN cid_com.DESCRICAO
-                    WHEN c.COD_CID_RES <> NULL THEN cid_res.DESCRICAO 
-                    ELSE cid_cob.DESCRICAO 
-                END cidade,
+                COALESCE(cid_com.DESCRICAO, cid_res.DESCRICAO, cid_cob.DESCRICAO) cidade,
                 cvp.ID_PROCESSO,
                 cvp.status
-            FROM veiculos v 
+            FROM VEICULOS_PROPOSTAS vp
+            LEFT JOIN veiculos v ON 1=1
+                AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
+                AND v.STATUS = 'E'
             LEFT JOIN produtos pr ON 1=1
-                AND pr.COD_PRODUTO = v.COD_PRODUTO 
+                AND pr.COD_PRODUTO = vp.COD_PRODUTO 
+            LEFT JOIN prop_ficticia_dados pfd ON 1=1
+                AND pfd.COD_FICTICIO = vp.COD_FICTICIO
             LEFT JOIN CORES_EXTERNAS ce ON 1=1
                 AND ce.COR_EXTERNA = v.COR_EXTERNA 
+            LEFT JOIN CORES_EXTERNAS ce2 ON 1=1
+                AND ce2.COR_EXTERNA = pfd.COR_EXTERNA
             LEFT JOIN produtos_modelos pm ON 1=1
-                AND pm.COD_PRODUTO = v.COD_PRODUTO 
-                AND pm.COD_MODELO = v.COD_MODELO 
-            LEFT JOIN VEICULOS_PROPOSTAS vp ON 1=1
-                --AND vp.COD_PROPOSTA = v.COD_PROPOSTA OR vp.COD_PROPOSTA = v.COD_PROPOSTA_INTERNET 
-                AND vp.CHASSI_RESUMIDO = v.CHASSI_RESUMIDO 
-                AND vp.STATUS_PROPOSTA <> 'C'
+                AND pm.COD_PRODUTO = vp.COD_PRODUTO 
+                AND pm.COD_MODELO = vp.COD_MODELO 
             LEFT JOIN clientes c ON c.COD_CLIENTE = vp.COD_CLIENTE 
             LEFT JOIN patio p ON 1=1
                 AND p.COD_PATIO = v.COD_PATIO
@@ -271,11 +270,11 @@ def get_veiculos_aguardando_faturamento():
                 AND cid_cob.uf = c.UF_COBRANCA 
             left join caiuas_veic_proc cvp on 1=1
                 and cvp.cod_proposta = vp.cod_proposta
-            WHERE v.status = 'E'
-                AND v.cod_proposta <> 0
-                AND v.cod_proposta IS NOT null
+            WHERE vp.STATUS_PROPOSTA NOT IN ('C','V')
+                AND TRUNC(vp.EMISSAO ) >= TO_DATE('2024-01-01', 'YYYY-MM-DD')
                 {filtro_vendedor}
-            ORDER BY pm.DESCRICAO_MODELO
+            ORDER BY CASE WHEN v.CHASSI_COMPLETO IS NOT NULL THEN 0 ELSE 1 END,
+    vp.EMISSAO DESC
         """
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
