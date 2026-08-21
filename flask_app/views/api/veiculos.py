@@ -2068,6 +2068,142 @@ def finaliza_processo(id_processo):
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
+@veiculos_bp.route('/api/processos/<int:id_processo>/solicita_faturamento', methods=['PUT'])
+@token_required
+def solicita_faturamento_processo(id_processo):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+
+        conn, cur = oracle()
+
+        query = f"""
+            SELECT eu.NOME
+            FROM empresas_usuarios eu
+            WHERE lower(eu.EMAIL) = '{email}'
+            order by eu.cod_empresa
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+
+        nome_usuario = rows[0][0]
+
+        query = f"""
+            SELECT cvp.STATUS FROM CAIUAS_VEIC_PROC cvp WHERE 1=1 AND cvp.ID_PROCESSO = {id_processo}
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+
+        if not result:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 404
+
+        status_atual = result[0]
+
+        if status_atual != 'Pendente':
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não está pendente'}), 400
+
+        query = f"""
+            UPDATE caiuas_veic_proc
+            SET status = 'Solicitado Faturamento',
+                updated_at = SYSDATE
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+
+        query = f"""
+            INSERT INTO caiuas_veic_proc_chat
+            (responsible, id_processo, message)
+            VALUES ('{nome_usuario}', '{id_processo}', '{nome_usuario} solicitou faturamento')
+        """
+        cur.execute(query)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        retorno = {}
+        retorno['message'] = 'Faturamento solicitado com sucesso'
+
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/processos/<int:id_processo>/rejeita_faturamento', methods=['PUT'])
+@token_required
+def rejeita_faturamento_processo(id_processo):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+
+        conn, cur = oracle()
+
+        query = f"""
+            SELECT eu.NOME
+            FROM empresas_usuarios eu
+            WHERE lower(eu.EMAIL) = '{email}'
+            order by eu.cod_empresa
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+
+        nome_usuario = rows[0][0]
+
+        query = f"""
+            SELECT cvp.STATUS FROM CAIUAS_VEIC_PROC cvp WHERE 1=1 AND cvp.ID_PROCESSO = {id_processo}
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+
+        if not result:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 404
+
+        status_atual = result[0]
+
+        if status_atual != 'Solicitado Faturamento':
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não está com faturamento solicitado'}), 400
+
+        query = f"""
+            UPDATE caiuas_veic_proc
+            SET status = 'Pendente',
+                updated_at = SYSDATE
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+
+        query = f"""
+            INSERT INTO caiuas_veic_proc_chat
+            (responsible, id_processo, message)
+            VALUES ('{nome_usuario}', '{id_processo}', '{nome_usuario} rejeitou o faturamento da proposta')
+        """
+        cur.execute(query)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        retorno = {}
+        retorno['message'] = 'Faturamento rejeitado com sucesso'
+
+        return jsonify(retorno), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
 @veiculos_bp.route('/api/veiculos/processos/chat', methods=['POST'])
 @token_required
 def add_chat_processo():
