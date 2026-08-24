@@ -1340,6 +1340,90 @@ def create_processos():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
+@veiculos_bp.route('/api/veiculos/processos/<int:id_processo>/etapas', methods=['POST'])
+@token_required
+def create_etapa_processo(id_processo):
+    try:
+        data = request.get_json() or {}
+        nome_etapa = data.get('nome_etapa') or data.get('nome')
+        categoria = data.get('categoria')
+        tipo = data.get('tipo')
+        autorizador = data.get('autorizador')
+
+        if not nome_etapa or categoria is None or tipo is None or not autorizador:
+            return jsonify({
+                'status': 'error',
+                'message': 'nome, categoria, tipo e autorizador são obrigatórios'
+            }), 400
+
+        if tipo not in [1, 2, 3]:
+            return jsonify({
+                'status': 'error',
+                'message': 'tipo inválido. Valores permitidos: 1, 2, 3'
+            }), 400
+
+        conn, cur = oracle()
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC
+            WHERE id_processo = {id_processo}
+              AND ativo = 1
+        """
+        cur.execute(query)
+        if cur.fetchone()[0] == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 404
+
+        query = """
+            SELECT NVL(MAX(id_etapa), 0) + 1
+            FROM CAIUAS_VEIC_PROC_ETAPAS
+        """
+        cur.execute(query)
+        id_etapa = cur.fetchone()[0]
+
+        query = f"""
+            INSERT INTO CAIUAS_VEIC_PROC_ETAPAS
+                (id_etapa, nome_etapa, autorizadores, tipo, id_processo,
+                 created_at, updated_at, status, explicacao, observacao, categoria)
+            VALUES
+                ({id_etapa}, '{nome_etapa}', '{autorizador}', {tipo}, {id_processo},
+                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'Pendente', NULL, NULL, '{categoria}')
+        """
+        cur.execute(query)
+
+        query = f"""
+            UPDATE CAIUAS_VEIC_PROC
+            SET updated_at = SYSDATE
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Etapa criada com sucesso',
+            'etapa': {
+                'id_etapa': id_etapa,
+                'nome_etapa': nome_etapa,
+                'categoria': categoria,
+                'tipo': tipo,
+                'autorizadores': autorizador,
+                'id_processo': id_processo,
+                'status': 'Pendente'
+            }
+        }), 201
+    except Exception as e:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
 @veiculos_bp.route('/api/veiculos/processos/obs_etapa', methods=['POST'])
 @token_required
 def add_obs_etapa():
@@ -2413,64 +2497,58 @@ def autorizar_etapa():
                 'acao': 'removido'
             }), 200
         
-        # 6. Não existe autorização → adicionar para o usuario_nbs
+        # 6. Um único autorizador libera toda a etapa.
+        for autorizador_etapa in autorizadores_list:
+            query = f"""
+                SELECT COUNT(*)
+                FROM CAIUAS_VEIC_PROC_ETAPAS_AUT
+                WHERE ID_ETAPA = {id_etapa}
+                  AND UPPER(AUTORIZADOR) = '{autorizador_etapa}'
+            """
+            cur.execute(query)
+            if cur.fetchone()[0] == 0:
+                query = f"""
+                    INSERT INTO CAIUAS_VEIC_PROC_ETAPAS_AUT
+                        (ID_AUTORIZACAO, ID_ETAPA, AUTORIZADOR, CREATED_AT, UPDATED_AT)
+                    VALUES (
+                        (SELECT NVL(MAX(ID_AUTORIZACAO), 0) + 1 FROM CAIUAS_VEIC_PROC_ETAPAS_AUT),
+                        {id_etapa},
+                        '{autorizador_etapa}',
+                        SYSDATE,
+                        SYSDATE
+                    )
+                """
+                cur.execute(query)
+
         query = f"""
-            INSERT INTO CAIUAS_VEIC_PROC_ETAPAS_AUT (ID_AUTORIZACAO, ID_ETAPA, AUTORIZADOR, CREATED_AT, UPDATED_AT)
-            VALUES (
-                (SELECT NVL(MAX(ID_AUTORIZACAO), 0) + 1 FROM CAIUAS_VEIC_PROC_ETAPAS_AUT),
-                {id_etapa},
-                '{usuario_nbs}',
-                SYSDATE,
-                SYSDATE
-            )
-        """
-        cur.execute(query)
-        
-        # 7. Verifica se todas as autorizações da etapa foram preenchidas
-        total_autorizadores = len(autorizadores_list)
-        
-        query = f"""
-            SELECT COUNT(*)
-            FROM CAIUAS_VEIC_PROC_ETAPAS_AUT
+            UPDATE CAIUAS_VEIC_PROC_ETAPAS
+            SET STATUS = 'Autorizado',
+                UPDATED_AT = SYSDATE
             WHERE ID_ETAPA = {id_etapa}
         """
         cur.execute(query)
-        total_autorizacoes = cur.fetchone()[0]
-        
-        etapa_autorizada = False
+        etapa_autorizada = True
         processo_autorizado = False
-        
-        if total_autorizacoes >= total_autorizadores:
-            # Todas as autorizações preenchidas → marca etapa como Autorizado
+
+        # 7. Verifica se todas as etapas do processo estão autorizadas
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC_ETAPAS
+            WHERE ID_PROCESSO = {id_processo}
+              AND (STATUS IS NULL OR STATUS <> 'Autorizado')
+        """
+        cur.execute(query)
+        etapas_pendentes = cur.fetchone()[0]
+
+        if etapas_pendentes == 0:
             query = f"""
-                UPDATE CAIUAS_VEIC_PROC_ETAPAS
+                UPDATE CAIUAS_VEIC_PROC
                 SET STATUS = 'Autorizado',
                     UPDATED_AT = SYSDATE
-                WHERE ID_ETAPA = {id_etapa}
-            """
-            cur.execute(query)
-            etapa_autorizada = True
-            
-            # 8. Verifica se todas as etapas do processo estão autorizadas
-            query = f"""
-                SELECT COUNT(*)
-                FROM CAIUAS_VEIC_PROC_ETAPAS
                 WHERE ID_PROCESSO = {id_processo}
-                  AND (STATUS IS NULL OR STATUS <> 'Autorizado')
             """
             cur.execute(query)
-            etapas_pendentes = cur.fetchone()[0]
-            
-            if etapas_pendentes == 0:
-                # Todas as etapas autorizadas → marca processo como Autorizado
-                query = f"""
-                    UPDATE CAIUAS_VEIC_PROC
-                    SET STATUS = 'Autorizado',
-                        UPDATED_AT = SYSDATE
-                    WHERE ID_PROCESSO = {id_processo}
-                """
-                cur.execute(query)
-                processo_autorizado = True
+            processo_autorizado = True
         
         # 9. Atualiza o updated_at do processo
         query = f"""
