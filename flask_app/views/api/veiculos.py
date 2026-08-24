@@ -1313,7 +1313,7 @@ def create_processos():
         cur.execute(query)
         conn.commit()
         query = f"""
-            INSERT INTO CAIUAS_VEIC_PROC_ETAPAS (id_etapa, nome_etapa, autorizadores, tipo, id_processo, created_at, UPDATED_AT, explicacao, observacao)
+            INSERT INTO CAIUAS_VEIC_PROC_ETAPAS (id_etapa, nome_etapa, autorizadores, tipo, id_processo, created_at, UPDATED_AT, explicacao, observacao, categoria)
             SELECT (SELECT NVL(MAX(id_etapa), 0) FROM CAIUAS_VEIC_PROC_ETAPAS) + ROWNUM AS id_etapa,
                 nome_etapa, 
                 autorizadores, 
@@ -1322,7 +1322,8 @@ def create_processos():
                 CURRENT_TIMESTAMP, 
                 CURRENT_TIMESTAMP,
                 explicacao,
-                null
+                null,
+                categoria
             FROM CAIUAS_VEIC_PROC_ET_MOD
             WHERE 1=1
                 AND tipo = {tipo}
@@ -1380,7 +1381,8 @@ def add_obs_etapa():
                 cvpe.explicacao, 
                 TO_CHAR(cvpe.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at,
                 TO_CHAR(cvpe.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at,
-                cvpe.observacao
+                cvpe.observacao,
+                cvpe.categoria
             FROM CAIUAS_VEIC_PROC_ETAPAS cvpe 
             WHERE 1=1
                 and cvpe.id_etapa = {id_etapa}
@@ -1435,6 +1437,7 @@ def add_obs_etapa():
                 'observacao': _read_clob(etapa[7]),
                 'created_at': etapa[5],
                 'updated_at': etapa[6],
+                'categoria': etapa[8],
                 'arquivos': []
             }
             retorno['etapa'] = etapa_info
@@ -1631,7 +1634,8 @@ def show_processo(id_processo):
                 TO_CHAR(cvpe.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') as created_at,
                 TO_CHAR(cvpe.updated_at, 'YYYY-MM-DD"T"HH24:MI:SS') as updated_at,
                 cvpe.observacao,
-                cvpe.status
+                cvpe.status,
+                cvpe.categoria
             FROM CAIUAS_VEIC_PROC_ETAPAS cvpe 
             WHERE 1=1
                 and cvpe.tipo = {retorno['tipo']}
@@ -1688,6 +1692,7 @@ def show_processo(id_processo):
                 'created_at': etapa[5],
                 'updated_at': etapa[6],
                 'status': etapa[8],
+                'categoria': etapa[9],
                 'arquivos': []
             }
             query = f"""
