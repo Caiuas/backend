@@ -234,7 +234,10 @@ def get_veiculos_aguardando_faturamento():
                 END novo_usado,
                 COALESCE(cid_com.DESCRICAO, cid_res.DESCRICAO, cid_cob.DESCRICAO) cidade,
                 cvp.ID_PROCESSO,
-                cvp.status
+                cvp.status,
+                vp.DATA_VENDA,
+                ea.DATA_AGENDADA,
+                ea.DATA_BAIXA
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -268,6 +271,16 @@ def get_veiculos_aguardando_faturamento():
             LEFT JOIN cidades cid_cob ON 1=1
                 AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
                 AND cid_cob.uf = c.UF_COBRANCA 
+            LEFT JOIN (
+                SELECT
+                    ea.COD_PROPOSTA,
+                    MAX(ea.DATA_AGENDADA) DATA_AGENDADA,
+                    MAX(ea.DATA_BAIXA) DATA_BAIXA
+                FROM EV_AGENDADOS ea
+                WHERE ea.STATUS <> 'C'
+                GROUP BY ea.COD_PROPOSTA
+            ) ea ON 1=1
+                AND ea.COD_PROPOSTA = vp.COD_PROPOSTA
             left join caiuas_veic_proc cvp on 1=1
                 and cvp.cod_proposta = vp.cod_proposta
             WHERE vp.STATUS_PROPOSTA NOT IN ('C','V')
@@ -325,6 +338,9 @@ def get_veiculos_aguardando_faturamento():
                 'usado': None,
                 'id_processo': row[15] if row[15] else None,
                 'status_processo': row[16] if row[16] else 'Não Iniciado',
+                'data_faturamento': format_date(row[17]),
+                'agenda_entrega': format_date(row[18]),
+                'data_entrega': format_date(row[19]),
             }
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
@@ -402,10 +418,24 @@ def veiculos_faturados():
     try:
         initial_date = request.args.get('initial_date')
         final_date = request.args.get('final_date')
+        order_by = request.args.get('order_by', 'data_faturamento')
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
         if not initial_date or not final_date:
             return jsonify({'status': 'error', 'message': 'Datas inicial e final são obrigatórias'}), 400
+
+        order_by_map = {
+            'data_faturamento': 'vp.DATA_VENDA',
+            'agenda_entrega': 'ea.DATA_AGENDADA',
+            'data_entrega': 'ea.DATA_BAIXA',
+            'updated_at': 'cvp.updated_at'
+        }
+        if order_by not in order_by_map:
+            return jsonify({
+                'status': 'error',
+                'message': 'Parâmetro order_by inválido. Use: data_faturamento, agenda_entrega, data_entrega ou updated_at'
+            }), 400
+        order_by_field = order_by_map[order_by]
         
         # valida data inicial e final e veja se estao no formato correto
         try:
@@ -498,7 +528,9 @@ def veiculos_faturados():
                 END cidade,
                 vp.DATA_VENDA,
                 cvp.ID_PROCESSO,
-                cvp.status
+                cvp.status,
+                ea.DATA_AGENDADA,
+                ea.DATA_BAIXA
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
                 AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -533,13 +565,23 @@ def veiculos_faturados():
             LEFT JOIN cidades cid_cob ON 1=1
                 AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
                 AND cid_cob.uf = c.UF_COBRANCA 
+            LEFT JOIN (
+                SELECT
+                    ea.COD_PROPOSTA,
+                    MAX(ea.DATA_AGENDADA) DATA_AGENDADA,
+                    MAX(ea.DATA_BAIXA) DATA_BAIXA
+                FROM EV_AGENDADOS ea
+                WHERE ea.STATUS <> 'C'
+                GROUP BY ea.COD_PROPOSTA
+            ) ea ON 1=1
+                AND ea.COD_PROPOSTA = vp.COD_PROPOSTA
             left join caiuas_veic_proc cvp on 1=1
                 and cvp.cod_proposta = vp.cod_proposta
             WHERE v.status = 'V'
                 and v.cod_cliente <> '22534303000127'
                 AND TRUNC(vp.DATA_VENDA) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
                 {filtro_vendedor}
-            ORDER BY pm.DESCRICAO_MODELO
+            ORDER BY {order_by_field} DESC NULLS LAST, pm.DESCRICAO_MODELO
         """
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
@@ -593,6 +635,9 @@ def veiculos_faturados():
                 'andamento': None,
                 'usado': None,
                 'data_venda': format_date(row[16]),
+                'data_faturamento': format_date(row[16]),
+                'agenda_entrega': format_date(row[19]),
+                'data_entrega': format_date(row[20]),
                 'id_processo': row[17] if row[17] else None,
                 'status_processo': row[18] if row[18] else 'Não Iniciado',
             }
@@ -1098,6 +1143,7 @@ def list_reclamacoes_padroes():
 def list_processos():
     try:
         search = request.args.get('search', None)
+        order_by = request.args.get('order_by', 'update_at')
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
         current_page = int(request.args.get('current_page', 1))
@@ -1105,6 +1151,19 @@ def list_processos():
         limit = int(request.args.get('limit', 10))
         retorno = {}
         cod_acesso = '50190'
+
+        order_by_map = {
+            'data_faturamento': 'vp.DATA_VENDA',
+            'agenda_entrega': 'ea.DATA_AGENDADA',
+            'data_entrega': 'ea.DATA_BAIXA',
+            'update_at': 'cvp.updated_at'
+        }
+        if order_by not in order_by_map:
+            return jsonify({
+                'status': 'error',
+                'message': 'Parâmetro order_by inválido. Use: data_faturamento, agenda_entrega, data_entrega ou update_at'
+            }), 400
+        order_by_field = order_by_map[order_by]
         
         if search:
             search_term = search.strip().lower()
@@ -1177,16 +1236,27 @@ def list_processos():
                 c.EMAIL2 ,
                 c.EMAIL_NFE,
                 eu.nome_completo nome_responsavel,
-                cvp.cod_proposta
+                cvp.cod_proposta,
+                vp.DATA_VENDA,
+                ea.DATA_AGENDADA,
+                ea.DATA_BAIXA,
+                COALESCE(v.CHASSI_COMPLETO, vp.CHASSI_RESUMIDO) chassi
             FROM caiuas_veic_proc cvp
-                LEFT JOIN clientes c ON 1=1
-                    AND c.cod_cliente = cvp.cod_cliente
-                LEFT JOIN empresas_usuarios eu ON 1=1
-		AND eu.nome = cvp.responsible
+            LEFT JOIN clientes c ON 1=1
+                AND c.cod_cliente = cvp.cod_cliente
+            LEFT JOIN empresas_usuarios eu ON 1=1
+        		AND eu.nome = cvp.responsible
+            LEFT JOIN EV_AGENDADOS ea ON 1=1
+				AND ea.STATUS <> 'C'
+				AND ea.COD_PROPOSTA = cvp.COD_PROPOSTA
+            LEFT JOIN veiculos_propostas vp ON 1=1
+				AND vp.COD_PROPOSTA = cvp.COD_PROPOSTA
+            LEFT JOIN veiculos v ON 1=1
+				AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO
             where 1=1
                 {filter_user}
                 {search}
-            order by cvp.updated_at desc
+            order by {order_by_field} desc nulls last, cvp.updated_at desc
         """
         cur.execute(query)
         
@@ -1217,7 +1287,12 @@ def list_processos():
                 'responsible': {
                     'nome_responsavel': row[15],
                     'cod_responsavel': row[1]
-                } if row[15] else {}
+                } if row[15] else {},
+                'data_faturamento': format_oracle_date(row[17]),
+                'agenda_entrega': format_oracle_date(row[18]),
+                'data_agendamento': format_oracle_date(row[18]),
+                'data_entrega': format_oracle_date(row[19]),
+                'chassi': row[20],
             }
             
             if processo['tipo'] == 1:
@@ -1655,12 +1730,29 @@ def show_processo(id_processo):
                 c.EMAIL2 ,
                 c.EMAIL_NFE,
                 eu.nome_completo nome_responsavel,
-                cvp.cod_proposta
+                cvp.cod_proposta,
+                COALESCE(v.CHASSI_COMPLETO, vp.CHASSI_RESUMIDO) chassi,
+                pm.DESCRICAO_MODELO modelo,
+                COALESCE(ce.DESCRICAO, ce2.DESCRICAO) cor,
+                v.ANO_MODELO
             FROM caiuas_veic_proc cvp
                 LEFT JOIN clientes c ON 1=1
                     AND c.cod_cliente = cvp.cod_cliente
                 LEFT JOIN empresas_usuarios eu ON 1=1
 		            AND eu.nome = cvp.responsible
+                LEFT JOIN veiculos_propostas vp ON 1=1
+                    AND vp.COD_PROPOSTA = cvp.COD_PROPOSTA
+                LEFT JOIN veiculos v ON 1=1
+                    AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO
+                LEFT JOIN produtos_modelos pm ON 1=1
+                    AND pm.COD_PRODUTO = vp.COD_PRODUTO
+                    AND pm.COD_MODELO = vp.COD_MODELO
+                LEFT JOIN CORES_EXTERNAS ce ON 1=1
+                    AND ce.COR_EXTERNA = v.COR_EXTERNA
+                LEFT JOIN prop_ficticia_dados pfd ON 1=1
+                    AND pfd.COD_FICTICIO = vp.COD_FICTICIO
+                LEFT JOIN CORES_EXTERNAS ce2 ON 1=1
+                    AND ce2.COR_EXTERNA = pfd.COR_EXTERNA
             where 1=1
                 and cvp.id_processo = {id_processo}
                 {filter_user}
@@ -1695,7 +1787,11 @@ def show_processo(id_processo):
                 'responsible': {
                     'nome_responsavel': row[15],
                     'cod_responsavel': row[1]
-                } if row[15] else {}
+                } if row[15] else {},
+                'chassi': row[17],
+                'modelo': row[18],
+                'cor': row[19],
+                'ano_modelo': row[20],
             }
             
             if processo['tipo'] == 1:
