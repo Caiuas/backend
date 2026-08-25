@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 from database import oracle, chatwoot
 from dotenv import load_dotenv
 from datetime import datetime
+from uuid import UUID
 from auth import token_required
 import boto3
 import jpype
@@ -237,7 +238,8 @@ def get_veiculos_aguardando_faturamento():
                 cvp.status,
                 vp.DATA_VENDA,
                 ea.DATA_AGENDADA,
-                ea.DATA_BAIXA
+                ea.DATA_BAIXA,
+                cvp.ANDAMENTO
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -341,6 +343,7 @@ def get_veiculos_aguardando_faturamento():
                 'data_faturamento': format_date(row[17]),
                 'agenda_entrega': format_date(row[18]),
                 'data_entrega': format_date(row[19]),
+                'andamento_processo': row[20],
             }
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
@@ -530,7 +533,8 @@ def veiculos_faturados():
                 cvp.ID_PROCESSO,
                 cvp.status,
                 ea.DATA_AGENDADA,
-                ea.DATA_BAIXA
+                ea.DATA_BAIXA,
+                cvp.ANDAMENTO
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
                 AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -640,6 +644,7 @@ def veiculos_faturados():
                 'data_entrega': format_date(row[20]),
                 'id_processo': row[17] if row[17] else None,
                 'status_processo': row[18] if row[18] else 'Não Iniciado',
+                'andamento_processo': row[21],
             }
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
@@ -1240,7 +1245,8 @@ def list_processos():
                 vp.DATA_VENDA,
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
-                COALESCE(v.CHASSI_COMPLETO, vp.CHASSI_RESUMIDO) chassi
+                COALESCE(v.CHASSI_COMPLETO, vp.CHASSI_RESUMIDO) chassi,
+                cvp.ANDAMENTO
             FROM caiuas_veic_proc cvp
             LEFT JOIN clientes c ON 1=1
                 AND c.cod_cliente = cvp.cod_cliente
@@ -1293,6 +1299,7 @@ def list_processos():
                 'data_agendamento': format_oracle_date(row[18]),
                 'data_entrega': format_oracle_date(row[19]),
                 'chassi': row[20],
+                'andamento': row[21],
             }
             
             if processo['tipo'] == 1:
@@ -1734,7 +1741,8 @@ def show_processo(id_processo):
                 COALESCE(v.CHASSI_COMPLETO, vp.CHASSI_RESUMIDO) chassi,
                 pm.DESCRICAO_MODELO modelo,
                 COALESCE(ce.DESCRICAO, ce2.DESCRICAO) cor,
-                v.ANO_MODELO
+                v.ANO_MODELO,
+                cvp.ANDAMENTO
             FROM caiuas_veic_proc cvp
                 LEFT JOIN clientes c ON 1=1
                     AND c.cod_cliente = cvp.cod_cliente
@@ -1792,6 +1800,7 @@ def show_processo(id_processo):
                 'modelo': row[18],
                 'cor': row[19],
                 'ano_modelo': row[20],
+                'andamento': row[21],
             }
             
             if processo['tipo'] == 1:
@@ -1934,22 +1943,28 @@ def show_processo(id_processo):
             retorno['arquivos'].append(arquivo_info)
         
         query = f"""
-            SELECT message, cod_proposta, created_at, responsible, eu.nome_completo
-            FROM caiuas_veic_proc_chat
-            left join empresas_usuarios eu on eu.NOME = caiuas_veic_proc_chat.responsible
-            WHERE id_processo = {id_processo}
-            ORDER BY CREATED_AT ASC
+            SELECT cvpc.message, cvpc.COD_PROPOSTA , cvpc.CREATED_AT ed_at, cvpc.responsible, eu.nome_completo, cvpe.NOME_ETAPA, cvpe.ID_ETAPA, cvpc.ID_CHAT
+            FROM caiuas_veic_proc_chat cvpc
+            left join empresas_usuarios eu on eu.NOME = cvpc.responsible
+            LEFT JOIN CAIUAS_VEIC_PROC_ETAPAS cvpe ON 1=1
+            	AND cvpe.ID_ETAPA = cvpc.id_etapa
+            WHERE cvpc.id_processo = {id_processo}
+            ORDER BY cvpc.CREATED_AT ASC
         """
         cur.execute(query)
         chat_messages = cur.fetchall()
         retorno['chat_messages'] = []
         for chat_message in chat_messages:
+            id_chat = str(UUID(bytes=bytes(chat_message[7]))) if chat_message[7] else None
             chat_message_info = {
                 'message': chat_message[0],
                 'cod_proposta': chat_message[1],
                 'created_at': chat_message[2],
                 'responsible': chat_message[3],
-                'name_responsible': chat_message[4]
+                'name_responsible': chat_message[4],
+                'nome_etapa': chat_message[5],
+                'id_etapa': chat_message[6],
+                'id_chat': id_chat
             }
             retorno['chat_messages'].append(chat_message_info)
 
@@ -1959,6 +1974,66 @@ def show_processo(id_processo):
         
         return jsonify(retorno), 200
     except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/veiculos/andamento/<cod_proposta>', methods=['PUT'])
+@token_required
+def update_andamento_por_proposta(cod_proposta):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email', '').strip().lower()
+        usuario = email.split('@')[0] if '@' in email else email
+        usuarios_permitidos = {'franciele.mayer', 'pablo.ti', 'tais.schrepel'}
+
+        if usuario not in usuarios_permitidos:
+            return jsonify({'status': 'error', 'message': 'Usuário não autorizado para atualizar andamento'}), 403
+
+        data = request.get_json() or {}
+        andamento = data.get('andamento')
+
+        if not isinstance(andamento, str) or not andamento.strip():
+            return jsonify({'status': 'error', 'message': 'Campo andamento é obrigatório'}), 400
+
+        andamento = andamento.strip()
+        if len(andamento) > 255:
+            return jsonify({'status': 'error', 'message': 'Campo andamento deve ter no máximo 255 caracteres'}), 400
+
+        cod_proposta_safe = str(cod_proposta).replace("'", "''")
+        andamento_safe = andamento.replace("'", "''")
+
+        conn, cur = oracle()
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC
+            WHERE cod_proposta = '{cod_proposta_safe}'
+        """
+        cur.execute(query)
+        total = cur.fetchone()[0]
+
+        if total == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado para a proposta informada'}), 404
+
+        query = f"""
+            UPDATE CAIUAS_VEIC_PROC
+            SET andamento = '{andamento_safe}',
+                updated_at = SYSDATE
+            WHERE cod_proposta = '{cod_proposta_safe}'
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({'status': 'success', 'message': 'Andamento atualizado com sucesso'}), 200
+    except Exception as e:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
         return jsonify({'status': 'error', 'message': str(e)}), 400
     
 @veiculos_bp.route('/api/veiculos/processos/<int:id_processo>/proposta', methods=['PUT'])
@@ -2426,6 +2501,101 @@ def add_chat_processo():
         return jsonify(retorno), 200
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400 
+
+@veiculos_bp.route('/api/veiculos/processos/chat/classifica', methods=['POST'])
+@token_required
+def classifica_chat_processo():
+    """Vincula (ou remove) uma etapa a uma mensagem do chat do processo, exigindo autorização completa da etapa."""
+    try:
+        id_chat = request.json.get('id_chat')
+        id_etapa = request.json.get('id_etapa')
+
+        if id_chat is None:
+            return jsonify({'error': 'id_chat is required'}), 400
+
+        try:
+            id_chat = UUID(str(id_chat))
+            if id_etapa is not None:
+                id_etapa = int(id_etapa)
+        except (ValueError, TypeError):
+            return jsonify({'error': 'id_chat must be a UUID and id_etapa must be an integer'}), 400
+
+        conn, cur = oracle()
+
+        if id_etapa is None:
+            query = f"""
+                UPDATE caiuas_veic_proc_chat
+                SET id_etapa = NULL
+                WHERE id_chat = HEXTORAW('{id_chat.hex}')
+            """
+            cur.execute(query)
+            conn.commit()
+            cur.close()
+            conn.close()
+            return jsonify({
+                'id_chat': str(id_chat),
+                'id_etapa': None,
+                'message': 'Classificação removida com sucesso'
+            }), 200
+
+        query = f"""
+            SELECT autorizadores
+            FROM CAIUAS_VEIC_PROC_ETAPAS
+            WHERE id_etapa = {id_etapa}
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+
+        if not result:
+            cur.close()
+            conn.close()
+            return jsonify({'error': 'Etapa não encontrada'}), 404
+
+        autorizadores = result[0]
+        if not autorizadores:
+            cur.close()
+            conn.close()
+            return jsonify({'error': 'Etapa não possui autorizadores configurados'}), 400
+
+        autorizadores_list = [a.strip().upper() for a in autorizadores.split(',') if a.strip()]
+        total_autorizadores = len(autorizadores_list)
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC_ETAPAS_AUT
+            WHERE id_etapa = {id_etapa}
+        """
+        cur.execute(query)
+        total_autorizacoes = cur.fetchone()[0]
+
+        if total_autorizacoes >= total_autorizadores:
+            cur.close()
+            conn.close()
+            return jsonify({'message': 'Etapa já está autorizada, não é possível classificar'}), 400
+
+        query = f"""
+            UPDATE caiuas_veic_proc_chat
+            SET id_etapa = {id_etapa}
+            WHERE id_chat = HEXTORAW('{id_chat.hex}')
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            'id_chat': str(id_chat),
+            'id_etapa': id_etapa,
+            'message': 'Chat classificado com sucesso'
+        }), 200
+
+    except Exception as e:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
+        return jsonify({'error': str(e)}), 500
 
 @veiculos_bp.route('/api/veiculos/processos/autorizar', methods=['POST'])
 @token_required
