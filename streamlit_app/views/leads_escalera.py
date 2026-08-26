@@ -248,6 +248,15 @@ def render():
     mask_sem_evento_nbs = link_crm_col.apply(lambda v: pd.isna(v) or str(v).strip() in ('', 'None'))
     df_chatwoot_excel.loc[mask_status_descartado & mask_sem_evento_nbs, 'termometro'] = 'Descartado'
 
+    # Se não tem cod_evento (link_crm/evento) e termometro é Descartado, altera o andamento para Descartado
+    mask_termometro_descartado = df_chatwoot_excel['termometro'].apply(lambda v: str(v).strip().lower() == 'descartado')
+    df_chatwoot_excel.loc[mask_sem_evento_nbs & mask_termometro_descartado, 'andamento_atendimento'] = 'Descartado'
+
+    # Se não tem cod_evento (link_crm/evento), termometro é 'Não classificado' e andamento é 'Pendente', muda o andamento para 'Oficina'
+    mask_termometro_nao_classificado = df_chatwoot_excel['termometro'].apply(lambda v: str(v).strip().lower() in ('não classificado', 'nao classificado'))
+    mask_andamento_pendente = df_chatwoot_excel['andamento_atendimento'].apply(lambda v: str(v).strip().lower() == 'pendente')
+    df_chatwoot_excel.loc[mask_sem_evento_nbs & mask_termometro_nao_classificado & mask_andamento_pendente, 'andamento_atendimento'] = 'Outros assuntos'
+
     st.subheader("Campanhas (Chatwoot)")
     total_linhas_chatwoot = len(df_chatwoot)
     excel_buffer_chatwoot = io.BytesIO()
