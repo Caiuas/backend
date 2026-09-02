@@ -106,7 +106,14 @@ def render():
         LEFT JOIN crm_eventos cev ON 1=1            
             AND cev.COD_PROPOSTA = vp.COD_PROPOSTA
             AND cev.status <> 'D'
-            AND cev.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
+            AND cev.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812,819,821,815,817,810,812,829,
+                795,
+                793,
+                797,
+                799,
+                810,
+812,
+837)
         LEFT JOIN crm_andamento ca ON ca.COD_ANDAMENTO = cev.COD_ANDAMENTO
         left join CRM_EVENTOS_TIPO cet on 1=1
             and cet.COD_TIPO_EVENTO = cev.COD_TIPO_EVENTO
@@ -198,7 +205,14 @@ def render():
         LEFT JOIN crm_eventos cev2 ON 1=1
             AND cev2.COD_PROPOSTA = v.COD_PROPOSTA
             AND cev2.status <> 'D'
-            AND cev2.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812)
+            AND cev2.cod_tipo_evento IN (829, 831,795,793,797,799,819,821,825,785,807,827,835,815,817,823,810,812,819,821,815,817,810,812,829,
+                795,
+                793,
+                797,
+                799,
+                810,
+812,
+837)
         LEFT JOIN crm_andamento ca2 ON ca2.COD_ANDAMENTO = cev2.COD_ANDAMENTO
         left join CRM_EVENTOS_TIPO cet on 1=1
             and cet.COD_TIPO_EVENTO = cev2.COD_TIPO_EVENTO
