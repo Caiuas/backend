@@ -634,13 +634,26 @@ def veiculos_muda_andamento_veiculo():
 @token_required
 def veiculos_faturados():
     try:
-        initial_date = request.args.get('initial_date')
-        final_date = request.args.get('final_date')
+        inicial_data_faturamento = request.args.get('inicial_data_faturamento')
+        final_data_faturamento = request.args.get('final_data_faturamento')
+        inicial_data_agendamento = request.args.get('inicial_data_agendamento')
+        final_data_agendamento = request.args.get('final_data_agendamento')
+        inicial_data_entrega = request.args.get('inicial_data_entrega')
+        final_data_entrega = request.args.get('final_data_entrega')
         order_by = request.args.get('order_by', 'data_faturamento')
+        search = request.args.get('search', '').strip()
+        current_page = request.args.get('current_page', 1, type=int)
+        limit = request.args.get('limit', 100, type=int)
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
-        if not initial_date or not final_date:
-            return jsonify({'status': 'error', 'message': 'Datas inicial e final são obrigatórias'}), 400
+
+        if not current_page or current_page < 1 or not limit or limit < 1:
+            return jsonify({
+                'status': 'error',
+                'message': 'current_page e limit devem ser números inteiros maiores que zero'
+            }), 400
+        offset = (current_page - 1) * limit
+        end_row = offset + limit
 
         order_by_map = {
             'data_faturamento': 'vp.DATA_VENDA',
@@ -654,11 +667,36 @@ def veiculos_faturados():
                 'message': 'Parâmetro order_by inválido. Use: data_faturamento, agenda_entrega, data_entrega ou updated_at'
             }), 400
         order_by_field = order_by_map[order_by]
+
+        filtro_busca = ''
+        if search:
+            search_term = search.lower().replace("'", "''")
+            filtro_busca = f"""
+                AND (
+                    LOWER(v.CHASSI_COMPLETO) LIKE '%{search_term}%'
+                    OR LOWER(c.NOME) LIKE '%{search_term}%'
+                    OR LOWER(TO_CHAR(c.COD_CLIENTE)) LIKE '%{search_term}%'
+                )
+            """
         
-        # valida data inicial e final e veja se estao no formato correto
+        filtros_data = {
+            'faturamento': (inicial_data_faturamento, final_data_faturamento, 'vp.DATA_VENDA'),
+            'agendamento': (inicial_data_agendamento, final_data_agendamento, 'ea.DATA_AGENDADA'),
+            'entrega': (inicial_data_entrega, final_data_entrega, 'ea.DATA_BAIXA')
+        }
+        filtros_periodo = ''
         try:
-            initial_date_obj = datetime.strptime(initial_date, '%Y-%m-%d')
-            final_date_obj = datetime.strptime(final_date, '%Y-%m-%d')
+            for nome, (data_inicial, data_final, campo) in filtros_data.items():
+                if bool(data_inicial) != bool(data_final):
+                    return jsonify({
+                        'status': 'error',
+                        'message': f'Datas inicial e final de {nome} devem ser informadas juntas'
+                    }), 400
+                if data_inicial:
+                    datetime.strptime(data_inicial, '%Y-%m-%d')
+                    datetime.strptime(data_final, '%Y-%m-%d')
+                    filtros_periodo += f"""
+                AND TRUNC({campo}) BETWEEN TO_DATE('{data_inicial}', 'YYYY-MM-DD') AND TO_DATE('{data_final}', 'YYYY-MM-DD')"""
         except ValueError:
             return jsonify({'status': 'error', 'message': 'Datas inválidas. Use o formato YYYY-MM-DD'}), 400
 
@@ -718,8 +756,16 @@ def veiculos_faturados():
             filtro_vendedor = f"AND vp.VENDEDOR IN ({vendedores})"
 
         query = f"""
-            SELECT 
-                v.COD_PROPOSTA, 
+            SELECT *
+            FROM (
+                SELECT resultado.*, ROWNUM AS rn
+                FROM (
+            SELECT
+                CASE
+            		WHEN v.cod_proposta is NULL THEN v.cod_proposta_internet
+            		ELSE
+            		v.cod_proposta
+            	END cod_proposta,
                 vp.EMISSAO data_proposta, 
                 vp.VENDEDOR cod_vendedor, 
                 eu.NOME_COMPLETO nome_vendedor, 
@@ -749,7 +795,8 @@ def veiculos_faturados():
                 cvp.status,
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
-                cvp.ANDAMENTO
+                cvp.ANDAMENTO,
+                COUNT(*) OVER() AS total
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
                 AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -784,32 +831,44 @@ def veiculos_faturados():
             LEFT JOIN cidades cid_cob ON 1=1
                 AND cid_cob.cod_cidades = c.COD_CID_COBRANCA  
                 AND cid_cob.uf = c.UF_COBRANCA 
-            LEFT JOIN (
-                SELECT
-                    ea.COD_PROPOSTA,
-                    MAX(ea.DATA_AGENDADA) DATA_AGENDADA,
-                    MAX(ea.DATA_BAIXA) DATA_BAIXA
-                FROM EV_AGENDADOS ea
-                WHERE ea.STATUS <> 'C'
-                GROUP BY ea.COD_PROPOSTA
-            ) ea ON 1=1
-                AND ea.COD_PROPOSTA = vp.COD_PROPOSTA
+            LEFT JOIN ev_agendados ea ON 1=1
+            	AND ea.STATUS NOT IN ('C')
+				AND ea.QUEM_CANCELOU IS NULL
+                AND TO_CHAR(ea.COD_PROPOSTA) = TO_CHAR(vp.COD_PROPOSTA)
+                AND TO_CHAR(ea.CHASSI_RESUMIDO) = TO_CHAR(v.CHASSI_RESUMIDO)
             left join caiuas_veic_proc cvp on 1=1
                 and cvp.cod_proposta = vp.cod_proposta
             WHERE v.status = 'V'
-                and v.cod_cliente <> '22534303000127'
-                AND TRUNC(vp.DATA_VENDA) BETWEEN TO_DATE('{initial_date}', 'YYYY-MM-DD') AND TO_DATE('{final_date}', 'YYYY-MM-DD')
+                AND TO_CHAR(v.cod_cliente) <> '22534303000127'
+                {filtros_periodo}
                 {filtro_vendedor}
+                {filtro_busca}
             ORDER BY {order_by_field} DESC NULLS LAST, pm.DESCRICAO_MODELO
+                ) resultado
+                WHERE ROWNUM <= {end_row}
+            )
+            WHERE rn > {offset}
         """
+        # return query
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
         if len(result) == 0:
             cur_oracle.close()
             conn_oracle.close()
-            return jsonify({'status': 'success', 'veiculos': []}), 404
-        retorno = {}
-        retorno['veiculos'] = []
+            return jsonify({
+                'status': 'success',
+                'veiculos': [],
+                'current_page': current_page,
+                'total_pages': 0,
+                'total': 0
+            }), 200
+        total = result[0][22]
+        retorno = {
+            'veiculos': [],
+            'current_page': current_page,
+            'total_pages': (total + limit - 1) // limit,
+            'total': total
+        }
         for row in result:
             def format_date(date_value):
                 if date_value is None:
