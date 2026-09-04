@@ -177,6 +177,12 @@ def get_veiculos_aguardando_faturamento():
         cod_acesso = '50190'
         conn_oracle, cur_oracle = oracle()
 
+        repasse = (request.args.get('repasse') or '').strip().upper()
+        if repasse == 'S':
+            filtro_repasse = ''
+        else:
+            filtro_repasse = "AND (cvp.REPASSE IS NULL OR cvp.REPASSE <> 'S')"
+
         query = f"""
             SELECT saf.COD_ACESSO
             FROM empresas_usuarios eu
@@ -239,7 +245,8 @@ def get_veiculos_aguardando_faturamento():
                 vp.DATA_VENDA,
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
-                cvp.ANDAMENTO
+                cvp.ANDAMENTO,
+                cvp.REPASSE
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -288,6 +295,7 @@ def get_veiculos_aguardando_faturamento():
             WHERE vp.STATUS_PROPOSTA NOT IN ('C','V')
                 AND TRUNC(vp.EMISSAO ) >= TO_DATE('2024-01-01', 'YYYY-MM-DD')
                 {filtro_vendedor}
+                {filtro_repasse}
             ORDER BY CASE WHEN v.CHASSI_COMPLETO IS NOT NULL THEN 0 ELSE 1 END,
     vp.EMISSAO DESC
         """
@@ -344,6 +352,7 @@ def get_veiculos_aguardando_faturamento():
                 'agenda_entrega': format_date(row[18]),
                 'data_entrega': format_date(row[19]),
                 'andamento_processo': row[20],
+                'repasse': row[21],
             }
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
@@ -647,6 +656,12 @@ def veiculos_faturados():
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
 
+        repasse = (request.args.get('repasse') or '').strip().upper()
+        if repasse == 'S':
+            filtro_repasse = ''
+        else:
+            filtro_repasse = "AND (cvp.REPASSE IS NULL OR cvp.REPASSE <> 'S')"
+
         if not current_page or current_page < 1 or not limit or limit < 1:
             return jsonify({
                 'status': 'error',
@@ -796,6 +811,7 @@ def veiculos_faturados():
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
                 cvp.ANDAMENTO,
+                cvp.REPASSE,
                 COUNT(*) OVER() AS total
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
@@ -843,6 +859,7 @@ def veiculos_faturados():
                 {filtros_periodo}
                 {filtro_vendedor}
                 {filtro_busca}
+                {filtro_repasse}
             ORDER BY {order_by_field} DESC NULLS LAST, pm.DESCRICAO_MODELO
                 ) resultado
                 WHERE ROWNUM <= {end_row}
@@ -862,7 +879,7 @@ def veiculos_faturados():
                 'total_pages': 0,
                 'total': 0
             }), 200
-        total = result[0][22]
+        total = result[0][23]
         retorno = {
             'veiculos': [],
             'current_page': current_page,
@@ -919,6 +936,7 @@ def veiculos_faturados():
                 'id_processo': row[17] if row[17] else None,
                 'status_processo': row[18] if row[18] else 'Não Iniciado',
                 'andamento_processo': row[21],
+                'repasse': row[22],
             }
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
@@ -1431,6 +1449,12 @@ def list_processos():
         retorno = {}
         cod_acesso = '50190'
 
+        repasse = (request.args.get('repasse') or '').strip().upper()
+        if repasse == 'S':
+            filtro_repasse = ''
+        else:
+            filtro_repasse = "AND (cvp.REPASSE IS NULL OR cvp.REPASSE <> 'S')"
+
         order_by_map = {
             'data_faturamento': 'vp.DATA_VENDA',
             'agenda_entrega': 'ea.DATA_AGENDADA',
@@ -1485,6 +1509,7 @@ def list_processos():
             where 1=1
                     {filter_user}
                     {search}
+                    {filtro_repasse}
 
         """
         cur.execute(query)
@@ -1520,12 +1545,13 @@ def list_processos():
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
                 COALESCE(v.CHASSI_COMPLETO, vp.CHASSI_RESUMIDO) chassi,
-                cvp.ANDAMENTO
+                cvp.ANDAMENTO,
+                cvp.REPASSE
             FROM caiuas_veic_proc cvp
             LEFT JOIN clientes c ON 1=1
                 AND c.cod_cliente = cvp.cod_cliente
             LEFT JOIN empresas_usuarios eu ON 1=1
-        		AND eu.nome = cvp.responsible
+         		AND eu.nome = cvp.responsible
             LEFT JOIN EV_AGENDADOS ea ON 1=1
 				AND ea.STATUS <> 'C'
 				AND ea.COD_PROPOSTA = cvp.COD_PROPOSTA
@@ -1536,6 +1562,7 @@ def list_processos():
             where 1=1
                 {filter_user}
                 {search}
+                {filtro_repasse}
             order by {order_by_field} desc nulls last, cvp.updated_at desc
         """
         cur.execute(query)
@@ -1574,6 +1601,7 @@ def list_processos():
                 'data_entrega': format_oracle_date(row[19]),
                 'chassi': row[20],
                 'andamento': row[21],
+                'repasse': row[22],
             }
             
             if processo['tipo'] == 1:
@@ -2016,7 +2044,8 @@ def show_processo(id_processo):
                 pm.DESCRICAO_MODELO modelo,
                 COALESCE(ce.DESCRICAO, ce2.DESCRICAO) cor,
                 v.ANO_MODELO,
-                cvp.ANDAMENTO
+                cvp.ANDAMENTO,
+                cvp.REPASSE
             FROM caiuas_veic_proc cvp
                 LEFT JOIN clientes c ON 1=1
                     AND c.cod_cliente = cvp.cod_cliente
@@ -2075,6 +2104,7 @@ def show_processo(id_processo):
                 'cor': row[19],
                 'ano_modelo': row[20],
                 'andamento': row[21],
+                'repasse': row[22],
             }
             
             if processo['tipo'] == 1:
@@ -3183,7 +3213,7 @@ def list_propostas():
                 )
             """
         query = f"""
-        SELECT vp.COD_PROPOSTA, vp.EMISSAO,c.COD_CLIENTE, c.NOME nome_cliente, pm.DESCRICAO_MODELO, vp.VALOR_PROPOSTA,cvp.ID_PROCESSO
+        SELECT vp.COD_PROPOSTA, vp.EMISSAO,c.COD_CLIENTE, c.NOME nome_cliente, pm.DESCRICAO_MODELO, vp.VALOR_PROPOSTA,cvp.ID_PROCESSO, cvp.REPASSE
             FROM veiculos_propostas vp
             LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
                 AND eu.NOME = vp.VENDEDOR
@@ -3221,7 +3251,8 @@ def list_propostas():
                 'nome_cliente': row[3],
                 'descricao_modelo': row[4],
                 'valor_proposta': float(row[5]) if row[5] else None,
-                'id_processo': row[6]
+                'id_processo': row[6],
+                'repasse': row[7]
             }
             retorno['propostas'].append(proposta)
         retorno['total'] = total
