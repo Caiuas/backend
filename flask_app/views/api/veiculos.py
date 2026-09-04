@@ -2339,6 +2339,87 @@ def update_andamento_por_proposta(cod_proposta):
         except:
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/veiculos/processo/repasse/<int:id_processo>', methods=['POST'])
+@token_required
+def update_repasse_processo(id_processo):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email', '').strip().lower()
+        permissao = '50190'
+
+        conn, cur = oracle()
+
+        query = f"""
+            SELECT saf2.COD_ACESSO
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf2 ON 1=1
+                    AND saf2.COD_FUNCAO = eu.COD_FUNCAO
+                WHERE 1=1
+                    AND eu.DEMITIDO <> 'S'
+                    AND saf2.COD_ACESSO = '{permissao}'
+                    AND lower(eu.EMAIl) = '{email}'
+                GROUP BY saf2.COD_ACESSO
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não tem permissão - 50190'}), 403
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
+        if cur.fetchone()[0] == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 404
+
+        data = request.get_json(silent=True) or {}
+        repasse = data.get('repasse', None)
+        if isinstance(repasse, str):
+            repasse = repasse.strip().upper()
+            if repasse == '':
+                repasse = None
+
+        if repasse is None:
+            query = f"""
+                UPDATE CAIUAS_VEIC_PROC
+                SET repasse = NULL,
+                    updated_at = SYSDATE
+                WHERE id_processo = {id_processo}
+            """
+        elif repasse == 'S':
+            query = f"""
+                UPDATE CAIUAS_VEIC_PROC
+                SET repasse = 'S',
+                    updated_at = SYSDATE
+                WHERE id_processo = {id_processo}
+            """
+        else:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': "Campo repasse inválido. Use 'S' ou null"}), 400
+
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({'status': 'success', 'message': 'Repasse atualizado com sucesso', 'id_processo': id_processo, 'repasse': repasse}), 200
+    except Exception as e:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     
 @veiculos_bp.route('/api/veiculos/processos/<int:id_processo>/proposta', methods=['PUT'])
 @token_required
