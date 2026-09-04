@@ -2408,6 +2408,34 @@ def update_repasse_processo(id_processo):
             return jsonify({'status': 'error', 'message': "Campo repasse inválido. Use 'S' ou null"}), 400
 
         cur.execute(query)
+
+        query = f"""
+            SELECT eu.NOME
+            FROM empresas_usuarios eu
+            WHERE lower(eu.EMAIL) = '{email}'
+            ORDER BY eu.cod_empresa
+        """
+        cur.execute(query)
+        user_rows = cur.fetchall()
+        nome_responsavel = user_rows[0][0] if user_rows else email
+        nome_safe = str(nome_responsavel).replace("'", "''")
+
+        if repasse == 'S':
+            chat_msg = f"{nome_safe} marcou veículo como repasse"
+        else:
+            chat_msg = f"{nome_safe} removeu veículo do repasse"
+
+        query = f"""
+            INSERT INTO caiuas_veic_proc_chat (id_processo, message, cod_proposta, responsible)
+            SELECT
+                {id_processo},
+                '{chat_msg}',
+                cod_proposta,
+                '{nome_safe}'
+            FROM caiuas_veic_proc
+            WHERE id_processo = {id_processo}
+        """
+        cur.execute(query)
         conn.commit()
         cur.close()
         conn.close()
