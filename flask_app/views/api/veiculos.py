@@ -6,6 +6,7 @@ from uuid import UUID
 from auth import token_required
 import boto3
 import jpype
+import json
 load_dotenv()
 
 veiculos_bp = Blueprint('veiculos', __name__)
@@ -245,8 +246,12 @@ def get_veiculos_aguardando_faturamento():
                 vp.DATA_VENDA,
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
-                cvp.ANDAMENTO,
-                cvp.REPASSE
+                cvp.OBS_FATURAMENTO,
+                cvp.OBS_ENTREGA,
+                cvp.OBS_LIBERACAO,
+                cvp.OBS_DOCUMENTACAO,
+                cvp.REPASSE,
+                NVL(etapas.json_etapas, '[]') AS status_processo_etapas
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -292,6 +297,19 @@ def get_veiculos_aguardando_faturamento():
                 AND ea.COD_PROPOSTA = vp.COD_PROPOSTA
             left join caiuas_veic_proc cvp on 1=1
                 and cvp.cod_proposta = vp.cod_proposta
+            LEFT JOIN (
+                SELECT
+                    ID_PROCESSO,
+                    '[' || LISTAGG('{{"categoria":"' || CATEGORIA || '","status":"' || STATUS || '"}}', ',')
+                           WITHIN GROUP (ORDER BY CATEGORIA, STATUS) || ']' AS json_etapas
+                FROM (
+                    SELECT DISTINCT ID_PROCESSO, CATEGORIA, STATUS
+                    FROM CAIUAS_VEIC_PROC_ETAPAS
+                    WHERE ID_PROCESSO IS NOT NULL
+                )
+                GROUP BY ID_PROCESSO
+            ) etapas ON 1=1
+                AND etapas.ID_PROCESSO = cvp.ID_PROCESSO
             WHERE vp.STATUS_PROPOSTA NOT IN ('C','V')
                 AND TRUNC(vp.EMISSAO ) >= TO_DATE('2024-01-01', 'YYYY-MM-DD')
                 {filtro_vendedor}
@@ -351,9 +369,27 @@ def get_veiculos_aguardando_faturamento():
                 'data_faturamento': format_date(row[17]),
                 'agenda_entrega': format_date(row[18]),
                 'data_entrega': format_date(row[19]),
-                'andamento_processo': row[20],
-                'repasse': row[21],
+                'obs_faturamento': _read_clob(row[20]) or None,
+                'obs_entrega': _read_clob(row[21]) or None,
+                'obs_liberacao': _read_clob(row[22]) or None,
+                'obs_documentacao': _read_clob(row[23]) or None,
+                'repasse': row[24],
+                'status_processo_etapas': [],
             }
+            try:
+                raw_etapas = row[25]
+                if raw_etapas is None:
+                    raw_etapas = '[]'
+                elif hasattr(raw_etapas, 'read'):
+                    raw_etapas = raw_etapas.read()
+                elif hasattr(raw_etapas, 'getSubString'):
+                    length = int(raw_etapas.length())
+                    raw_etapas = str(raw_etapas.getSubString(jpype.JLong(1), length))
+                else:
+                    raw_etapas = str(raw_etapas)
+                veiculo['status_processo_etapas'] = json.loads(raw_etapas) if raw_etapas else []
+            except Exception:
+                veiculo['status_processo_etapas'] = []
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
                 WHERE chassi_completo = '{veiculo["chassi_completo"]}'
@@ -662,6 +698,12 @@ def veiculos_faturados():
         else:
             filtro_repasse = "AND (cvp.REPASSE IS NULL OR cvp.REPASSE <> 'S')"
 
+        sem_entrega = (request.args.get('sem_entrega') or '').strip().upper()
+        if sem_entrega == 'S':
+            filtro_sem_entrega = 'AND ea.DATA_BAIXA IS NULL'
+        else:
+            filtro_sem_entrega = ''
+
         if not current_page or current_page < 1 or not limit or limit < 1:
             return jsonify({
                 'status': 'error',
@@ -810,8 +852,12 @@ def veiculos_faturados():
                 cvp.status,
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
-                cvp.ANDAMENTO,
+                cvp.OBS_FATURAMENTO,
+                cvp.OBS_ENTREGA,
+                cvp.OBS_LIBERACAO,
+                cvp.OBS_DOCUMENTACAO,
                 cvp.REPASSE,
+                NVL(etapas.json_etapas, '[]') AS status_processo_etapas,
                 COUNT(*) OVER() AS total
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
@@ -854,12 +900,33 @@ def veiculos_faturados():
                 AND TO_CHAR(ea.CHASSI_RESUMIDO) = TO_CHAR(v.CHASSI_RESUMIDO)
             left join caiuas_veic_proc cvp on 1=1
                 and cvp.cod_proposta = vp.cod_proposta
+            LEFT JOIN (
+            SELECT 
+                ID_PROCESSO,
+                '[' || LISTAGG('{{"categoria":"' || CATEGORIA || '","status":"' || status_categoria || '"}}', ',') 
+                       WITHIN GROUP (ORDER BY CATEGORIA) || ']' AS json_etapas
+            FROM (
+                SELECT 
+                    ID_PROCESSO, 
+                    CATEGORIA,
+                    CASE 
+                        WHEN COUNT(CASE WHEN STATUS <> 'Autorizado' OR STATUS IS NULL THEN 1 END) = 0 
+                        THEN 'Autorizado'
+                        ELSE 'Pendente'
+                    END AS status_categoria
+                FROM CAIUAS_VEIC_PROC_ETAPAS
+                WHERE ID_PROCESSO IS NOT NULL
+                GROUP BY ID_PROCESSO, CATEGORIA
+            )
+            GROUP BY ID_PROCESSO
+        ) etapas ON etapas.ID_PROCESSO = cvp.ID_PROCESSO
             WHERE v.status = 'V'
                 AND TO_CHAR(v.cod_cliente) <> '22534303000127'
                 {filtros_periodo}
                 {filtro_vendedor}
                 {filtro_busca}
                 {filtro_repasse}
+                {filtro_sem_entrega}
             ORDER BY {order_by_field} DESC NULLS LAST, pm.DESCRICAO_MODELO
                 ) resultado
                 WHERE ROWNUM <= {end_row}
@@ -879,7 +946,7 @@ def veiculos_faturados():
                 'total_pages': 0,
                 'total': 0
             }), 200
-        total = result[0][23]
+        total = result[0][27]
         retorno = {
             'veiculos': [],
             'current_page': current_page,
@@ -935,9 +1002,27 @@ def veiculos_faturados():
                 'data_entrega': format_date(row[20]),
                 'id_processo': row[17] if row[17] else None,
                 'status_processo': row[18] if row[18] else 'Não Iniciado',
-                'andamento_processo': row[21],
-                'repasse': row[22],
+                'obs_faturamento': _read_clob(row[21]) or None,
+                'obs_entrega': _read_clob(row[22]) or None,
+                'obs_liberacao': _read_clob(row[23]) or None,
+                'obs_documentacao': _read_clob(row[24]) or None,
+                'repasse': row[25],
+                'status_processo_etapas': [],
             }
+            try:
+                raw_etapas = row[26]
+                if raw_etapas is None:
+                    raw_etapas = '[]'
+                elif hasattr(raw_etapas, 'read'):
+                    raw_etapas = raw_etapas.read()
+                elif hasattr(raw_etapas, 'getSubString'):
+                    length = int(raw_etapas.length())
+                    raw_etapas = str(raw_etapas.getSubString(jpype.JLong(1), length))
+                else:
+                    raw_etapas = str(raw_etapas)
+                veiculo['status_processo_etapas'] = json.loads(raw_etapas) if raw_etapas else []
+            except Exception:
+                veiculo['status_processo_etapas'] = []
             query = f"""
             SELECT cav.DESCRICAO  FROM CAIUAS_ANDAMENTO_VEICULO cav
                 WHERE chassi_completo = '{veiculo["chassi_completo"]}'
@@ -1545,7 +1630,10 @@ def list_processos():
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
                 COALESCE(v.CHASSI_COMPLETO, vp.CHASSI_RESUMIDO) chassi,
-                cvp.ANDAMENTO,
+                cvp.OBS_FATURAMENTO,
+                cvp.OBS_ENTREGA,
+                cvp.OBS_LIBERACAO,
+                cvp.OBS_DOCUMENTACAO,
                 cvp.REPASSE
             FROM caiuas_veic_proc cvp
             LEFT JOIN clientes c ON 1=1
@@ -1600,8 +1688,11 @@ def list_processos():
                 'data_agendamento': format_oracle_date(row[18]),
                 'data_entrega': format_oracle_date(row[19]),
                 'chassi': row[20],
-                'andamento': row[21],
-                'repasse': row[22],
+                'obs_faturamento': _read_clob(row[21]) or None,
+                'obs_entrega': _read_clob(row[22]) or None,
+                'obs_liberacao': _read_clob(row[23]) or None,
+                'obs_documentacao': _read_clob(row[24]) or None,
+                'repasse': row[25],
             }
             
             if processo['tipo'] == 1:
@@ -2044,7 +2135,10 @@ def show_processo(id_processo):
                 pm.DESCRICAO_MODELO modelo,
                 COALESCE(ce.DESCRICAO, ce2.DESCRICAO) cor,
                 v.ANO_MODELO,
-                cvp.ANDAMENTO,
+                cvp.OBS_FATURAMENTO,
+                cvp.OBS_ENTREGA,
+                cvp.OBS_LIBERACAO,
+                cvp.OBS_DOCUMENTACAO,
                 cvp.REPASSE
             FROM caiuas_veic_proc cvp
                 LEFT JOIN clientes c ON 1=1
@@ -2103,8 +2197,11 @@ def show_processo(id_processo):
                 'modelo': row[18],
                 'cor': row[19],
                 'ano_modelo': row[20],
-                'andamento': row[21],
-                'repasse': row[22],
+                'obs_faturamento': _read_clob(row[21]) or None,
+                'obs_entrega': _read_clob(row[22]) or None,
+                'obs_liberacao': _read_clob(row[23]) or None,
+                'obs_documentacao': _read_clob(row[24]) or None,
+                'repasse': row[25],
             }
             
             if processo['tipo'] == 1:
@@ -2332,6 +2429,87 @@ def update_andamento_por_proposta(cod_proposta):
         conn.close()
 
         return jsonify({'status': 'success', 'message': 'Andamento atualizado com sucesso'}), 200
+    except Exception as e:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/veiculos/observacao/<cod_proposta>', methods=['PUT'])
+@token_required
+def update_observacao_por_proposta(cod_proposta):
+    try:
+        token_data = request.token_data
+        email = token_data.get('email', '').strip().lower()
+        usuario = email.split('@')[0] if '@' in email else email
+
+        permissoes = {
+            'obs_faturamento': {'pablo.ti', 'franciele.mayer', 'tais.schrepel'},
+            'obs_entrega': {'pablo.ti', 'fernanda.suzuki'},
+            'obs_liberacao': {'pablo.ti', 'vanessa.vilela'},
+            'obs_documentacao': {'franciele.mayer', 'flavia', 'pablo.ti', 'fernanda.cristina'},
+        }
+        colunas = {
+            'obs_faturamento': 'OBS_FATURAMENTO',
+            'obs_entrega': 'OBS_ENTREGA',
+            'obs_liberacao': 'OBS_LIBERACAO',
+            'obs_documentacao': 'OBS_DOCUMENTACAO',
+        }
+
+        data = request.get_json(silent=True) or {}
+        campos = [campo for campo in colunas if campo in data]
+
+        if not campos:
+            return jsonify({'status': 'error', 'message': 'Informe ao menos um campo: obs_faturamento, obs_entrega, obs_liberacao ou obs_documentacao'}), 400
+
+        sem_permissao = [campo for campo in campos if usuario not in permissoes[campo]]
+        if sem_permissao:
+            return jsonify({'status': 'error', 'message': f"Usuário não autorizado para atualizar: {', '.join(sem_permissao)}"}), 403
+
+        cod_proposta_safe = str(cod_proposta).replace("'", "''")
+
+        conn, cur = oracle()
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC
+            WHERE cod_proposta = '{cod_proposta_safe}'
+        """
+        cur.execute(query)
+        total = cur.fetchone()[0]
+
+        if total == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Processo não encontrado para a proposta informada'}), 404
+
+        sets = []
+        for campo in campos:
+            valor = data.get(campo)
+            if valor is None or (isinstance(valor, str) and not valor.strip()):
+                sets.append(f"{colunas[campo]} = NULL")
+            elif isinstance(valor, str):
+                valor_safe = valor.replace("'", "''")
+                sets.append(f"{colunas[campo]} = '{valor_safe}'")
+            else:
+                cur.close()
+                conn.close()
+                return jsonify({'status': 'error', 'message': f"Campo {campo} inválido. Use texto ou null"}), 400
+
+        query = f"""
+            UPDATE CAIUAS_VEIC_PROC
+            SET {', '.join(sets)},
+                updated_at = SYSDATE
+            WHERE cod_proposta = '{cod_proposta_safe}'
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({'status': 'success', 'message': 'Observação atualizada com sucesso', 'campos': campos}), 200
     except Exception as e:
         try:
             cur.close()
@@ -3322,7 +3500,7 @@ def list_propostas():
                 )
             """
         query = f"""
-        SELECT vp.COD_PROPOSTA, vp.EMISSAO,c.COD_CLIENTE, c.NOME nome_cliente, pm.DESCRICAO_MODELO, vp.VALOR_PROPOSTA,cvp.ID_PROCESSO, cvp.REPASSE
+        SELECT vp.COD_PROPOSTA, vp.EMISSAO,c.COD_CLIENTE, c.NOME nome_cliente, pm.DESCRICAO_MODELO, vp.VALOR_PROPOSTA,cvp.ID_PROCESSO, cvp.REPASSE, cvp.OBS_FATURAMENTO, cvp.OBS_ENTREGA, cvp.OBS_LIBERACAO, cvp.OBS_DOCUMENTACAO
             FROM veiculos_propostas vp
             LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
                 AND eu.NOME = vp.VENDEDOR
@@ -3361,7 +3539,11 @@ def list_propostas():
                 'descricao_modelo': row[4],
                 'valor_proposta': float(row[5]) if row[5] else None,
                 'id_processo': row[6],
-                'repasse': row[7]
+                'repasse': row[7],
+                'obs_faturamento': _read_clob(row[8]) or None,
+                'obs_entrega': _read_clob(row[9]) or None,
+                'obs_liberacao': _read_clob(row[10]) or None,
+                'obs_documentacao': _read_clob(row[11]) or None
             }
             retorno['propostas'].append(proposta)
         retorno['total'] = total
