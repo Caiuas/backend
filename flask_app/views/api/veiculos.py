@@ -3064,6 +3064,7 @@ def add_chat_processo():
         id_processo = request.json.get('id_processo', None)
         mensagem = request.json.get('message', None)
         cod_proposta = request.json.get('cod_proposta', None)
+        id_etapa = request.json.get('id_etapa', None)
         conn, cur = oracle()
         query = f"""
             SELECT eu.NOME
@@ -3077,11 +3078,29 @@ def add_chat_processo():
             cur.close()
             conn.close()
             return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+
+        if id_etapa is not None:
+            query = f"""
+                SELECT COUNT(*)
+                FROM CAIUAS_VEIC_PROC_ETAPAS
+                WHERE id_etapa = {id_etapa}
+            """
+            cur.execute(query)
+            if cur.fetchone()[0] == 0:
+                cur.close()
+                conn.close()
+                return jsonify({'status': 'error', 'message': 'Etapa não encontrada'}), 404
+
+            coluna_id_etapa = ', id_etapa'
+            valor_id_etapa = f', {id_etapa}'
+        else:
+            coluna_id_etapa = ''
+            valor_id_etapa = ''
         
         query = f"""
             INSERT INTO caiuas_veic_proc_chat 
-            (responsible, id_processo, cod_proposta, message)
-            VALUES ('{rows[0][0]}', '{id_processo}', '{cod_proposta}', '{mensagem}')
+            (responsible, id_processo, cod_proposta, message{coluna_id_etapa})
+            VALUES ('{rows[0][0]}', '{id_processo}', '{cod_proposta}', '{mensagem}'{valor_id_etapa})
         """
         cur.execute(query)
         conn.commit()
