@@ -251,7 +251,8 @@ def get_veiculos_aguardando_faturamento():
                 cvp.OBS_LIBERACAO,
                 cvp.OBS_DOCUMENTACAO,
                 cvp.REPASSE,
-                NVL(etapas.json_etapas, '[]') AS status_processo_etapas
+                NVL(etapas.json_etapas, '[]') AS status_processo_etapas,
+                ea.local_entrega
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -289,8 +290,11 @@ def get_veiculos_aguardando_faturamento():
                 SELECT
                     ea.COD_PROPOSTA,
                     MAX(ea.DATA_AGENDADA) DATA_AGENDADA,
-                    MAX(ea.DATA_BAIXA) DATA_BAIXA
+                    MAX(ea.DATA_BAIXA) DATA_BAIXA,
+                    MAX(es.DESCRICAO_SALA) local_entrega
                 FROM EV_AGENDADOS ea
+                LEFT JOIN EV_SALAS es ON 1=1
+                    AND es.cod_sala = ea.COD_SALA
                 WHERE ea.STATUS <> 'C'
                 GROUP BY ea.COD_PROPOSTA
             ) ea ON 1=1
@@ -375,6 +379,7 @@ def get_veiculos_aguardando_faturamento():
                 'obs_documentacao': _read_clob(row[23]) or None,
                 'repasse': row[24],
                 'status_processo_etapas': [],
+                'local_entrega': row[26],
             }
             try:
                 raw_etapas = row[25]
@@ -687,6 +692,7 @@ def veiculos_faturados():
         final_data_entrega = request.args.get('final_data_entrega')
         order_by = request.args.get('order_by', 'data_faturamento')
         search = request.args.get('search', '').strip()
+        cod_sala = request.args.get('cod_sala', type=int)
         current_page = request.args.get('current_page', 1, type=int)
         limit = request.args.get('limit', 100, type=int)
         token_data = request.token_data
@@ -703,6 +709,14 @@ def veiculos_faturados():
             filtro_sem_entrega = 'AND ea.DATA_BAIXA IS NULL'
         else:
             filtro_sem_entrega = ''
+
+        if request.args.get('cod_sala') and cod_sala is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'cod_sala deve ser um número inteiro'
+            }), 400
+
+        filtro_sala = f'AND es.cod_sala = {cod_sala}' if cod_sala is not None else ''
 
         if not current_page or current_page < 1 or not limit or limit < 1:
             return jsonify({
@@ -858,6 +872,7 @@ def veiculos_faturados():
                 cvp.OBS_DOCUMENTACAO,
                 cvp.REPASSE,
                 NVL(etapas.json_etapas, '[]') AS status_processo_etapas,
+                es.DESCRICAO_SALA AS local_entrega,
                 COUNT(*) OVER() AS total
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
@@ -898,6 +913,8 @@ def veiculos_faturados():
 				AND ea.QUEM_CANCELOU IS NULL
                 AND TO_CHAR(ea.COD_PROPOSTA) = TO_CHAR(vp.COD_PROPOSTA)
                 AND TO_CHAR(ea.CHASSI_RESUMIDO) = TO_CHAR(v.CHASSI_RESUMIDO)
+            left join EV_SALAS es on 1=1
+                and es.cod_sala = ea.cod_sala
             left join caiuas_veic_proc cvp on 1=1
                 and cvp.cod_proposta = vp.cod_proposta
             LEFT JOIN (
@@ -927,6 +944,7 @@ def veiculos_faturados():
                 {filtro_busca}
                 {filtro_repasse}
                 {filtro_sem_entrega}
+                {filtro_sala}
             ORDER BY {order_by_field} DESC NULLS LAST, pm.DESCRICAO_MODELO
                 ) resultado
                 WHERE ROWNUM <= {end_row}
@@ -946,7 +964,7 @@ def veiculos_faturados():
                 'total_pages': 0,
                 'total': 0
             }), 200
-        total = result[0][27]
+        total = result[0][28]
         retorno = {
             'veiculos': [],
             'current_page': current_page,
@@ -1008,6 +1026,7 @@ def veiculos_faturados():
                 'obs_documentacao': _read_clob(row[24]) or None,
                 'repasse': row[25],
                 'status_processo_etapas': [],
+                'local_entrega': row[27],
             }
             try:
                 raw_etapas = row[26]
@@ -1799,9 +1818,17 @@ def create_processos():
                 explicacao,
                 null,
                 categoria
-            FROM CAIUAS_VEIC_PROC_ET_MOD
-            WHERE 1=1
-                AND tipo = {tipo}
+            FROM (
+                SELECT
+                    nome_etapa,
+                    autorizadores,
+                    explicacao,
+                    categoria,
+                    ROW_NUMBER() OVER (PARTITION BY nome_etapa ORDER BY ROWID) AS ordem
+                FROM CAIUAS_VEIC_PROC_ET_MOD
+                WHERE tipo = {tipo}
+            )
+            WHERE ordem = 1
         """
         cur.execute(query)
         conn.commit()
@@ -1850,6 +1877,18 @@ def create_etapa_processo(id_processo):
             cur.close()
             conn.close()
             return jsonify({'status': 'error', 'message': 'Processo não encontrado'}), 404
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM CAIUAS_VEIC_PROC_ETAPAS
+            WHERE id_processo = {id_processo}
+              AND nome_etapa = '{nome_etapa}'
+        """
+        cur.execute(query)
+        if cur.fetchone()[0] > 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Já existe uma etapa com este nome no processo'}), 400
 
         query = """
             SELECT NVL(MAX(id_etapa), 0) + 1
