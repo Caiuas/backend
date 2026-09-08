@@ -89,6 +89,7 @@ def get_veiculos_estoque():
                 c.NOME nome_cliente,
                 CASE 
                     WHEN v.novo_usado = 'U' THEN 'Usado'
+                    WHEN v.COD_PROPOSTA_INTERNET IS NOT NULL OR vp.INTERNET = 'F' THEN 'Direta'
                     ELSE
                         'Novo'
                 END novo_usado
@@ -237,6 +238,7 @@ def get_veiculos_aguardando_faturamento():
                 c.NOME nome_cliente,
                 CASE 
                     WHEN v.novo_usado = 'U' THEN 'Usado'
+                    WHEN v.COD_PROPOSTA_INTERNET IS NOT NULL OR vp.INTERNET = 'F' THEN 'Direta'
                     ELSE
                         'Novo'
                 END novo_usado,
@@ -851,7 +853,7 @@ def veiculos_faturados():
                 c.NOME nome_cliente,
                 CASE 
                     WHEN v.novo_usado = 'U' THEN 'Usado'
-                    WHEN v.COD_PROPOSTA_INTERNET IS NOT NULL THEN 'Direta'
+                    WHEN v.COD_PROPOSTA_INTERNET IS NOT NULL OR vp.INTERNET = 'F' THEN 'Direta'
                     ELSE
                         'Novo'
                 END novo_usado,
