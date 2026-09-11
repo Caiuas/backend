@@ -540,16 +540,16 @@ def render():
     st.dataframe(eventos_por_modelo, hide_index=True)
     
     # Tabela: Passagens Varejo - CRIS (apenas tipo 785)
-    st.subheader("Passagens Varejo - CRIS")
-    df_varejo_cris = df[df['COD_TIPO_EVENTO'].isin(['785','815','810'])]
-    varejo_cris_por_modelo = (
-        df_varejo_cris.groupby('VEICULO')['COD_EVENTO']
-        .count()
-        .reset_index()
-        .rename(columns={'VEICULO': 'Modelo', 'COD_EVENTO': 'Quantidade'})
-        .sort_values('Quantidade', ascending=False)
-    )
-    st.dataframe(varejo_cris_por_modelo, hide_index=True)
+    # st.subheader("Passagens Varejo - CRIS")
+    # df_varejo_cris = df[df['COD_TIPO_EVENTO'].isin(['785','815','810'])]
+    # varejo_cris_por_modelo = (
+    #     df_varejo_cris.groupby('VEICULO')['COD_EVENTO']
+    #     .count()
+    #     .reset_index()
+    #     .rename(columns={'VEICULO': 'Modelo', 'COD_EVENTO': 'Quantidade'})
+    #     .sort_values('Quantidade', ascending=False)
+    # )
+    # st.dataframe(varejo_cris_por_modelo, hide_index=True)
     
     st.subheader("Eventos")
     st.dataframe(
