@@ -26,7 +26,8 @@ ALLOWED_REMOVER_DESCARTE_EMAILS = [
     'stefany.araujo@caiuas.com.br',
     'nathalli.pereira@caiuas.com.br',
     'fabiane.zanzin@caiuas.com.br',
-    'paulo.rocha@caiuas.com.br'
+    'paulo.rocha@caiuas.com.br',
+    'bianca.pinheiro@caiuas.com.br'
 ]
 
 def processar_obs_memo(obs_memo):
