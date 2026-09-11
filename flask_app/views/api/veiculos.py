@@ -255,7 +255,8 @@ def get_veiculos_aguardando_faturamento():
                 cvp.REPASSE,
                 NVL(etapas.json_etapas, '[]') AS status_processo_etapas,
                 ea.local_entrega,
-                cvp.OBS_ISENCAO
+                cvp.OBS_ISENCAO,
+                cvp.DATA_SOLICITACAO
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -322,7 +323,7 @@ def get_veiculos_aguardando_faturamento():
                 {filtro_vendedor}
                 {filtro_repasse}
             ORDER BY CASE WHEN v.CHASSI_COMPLETO IS NOT NULL THEN 0 ELSE 1 END,
-    vp.EMISSAO DESC
+    cvp.DATA_SOLICITACAO,vp.EMISSAO DESC
         """
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
@@ -384,6 +385,8 @@ def get_veiculos_aguardando_faturamento():
                 'status_processo_etapas': [],
                 'local_entrega': row[26],
                 'obs_isencao': _read_clob(row[27]) or None,
+                'data_solicitacao': format_date(row[28]),
+                'placa_usado': None,
             }
             try:
                 raw_etapas = row[25]
@@ -412,18 +415,29 @@ def get_veiculos_aguardando_faturamento():
                 veiculo['andamento'] = andamento_result[0]
             
             query = f"""
-                SELECT count(*) FROM VEIC_FORMAS_PAGAMENTO vfp
+                SELECT vfp.cod_avaliacao FROM VEIC_FORMAS_PAGAMENTO vfp
                 LEFT JOIN FORMA_PGTO fp ON 1=1
                     AND fp.cod_empresa = vfp.COD_EMPRESA 
                     AND fp.COD_FORMA_PGTO = vfp.COD_FORMA_PGTO 
                 WHERE 1=1
+                    AND (vfp.cod_avaliacao IS NOT NULL AND vfp.COD_AVALIACAO <> 0)
                     AND vfp.cod_proposta = '{veiculo["cod_proposta"]}'
                     AND lower(descricao) LIKE ('%usado%')
             """
             cur_oracle.execute(query)
-            usado_result = cur_oracle.fetchone()
-            if usado_result and usado_result[0] > 0:
+            avaliacoes_result = cur_oracle.fetchall()
+            if avaliacoes_result:
                 veiculo['usado'] = True
+                cod_avaliacoes = ', '.join(f"'{a[0]}'" for a in avaliacoes_result)
+                query = f"""
+                    SELECT fu.PLACA FROM FU_USADOS fu 
+                        WHERE 1=1
+                            AND fu.COD_AVALIACAO IN ({cod_avaliacoes})
+                """
+                cur_oracle.execute(query)
+                placas_result = cur_oracle.fetchall()
+                if placas_result:
+                    veiculo['placa_usado'] = ', '.join([p[0] for p in placas_result if p[0]])
             
             retorno['veiculos'].append(veiculo)
         cur_oracle.close()
@@ -879,6 +893,7 @@ def veiculos_faturados():
                 es.DESCRICAO_SALA AS local_entrega,
                 v.COD_EMPRESA AS cod_empresa_veiculo,
                 cvp.OBS_ISENCAO,
+                cvp.DATA_SOLICITACAO,
                 COUNT(*) OVER() AS total
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
@@ -970,7 +985,7 @@ def veiculos_faturados():
                 'total_pages': 0,
                 'total': 0
             }), 200
-        total = result[0][30]
+        total = result[0][31]
         retorno = {
             'veiculos': [],
             'current_page': current_page,
@@ -1044,6 +1059,8 @@ def veiculos_faturados():
                 'local_entrega': row[27],
                 'cod_empresa_veiculo': row[28],
                 'obs_isencao': _read_clob(row[29]) or None,
+                'data_solicitacao': format_date(row[30]),
+                'placa_usado': None,
             }
             try:
                 raw_etapas = row[26]
@@ -1072,18 +1089,29 @@ def veiculos_faturados():
                 veiculo['andamento'] = andamento_result[0]
             
             query = f"""
-                SELECT count(*) FROM VEIC_FORMAS_PAGAMENTO vfp
+                SELECT vfp.cod_avaliacao FROM VEIC_FORMAS_PAGAMENTO vfp
                 LEFT JOIN FORMA_PGTO fp ON 1=1
                     AND fp.cod_empresa = vfp.COD_EMPRESA 
                     AND fp.COD_FORMA_PGTO = vfp.COD_FORMA_PGTO 
                 WHERE 1=1
+                    AND (vfp.cod_avaliacao IS NOT NULL AND vfp.COD_AVALIACAO <> 0)
                     AND vfp.cod_proposta = '{veiculo["cod_proposta"]}'
                     AND lower(descricao) LIKE ('%usado%')
             """
             cur_oracle.execute(query)
-            usado_result = cur_oracle.fetchone()
-            if usado_result and usado_result[0] > 0:
+            avaliacoes_result = cur_oracle.fetchall()
+            if avaliacoes_result:
                 veiculo['usado'] = True
+                cod_avaliacoes = ', '.join(f"'{a[0]}'" for a in avaliacoes_result)
+                query = f"""
+                    SELECT fu.PLACA FROM FU_USADOS fu 
+                        WHERE 1=1
+                            AND fu.COD_AVALIACAO IN ({cod_avaliacoes})
+                """
+                cur_oracle.execute(query)
+                placas_result = cur_oracle.fetchall()
+                if placas_result:
+                    veiculo['placa_usado'] = ', '.join([p[0] for p in placas_result if p[0]])
             retorno['veiculos'].append(veiculo)
         cur_oracle.close()
         conn_oracle.close()
@@ -3076,6 +3104,7 @@ def solicita_faturamento_processo(id_processo):
         query = f"""
             UPDATE caiuas_veic_proc
             SET status = 'Solicitado Faturamento',
+                data_solicitacao = CURRENT_TIMESTAMP,
                 updated_at = SYSDATE
             WHERE id_processo = {id_processo}
         """
@@ -3774,7 +3803,8 @@ def get_proposta_details(cod_proposta):
             'valor_proposta': float(r[0][18]) if r[0][18] else None,
             'desconto_incondicional': float(r[0][19]) if r[0][19] else None,
             'observacao': r[0][20],
-            'vendedor': r[0][21]
+            'vendedor': r[0][21],
+            'placa_usado': None
         }
         # se internet = F e novo_usado = N tipo_proposta = Frotista
         # se internet = N e novo_usado = N tipo_proposta = Novo
@@ -3807,6 +3837,30 @@ def get_proposta_details(cod_proposta):
         # se proposta['observacao'] for vazio substitua pelo valor de observacoes
         if proposta['observacao'] is None or proposta['observacao'] == '':
             proposta['observacao'] = proposta['observacoes']
+        
+        query = f"""
+            SELECT vfp.cod_avaliacao FROM VEIC_FORMAS_PAGAMENTO vfp
+            LEFT JOIN FORMA_PGTO fp ON 1=1
+                AND fp.cod_empresa = vfp.COD_EMPRESA 
+                AND fp.COD_FORMA_PGTO = vfp.COD_FORMA_PGTO 
+            WHERE 1=1
+                AND (vfp.cod_avaliacao IS NOT NULL AND vfp.COD_AVALIACAO <> 0)
+                AND vfp.cod_proposta = '{cod_proposta}'
+                AND lower(descricao) LIKE ('%usado%')
+        """
+        cur.execute(query)
+        avaliacoes_result = cur.fetchall()
+        if avaliacoes_result:
+            cod_avaliacoes = ', '.join(f"'{a[0]}'" for a in avaliacoes_result)
+            query = f"""
+                SELECT fu.PLACA FROM FU_USADOS fu 
+                    WHERE 1=1
+                        AND fu.COD_AVALIACAO IN ({cod_avaliacoes})
+            """
+            cur.execute(query)
+            placas_result = cur.fetchall()
+            if placas_result:
+                proposta['placa_usado'] = ', '.join([p[0] for p in placas_result if p[0]])
         
         query = f"""
             SELECT fp.descricao descricao_forma_pgto, 
