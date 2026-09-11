@@ -3954,6 +3954,22 @@ def recebe_veiculo():
         conn, cur = oracle()
 
         query = f"""
+            SELECT eu.NOME FROM EMPRESAS_USUARIOS eu 
+            LEFT JOIN EMPRESAS_FUNCOES ef ON 1=1
+                AND ef.COD_FUNCAO = eu.COD_FUNCAO 
+            WHERE 1=1
+                AND eu.DEMITIDO <> 'S'
+                AND eu.COD_FUNCAO IN (28,21,1)
+                AND lower(eu.EMAIL) = '{email}'
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não autorizado a receber veículos'}), 403
+
+        query = f"""
             SELECT count(*) FROM veiculos v
             WHERE 1=1
                 AND v.COD_EMPRESA = '{cod_empresa}'
@@ -3983,18 +3999,6 @@ def recebe_veiculo():
             conn.close()
             return jsonify({'status': 'error', 'code': 4000, 'message': 'Já existe recebimento'}), 400
 
-        query = f"""
-            SELECT eu.NOME
-            FROM empresas_usuarios eu
-            WHERE lower(eu.EMAIL) = '{email}'
-            order by eu.cod_empresa
-        """
-        cur.execute(query)
-        rows = cur.fetchall()
-        if len(rows) == 0:
-            cur.close()
-            conn.close()
-            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
         quem_recebeu = rows[0][0]
 
         query = f"""
@@ -4007,6 +4011,100 @@ def recebe_veiculo():
         conn.close()
 
         return jsonify({'status': 'success', 'message': 'Veículo recebido com sucesso'}), 200
+    except Exception as e:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+@veiculos_bp.route('/api/veiculos/consulta_veiculo', methods=['GET'])
+@token_required
+def consulta_veiculo():
+    try:
+        chassi = request.args.get('chassi')
+        if not chassi:
+            return jsonify({'status': 'error', 'message': 'chassi é obrigatório'}), 400
+
+        current_page = request.args.get('current_page', 1, type=int)
+        limit = 200
+
+        if not current_page or current_page < 1:
+            return jsonify({'status': 'error', 'message': 'current_page deve ser um número inteiro maior que zero'}), 400
+
+        conn, cur = oracle()
+
+        query = f"""
+            SELECT count(*)
+                FROM veiculos v
+                WHERE lower(v.CHASSI_COMPLETO) like '%{chassi.lower()}%'
+                AND v.STATUS IN ('E','V')
+        """
+        cur.execute(query)
+        total = cur.fetchone()[0]
+
+        if total == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Veículo não encontrado'}), 404
+
+        total_pages = (total + limit - 1) // limit
+        start_row = (current_page - 1) * limit + 1
+        end_row = current_page * limit
+
+        query = f"""
+            SELECT *
+                FROM (
+                    SELECT t.*, ROWNUM AS rn
+                    FROM (
+                        SELECT v.cod_empresa, v.cod_modelo, v.cod_produto, v.chassi_resumido, v.DATA_ENTRADA, pm.DESCRICAO_MODELO, ce.DESCRICAO cor, e.NOME, crv.quem_recebeu, crv.created_at data_recebimento
+                            FROM veiculos v
+                            LEFT JOIN produtos_modelos pm ON 1=1
+                                AND pm.COD_PRODUTO = v.COD_PRODUTO 
+                                AND pm.COD_MODELO = v.COD_MODELO 
+                            LEFT JOIN EMPRESAS e ON 1=1
+                                AND e.COD_EMPRESA = v.COD_EMPRESA
+                            LEFT JOIN CORES_EXTERNAS ce ON 1=1
+                                AND ce.COR_EXTERNA = v.COR_EXTERNA
+                            LEFT JOIN caiuas_recebimento_veiculo crv ON 1=1
+                                AND crv.cod_modelo = v.COD_MODELO 
+                                AND crv.cod_produto = v.COD_PRODUTO 
+                                AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
+                                AND crv.cod_empresa = v.COD_EMPRESA 
+                            WHERE lower(v.CHASSI_COMPLETO) like '%{chassi.lower()}%'
+                            AND v.STATUS IN ('E','V')
+                        ) t
+                )
+                WHERE
+                    rn BETWEEN {start_row} AND {end_row}
+        """
+        cur.execute(query)
+        result = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        retorno = {
+            'veiculos': [],
+            'current_page': current_page,
+            'total_pages': total_pages,
+            'total': total
+        }
+        for row in result:
+            retorno['veiculos'].append({
+                'cod_empresa': row[0],
+                'cod_modelo': row[1],
+                'cod_produto': row[2],
+                'chassi_resumido': row[3],
+                'data_entrada': format_oracle_date(row[4]),
+                'descricao_modelo': row[5],
+                'cor': row[6],
+                'empresa': row[7],
+                'quem_recebeu': row[8],
+                'data_recebimento': format_oracle_date(row[9])
+            })
+
+        return jsonify(retorno), 200
     except Exception as e:
         try:
             cur.close()
