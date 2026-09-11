@@ -3935,5 +3935,82 @@ def get_proposta_details(cod_proposta):
     
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 400
-        
-        
+
+@veiculos_bp.route('/api/veiculos/recebe_veiculo', methods=['POST'])
+@token_required
+def recebe_veiculo():
+    try:
+        data = request.get_json() or {}
+        cod_empresa = data.get('cod_empresa')
+        cod_modelo = data.get('cod_modelo')
+        cod_produto = data.get('cod_produto')
+        chassi_resumido = data.get('chassi_resumido')
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+
+        if not cod_empresa or not cod_modelo or not cod_produto or not chassi_resumido:
+            return jsonify({'status': 'error', 'message': 'cod_empresa, cod_modelo, cod_produto e chassi_resumido são obrigatórios'}), 400
+
+        conn, cur = oracle()
+
+        query = f"""
+            SELECT count(*) FROM veiculos v
+            WHERE 1=1
+                AND v.COD_EMPRESA = '{cod_empresa}'
+                AND v.COD_MODELO = '{cod_modelo}'
+                AND v.COD_PRODUTO = '{cod_produto}'
+                AND v.CHASSI_RESUMIDO = '{chassi_resumido}'
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+        if not result or result[0] == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Veículo não encontrado'}), 404
+
+        query = f"""
+            SELECT count(*) FROM caiuas_recebimento_veiculo
+            WHERE 1=1
+                AND COD_EMPRESA = '{cod_empresa}'
+                AND COD_MODELO = '{cod_modelo}'
+                AND COD_PRODUTO = '{cod_produto}'
+                AND CHASSI_RESUMIDO = '{chassi_resumido}'
+        """
+        cur.execute(query)
+        result = cur.fetchone()
+        if result and result[0] > 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'code': 4000, 'message': 'Já existe recebimento'}), 400
+
+        query = f"""
+            SELECT eu.NOME
+            FROM empresas_usuarios eu
+            WHERE lower(eu.EMAIL) = '{email}'
+            order by eu.cod_empresa
+        """
+        cur.execute(query)
+        rows = cur.fetchall()
+        if len(rows) == 0:
+            cur.close()
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+        quem_recebeu = rows[0][0]
+
+        query = f"""
+            INSERT INTO caiuas_recebimento_veiculo (cod_empresa, cod_modelo, cod_produto, chassi_resumido, quem_recebeu)
+            VALUES ('{cod_empresa}', '{cod_modelo}', '{cod_produto}', '{chassi_resumido}', '{quem_recebeu}')
+        """
+        cur.execute(query)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({'status': 'success', 'message': 'Veículo recebido com sucesso'}), 200
+    except Exception as e:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
