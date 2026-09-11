@@ -92,7 +92,9 @@ def get_veiculos_estoque():
                     WHEN v.COD_PROPOSTA_INTERNET IS NOT NULL OR vp.INTERNET = 'F' THEN 'Direta'
                     ELSE
                         'Novo'
-                END novo_usado
+                END novo_usado,
+                crv.quem_recebeu,
+                crv.created_at data_recebimento
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
                 AND pr.COD_PRODUTO = v.COD_PRODUTO 
@@ -114,6 +116,11 @@ def get_veiculos_estoque():
                 AND eu2.nome = vp.QUEM_APROVOU 
             LEFT JOIN empresas e ON 1=1
                 AND e.cod_empresa = v.COD_EMPRESA 
+            LEFT JOIN caiuas_recebimento_veiculo crv ON 1=1
+                AND crv.cod_modelo = v.COD_MODELO 
+                AND crv.cod_produto = v.COD_PRODUTO 
+                AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
+                AND crv.cod_empresa = v.COD_EMPRESA
             WHERE v.status = 'E'
             ORDER BY pm.DESCRICAO_MODELO
         """
@@ -162,7 +169,9 @@ def get_veiculos_estoque():
                 'patio': row[10],
                 'cod_cliente': row[11],
                 'nome_cliente': row[12],
-                'novo_usado': row[13]
+                'novo_usado': row[13],
+                'quem_recebeu': row[14],
+                'data_recebimento': format_date(row[15])
             }
             retorno['veiculos'].append(veiculo)
         return jsonify(retorno), 200
@@ -256,7 +265,9 @@ def get_veiculos_aguardando_faturamento():
                 NVL(etapas.json_etapas, '[]') AS status_processo_etapas,
                 ea.local_entrega,
                 cvp.OBS_ISENCAO,
-                cvp.DATA_SOLICITACAO
+                cvp.DATA_SOLICITACAO,
+                crv.quem_recebeu,
+                crv.created_at data_recebimento
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -305,6 +316,11 @@ def get_veiculos_aguardando_faturamento():
                 AND ea.COD_PROPOSTA = vp.COD_PROPOSTA
             left join caiuas_veic_proc cvp on 1=1
                 and cvp.cod_proposta = vp.cod_proposta
+            LEFT JOIN caiuas_recebimento_veiculo crv ON 1=1
+                AND crv.cod_modelo = v.COD_MODELO 
+                AND crv.cod_produto = v.COD_PRODUTO 
+                AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
+                AND crv.cod_empresa = v.COD_EMPRESA
             LEFT JOIN (
                 SELECT
                     ID_PROCESSO,
@@ -386,6 +402,8 @@ def get_veiculos_aguardando_faturamento():
                 'local_entrega': row[26],
                 'obs_isencao': _read_clob(row[27]) or None,
                 'data_solicitacao': format_date(row[28]),
+                'quem_recebeu': row[29],
+                'data_recebimento': format_date(row[30]),
                 'placa_usado': None,
             }
             try:
@@ -894,6 +912,8 @@ def veiculos_faturados():
                 v.COD_EMPRESA AS cod_empresa_veiculo,
                 cvp.OBS_ISENCAO,
                 cvp.DATA_SOLICITACAO,
+                crv.quem_recebeu,
+                crv.created_at data_recebimento,
                 COUNT(*) OVER() AS total
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
@@ -938,6 +958,11 @@ def veiculos_faturados():
                 and es.cod_sala = ea.cod_sala
             left join caiuas_veic_proc cvp on 1=1
                 and cvp.cod_proposta = vp.cod_proposta
+            LEFT JOIN caiuas_recebimento_veiculo crv ON 1=1
+                AND crv.cod_modelo = v.COD_MODELO 
+                AND crv.cod_produto = v.COD_PRODUTO 
+                AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
+                AND crv.cod_empresa = v.COD_EMPRESA
             LEFT JOIN (
             SELECT 
                 ID_PROCESSO,
@@ -985,7 +1010,7 @@ def veiculos_faturados():
                 'total_pages': 0,
                 'total': 0
             }), 200
-        total = result[0][31]
+        total = result[0][33]
         retorno = {
             'veiculos': [],
             'current_page': current_page,
@@ -1060,6 +1085,8 @@ def veiculos_faturados():
                 'cod_empresa_veiculo': row[28],
                 'obs_isencao': _read_clob(row[29]) or None,
                 'data_solicitacao': format_date(row[30]),
+                'quem_recebeu': row[31],
+                'data_recebimento': format_date(row[32]),
                 'placa_usado': None,
             }
             try:
@@ -2261,7 +2288,9 @@ def show_processo(id_processo):
                 vp.DATA_VENDA,
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
-                es.DESCRICAO_SALA AS local_entrega
+                es.DESCRICAO_SALA AS local_entrega,
+                crv.quem_recebeu,
+                crv.created_at data_recebimento
             FROM caiuas_veic_proc cvp
                 LEFT JOIN clientes c ON 1=1
                     AND c.cod_cliente = cvp.cod_cliente
@@ -2271,6 +2300,11 @@ def show_processo(id_processo):
                     AND vp.COD_PROPOSTA = cvp.COD_PROPOSTA
                 LEFT JOIN veiculos v ON 1=1
                     AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO
+                LEFT JOIN caiuas_recebimento_veiculo crv ON 1=1
+                    AND crv.cod_modelo = v.COD_MODELO 
+                    AND crv.cod_produto = v.COD_PRODUTO 
+                    AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
+                    AND crv.cod_empresa = v.COD_EMPRESA
                 LEFT JOIN produtos_modelos pm ON 1=1
                     AND pm.COD_PRODUTO = vp.COD_PRODUTO
                     AND pm.COD_MODELO = vp.COD_MODELO
@@ -2340,6 +2374,8 @@ def show_processo(id_processo):
                 'data_agendamento': format_oracle_date(row[30]),
                 'data_entrega': format_oracle_date(row[31]),
                 'local_entrega': row[32],
+                'quem_recebeu': row[33],
+                'data_recebimento': format_oracle_date(row[34]),
             }
             
             if processo['tipo'] == 1:
