@@ -254,7 +254,8 @@ def get_veiculos_aguardando_faturamento():
                 cvp.OBS_DOCUMENTACAO,
                 cvp.REPASSE,
                 NVL(etapas.json_etapas, '[]') AS status_processo_etapas,
-                ea.local_entrega
+                ea.local_entrega,
+                cvp.OBS_ISENCAO
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -382,6 +383,7 @@ def get_veiculos_aguardando_faturamento():
                 'repasse': row[24],
                 'status_processo_etapas': [],
                 'local_entrega': row[26],
+                'obs_isencao': _read_clob(row[27]) or None,
             }
             try:
                 raw_etapas = row[25]
@@ -875,6 +877,8 @@ def veiculos_faturados():
                 cvp.REPASSE,
                 NVL(etapas.json_etapas, '[]') AS status_processo_etapas,
                 es.DESCRICAO_SALA AS local_entrega,
+                v.COD_EMPRESA AS cod_empresa_veiculo,
+                cvp.OBS_ISENCAO,
                 COUNT(*) OVER() AS total
             FROM veiculos v 
             LEFT JOIN produtos pr ON 1=1
@@ -966,7 +970,7 @@ def veiculos_faturados():
                 'total_pages': 0,
                 'total': 0
             }), 200
-        total = result[0][28]
+        total = result[0][30]
         retorno = {
             'veiculos': [],
             'current_page': current_page,
@@ -997,6 +1001,15 @@ def veiculos_faturados():
                     return date_obj.isoformat()
                 else:
                     return str(date_value)
+
+            data_faturamento = format_date(row[16])
+            id_processo = row[17] if row[17] else None
+            status_processo = row[18] if row[18] else 'Não Iniciado'
+            if id_processo is None:
+                status_processo = 'Não Iniciado'
+            elif data_faturamento is not None:
+                status_processo = 'Faturado'
+
             veiculo = {
                 'cod_proposta': row[0] if row[0] != 0 else None,
                 'data_proposta': format_date(row[1]),
@@ -1016,12 +1029,12 @@ def veiculos_faturados():
                 'cidade': row[15],
                 'andamento': None,
                 'usado': None,
-                'data_venda': format_date(row[16]),
-                'data_faturamento': format_date(row[16]),
+                'data_venda': data_faturamento,
+                'data_faturamento': data_faturamento,
                 'agenda_entrega': format_date(row[19]),
                 'data_entrega': format_date(row[20]),
-                'id_processo': row[17] if row[17] else None,
-                'status_processo': row[18] if row[18] else 'Não Iniciado',
+                'id_processo': id_processo,
+                'status_processo': status_processo,
                 'obs_faturamento': _read_clob(row[21]) or None,
                 'obs_entrega': _read_clob(row[22]) or None,
                 'obs_liberacao': _read_clob(row[23]) or None,
@@ -1029,6 +1042,8 @@ def veiculos_faturados():
                 'repasse': row[25],
                 'status_processo_etapas': [],
                 'local_entrega': row[27],
+                'cod_empresa_veiculo': row[28],
+                'obs_isencao': _read_clob(row[29]) or None,
             }
             try:
                 raw_etapas = row[26]
@@ -1655,7 +1670,14 @@ def list_processos():
                 cvp.OBS_ENTREGA,
                 cvp.OBS_LIBERACAO,
                 cvp.OBS_DOCUMENTACAO,
-                cvp.REPASSE
+                cvp.REPASSE,
+                CASE 
+                    WHEN v.novo_usado = 'U' THEN 'Usado'
+                    WHEN v.COD_PROPOSTA_INTERNET IS NOT NULL OR vp.INTERNET = 'F' THEN 'Direta'
+                    ELSE
+                        'Novo'
+                END novo_usado,
+                cvp.OBS_ISENCAO
             FROM caiuas_veic_proc cvp
             LEFT JOIN clientes c ON 1=1
                 AND c.cod_cliente = cvp.cod_cliente
@@ -1714,6 +1736,8 @@ def list_processos():
                 'obs_liberacao': _read_clob(row[23]) or None,
                 'obs_documentacao': _read_clob(row[24]) or None,
                 'repasse': row[25],
+                'novo_usado': row[26],
+                'obs_isencao': _read_clob(row[27]) or None,
             }
             
             if processo['tipo'] == 1:
@@ -2150,9 +2174,26 @@ def show_processo(id_processo):
         rows = cur.fetchall()
         filter_user = ''
         if len(rows) == 0:
-            filter_user = f"""
-                    AND lower(eu.EMAIl) = '{email}'
+            query = f"""
+                SELECT eu.nome
+                FROM empresas_usuarios eu
+                LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                    AND saf.COD_FUNCAO = eu.COD_FUNCAO
+                WHERE eu.DEMITIDO <> 'S'
+                    AND lower(eu.EMAIL) = '{email}'
+                GROUP BY eu.COD_EMPRESA, eu.nome
+                ORDER BY eu.cod_empresa
             """
+            cur.execute(query)
+            usuarios = [row[0] for row in cur.fetchall()]
+
+            if not usuarios:
+                cur.close()
+                conn.close()
+                return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+
+            vendedores = ', '.join(f"'{usuario}'" for usuario in usuarios)
+            filter_user = f"AND vp.VENDEDOR IN ({vendedores})"
             
         query = f"""
             SELECT cvp.id_processo,
@@ -2180,7 +2221,19 @@ def show_processo(id_processo):
                 cvp.OBS_ENTREGA,
                 cvp.OBS_LIBERACAO,
                 cvp.OBS_DOCUMENTACAO,
-                cvp.REPASSE
+                cvp.REPASSE,
+                CASE 
+                    WHEN v.novo_usado = 'U' THEN 'Usado'
+                    WHEN v.COD_PROPOSTA_INTERNET IS NOT NULL OR vp.INTERNET = 'F' THEN 'Direta'
+                    ELSE
+                        'Novo'
+                END novo_usado,
+                v.COD_EMPRESA AS cod_empresa_veiculo,
+                cvp.OBS_ISENCAO,
+                vp.DATA_VENDA,
+                ea.DATA_AGENDADA,
+                ea.DATA_BAIXA,
+                es.DESCRICAO_SALA AS local_entrega
             FROM caiuas_veic_proc cvp
                 LEFT JOIN clientes c ON 1=1
                     AND c.cod_cliente = cvp.cod_cliente
@@ -2199,6 +2252,13 @@ def show_processo(id_processo):
                     AND pfd.COD_FICTICIO = vp.COD_FICTICIO
                 LEFT JOIN CORES_EXTERNAS ce2 ON 1=1
                     AND ce2.COR_EXTERNA = pfd.COR_EXTERNA
+                LEFT JOIN ev_agendados ea ON 1=1
+                    AND ea.STATUS NOT IN ('C')
+                    AND ea.QUEM_CANCELOU IS NULL
+                    AND TO_CHAR(ea.COD_PROPOSTA) = TO_CHAR(cvp.COD_PROPOSTA)
+                    AND TO_CHAR(ea.CHASSI_RESUMIDO) = TO_CHAR(vp.CHASSI_RESUMIDO)
+                LEFT JOIN EV_SALAS es ON 1=1
+                    AND es.cod_sala = ea.cod_sala
             where 1=1
                 and cvp.id_processo = {id_processo}
                 {filter_user}
@@ -2243,6 +2303,15 @@ def show_processo(id_processo):
                 'obs_liberacao': _read_clob(row[23]) or None,
                 'obs_documentacao': _read_clob(row[24]) or None,
                 'repasse': row[25],
+                'novo_usado': row[26],
+                'cod_empresa_veiculo': row[27],
+                'obs_isencao': _read_clob(row[28]) or None,
+                'data_venda': format_oracle_date(row[29]),
+                'data_faturamento': format_oracle_date(row[29]),
+                'agenda_entrega': format_oracle_date(row[30]),
+                'data_agendamento': format_oracle_date(row[30]),
+                'data_entrega': format_oracle_date(row[31]),
+                'local_entrega': row[32],
             }
             
             if processo['tipo'] == 1:
@@ -2491,19 +2560,21 @@ def update_observacao_por_proposta(cod_proposta):
             'obs_entrega': {'pablo.ti', 'fernanda.suzuki'},
             'obs_liberacao': {'pablo.ti', 'vanessa.vilela'},
             'obs_documentacao': {'franciele.mayer', 'flavia', 'pablo.ti', 'fernanda.cristina'},
+            'obs_isencao': {'flavia_co', 'pablo.ti'},
         }
         colunas = {
             'obs_faturamento': 'OBS_FATURAMENTO',
             'obs_entrega': 'OBS_ENTREGA',
             'obs_liberacao': 'OBS_LIBERACAO',
             'obs_documentacao': 'OBS_DOCUMENTACAO',
+            'obs_isencao': 'OBS_ISENCAO',
         }
 
         data = request.get_json(silent=True) or {}
         campos = [campo for campo in colunas if campo in data]
 
         if not campos:
-            return jsonify({'status': 'error', 'message': 'Informe ao menos um campo: obs_faturamento, obs_entrega, obs_liberacao ou obs_documentacao'}), 400
+            return jsonify({'status': 'error', 'message': 'Informe ao menos um campo: obs_faturamento, obs_entrega, obs_liberacao, obs_documentacao ou obs_isencao'}), 400
 
         sem_permissao = [campo for campo in campos if usuario not in permissoes[campo]]
         if sem_permissao:
