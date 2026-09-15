@@ -265,6 +265,7 @@ def get_veiculos_aguardando_faturamento():
                 NVL(etapas.json_etapas, '[]') AS status_processo_etapas,
                 ea.local_entrega,
                 cvp.OBS_ISENCAO,
+                cvp.OBS_ACESSORIOS,
                 cvp.DATA_SOLICITACAO,
                 crv.quem_recebeu,
                 crv.created_at data_recebimento
@@ -401,9 +402,10 @@ def get_veiculos_aguardando_faturamento():
                 'status_processo_etapas': [],
                 'local_entrega': row[26],
                 'obs_isencao': _read_clob(row[27]) or None,
-                'data_solicitacao': format_date(row[28]),
-                'quem_recebeu': row[29],
-                'data_recebimento': format_date(row[30]),
+                'obs_acessorios': _read_clob(row[28]) or None,
+                'data_solicitacao': format_date(row[29]),
+                'quem_recebeu': row[30],
+                'data_recebimento': format_date(row[31]),
                 'placa_usado': None,
             }
             try:
@@ -911,6 +913,7 @@ def veiculos_faturados():
                 es.DESCRICAO_SALA AS local_entrega,
                 v.COD_EMPRESA AS cod_empresa_veiculo,
                 cvp.OBS_ISENCAO,
+                cvp.OBS_ACESSORIOS,
                 cvp.DATA_SOLICITACAO,
                 crv.quem_recebeu,
                 crv.created_at data_recebimento,
@@ -1010,7 +1013,7 @@ def veiculos_faturados():
                 'total_pages': 0,
                 'total': 0
             }), 200
-        total = result[0][33]
+        total = result[0][34]
         retorno = {
             'veiculos': [],
             'current_page': current_page,
@@ -1084,9 +1087,10 @@ def veiculos_faturados():
                 'local_entrega': row[27],
                 'cod_empresa_veiculo': row[28],
                 'obs_isencao': _read_clob(row[29]) or None,
-                'data_solicitacao': format_date(row[30]),
-                'quem_recebeu': row[31],
-                'data_recebimento': format_date(row[32]),
+                'obs_acessorios': _read_clob(row[30]) or None,
+                'data_solicitacao': format_date(row[31]),
+                'quem_recebeu': row[32],
+                'data_recebimento': format_date(row[33]),
                 'placa_usado': None,
             }
             try:
