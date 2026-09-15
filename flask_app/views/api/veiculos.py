@@ -723,6 +723,102 @@ def reserva_veiculo():
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
+@veiculos_bp.route('/api/veiculos/remove_reserva_veiculo', methods=['POST'])
+@token_required
+def remove_reserva_veiculo():
+    try:
+        data = request.get_json() or {}
+        cod_proposta = data.get('cod_proposta')
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+
+        if not cod_proposta:
+            return jsonify({'status': 'error', 'message': 'cod_proposta é obrigatório'}), 400
+
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+            SELECT saf.COD_ACESSO
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO
+            WHERE eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIL) = '{email}'
+                AND saf.COD_ACESSO = '50190'
+            GROUP BY saf.COD_ACESSO
+        """
+        cur_oracle.execute(query)
+        possui_acesso = cur_oracle.fetchone() is not None
+
+        query = f"""
+            SELECT vp.COD_PROPOSTA, vp.COD_PEDIDO, vp.VENDEDOR
+            FROM VEICULOS_PROPOSTAS vp
+            WHERE vp.STATUS_PROPOSTA NOT IN ('V', 'C')
+                AND vp.COD_EMPRESA IN (11, 33)
+                AND vp.COD_PROPOSTA = '{cod_proposta}'
+        """
+        cur_oracle.execute(query)
+        proposta = cur_oracle.fetchone()
+
+        if not proposta:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Proposta não encontrada ou inválida'}), 400
+
+        if not possui_acesso:
+            query = f"""
+                SELECT eu.nome
+                FROM empresas_usuarios eu
+                WHERE eu.DEMITIDO <> 'S'
+                    AND lower(eu.EMAIL) = '{email}'
+                GROUP BY eu.COD_EMPRESA, eu.nome
+                ORDER BY eu.cod_empresa
+            """
+            cur_oracle.execute(query)
+            vendedores = [row[0] for row in cur_oracle.fetchall()]
+
+            if not vendedores:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+
+            if proposta[2] not in vendedores:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Usuário não autorizado para remover reserva nesta proposta'}), 403
+
+        cod_pedido_atual = proposta[1]
+
+        if not cod_pedido_atual:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Proposta sem reserva de veículo'}), 400
+
+        query = f"""
+            UPDATE VEICULOS_PROPOSTAS
+            SET COD_PEDIDO = NULL
+            WHERE COD_PROPOSTA = '{cod_proposta}'
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            UPDATE VEICULOS_PEDIDOS
+            SET RESERVADO = NULL
+            WHERE COD_PEDIDO = '{cod_pedido_atual}'
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+
+        return jsonify({'status': 'success', 'message': 'Reserva de veículo removida com sucesso'}), 200
+    except Exception as e:
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
 @veiculos_bp.route('/api/veiculos/muda_andamento_veiculo', methods=['POST'])
 @token_required
 def veiculos_muda_andamento_veiculo():
