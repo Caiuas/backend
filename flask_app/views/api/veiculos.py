@@ -325,12 +325,20 @@ def get_veiculos_aguardando_faturamento():
             LEFT JOIN (
                 SELECT
                     ID_PROCESSO,
-                    '[' || LISTAGG('{{"categoria":"' || CATEGORIA || '","status":"' || STATUS || '"}}', ',')
-                           WITHIN GROUP (ORDER BY CATEGORIA, STATUS) || ']' AS json_etapas
+                    '[' || LISTAGG('{{"categoria":"' || CATEGORIA || '","status":"' || status_categoria || '"}}', ',')
+                           WITHIN GROUP (ORDER BY CATEGORIA) || ']' AS json_etapas
                 FROM (
-                    SELECT DISTINCT ID_PROCESSO, CATEGORIA, STATUS
+                    SELECT
+                        ID_PROCESSO,
+                        CATEGORIA,
+                        CASE
+                            WHEN COUNT(CASE WHEN STATUS <> 'Autorizado' OR STATUS IS NULL THEN 1 END) = 0
+                            THEN 'Autorizado'
+                            ELSE 'Pendente'
+                        END AS status_categoria
                     FROM CAIUAS_VEIC_PROC_ETAPAS
                     WHERE ID_PROCESSO IS NOT NULL
+                    GROUP BY ID_PROCESSO, CATEGORIA
                 )
                 GROUP BY ID_PROCESSO
             ) etapas ON 1=1
