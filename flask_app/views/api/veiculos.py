@@ -951,7 +951,7 @@ def veiculos_faturados():
                 AND cid_cob.uf = c.UF_COBRANCA 
             LEFT JOIN ev_agendados ea ON 1=1
             	AND ea.STATUS NOT IN ('C')
-				AND ea.QUEM_CANCELOU IS NULL
+				--AND ea.QUEM_CANCELOU IS NULL
                 AND TO_CHAR(ea.COD_PROPOSTA) = TO_CHAR(vp.COD_PROPOSTA)
                 AND TO_CHAR(ea.CHASSI_RESUMIDO) = TO_CHAR(v.CHASSI_RESUMIDO)
             left join EV_SALAS es on 1=1
