@@ -2289,6 +2289,7 @@ def show_processo(id_processo):
                 END novo_usado,
                 v.COD_EMPRESA AS cod_empresa_veiculo,
                 cvp.OBS_ISENCAO,
+                cvp.OBS_ACESSORIOS,
                 vp.DATA_VENDA,
                 ea.DATA_AGENDADA,
                 ea.DATA_BAIXA,
@@ -2372,14 +2373,15 @@ def show_processo(id_processo):
                 'novo_usado': row[26],
                 'cod_empresa_veiculo': row[27],
                 'obs_isencao': _read_clob(row[28]) or None,
-                'data_venda': format_oracle_date(row[29]),
-                'data_faturamento': format_oracle_date(row[29]),
-                'agenda_entrega': format_oracle_date(row[30]),
-                'data_agendamento': format_oracle_date(row[30]),
-                'data_entrega': format_oracle_date(row[31]),
-                'local_entrega': row[32],
-                'quem_recebeu': row[33],
-                'data_recebimento': format_oracle_date(row[34]),
+                'obs_acessorios': _read_clob(row[29]) or None,
+                'data_venda': format_oracle_date(row[30]),
+                'data_faturamento': format_oracle_date(row[30]),
+                'agenda_entrega': format_oracle_date(row[31]),
+                'data_agendamento': format_oracle_date(row[31]),
+                'data_entrega': format_oracle_date(row[32]),
+                'local_entrega': row[33],
+                'quem_recebeu': row[34],
+                'data_recebimento': format_oracle_date(row[35]),
             }
             
             if processo['tipo'] == 1:
@@ -2629,6 +2631,7 @@ def update_observacao_por_proposta(cod_proposta):
             'obs_liberacao': {'pablo.ti', 'vanessa.vilela'},
             'obs_documentacao': {'franciele.mayer', 'flavia', 'pablo.ti', 'fernanda.cristina'},
             'obs_isencao': {'flavia_co', 'pablo.ti'},
+            'obs_acessorios': {'pablo.ti'},
         }
         colunas = {
             'obs_faturamento': 'OBS_FATURAMENTO',
@@ -2636,13 +2639,14 @@ def update_observacao_por_proposta(cod_proposta):
             'obs_liberacao': 'OBS_LIBERACAO',
             'obs_documentacao': 'OBS_DOCUMENTACAO',
             'obs_isencao': 'OBS_ISENCAO',
+            'obs_acessorios': 'OBS_ACESSORIOS',
         }
 
         data = request.get_json(silent=True) or {}
         campos = [campo for campo in colunas if campo in data]
 
         if not campos:
-            return jsonify({'status': 'error', 'message': 'Informe ao menos um campo: obs_faturamento, obs_entrega, obs_liberacao, obs_documentacao ou obs_isencao'}), 400
+            return jsonify({'status': 'error', 'message': 'Informe ao menos um campo: obs_faturamento, obs_entrega, obs_liberacao, obs_documentacao, obs_isencao ou obs_acessorios'}), 400
 
         sem_permissao = [campo for campo in campos if usuario not in permissoes[campo]]
         if sem_permissao:
