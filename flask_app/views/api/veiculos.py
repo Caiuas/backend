@@ -268,7 +268,8 @@ def get_veiculos_aguardando_faturamento():
                 cvp.OBS_ACESSORIOS,
                 cvp.DATA_SOLICITACAO,
                 crv.quem_recebeu,
-                crv.created_at data_recebimento
+                crv.created_at data_recebimento,
+                vp2.NUMERO_FABRICA pedido_fabrica
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -322,6 +323,8 @@ def get_veiculos_aguardando_faturamento():
                 AND crv.cod_produto = v.COD_PRODUTO 
                 AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
                 AND crv.cod_empresa = v.COD_EMPRESA
+            LEFT JOIN veiculos_pedidos vp2 ON 1=1
+                AND vp2.cod_pedido = vp.cod_pedido
             LEFT JOIN (
                 SELECT
                     ID_PROCESSO,
@@ -415,6 +418,7 @@ def get_veiculos_aguardando_faturamento():
                 'quem_recebeu': row[30],
                 'data_recebimento': format_date(row[31]),
                 'placa_usado': None,
+                'pedido_fabrica': row[32],
             }
             try:
                 raw_etapas = row[25]
@@ -518,6 +522,34 @@ def get_veiculos_pedidos():
             vendedores = ', '.join(f"'{usuario}'" for usuario in usuarios)
             filtro_vendedor = f"AND (vp2.COD_PROPOSTA IS NULL OR vp2.VENDEDOR IN ({vendedores}))"
 
+        cod_proposta = (request.args.get('cod_proposta') or '').strip()
+        filtro_modelo = ''
+        if cod_proposta:
+            cod_proposta_safe = cod_proposta.replace("'", "''")
+            query_prop = f"""
+                SELECT vp.cod_produto, vp.cod_modelo
+                FROM veiculos_propostas vp
+                WHERE 1=1
+                    AND (vp.status_proposta NOT IN ('V','C') OR vp.status_proposta IS NULL)
+                    AND vp.cod_empresa IN (11,33)
+                    AND vp.cod_proposta = '{cod_proposta_safe}'
+            """
+            cur_oracle.execute(query_prop)
+            prop = cur_oracle.fetchone()
+            if not prop:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Proposta não encontrada'}), 404
+            cod_produto_prop, cod_modelo_prop = prop[0], prop[1]
+            if cod_produto_prop is None or cod_modelo_prop is None:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Proposta sem produto/modelo'}), 400
+            filtro_modelo = f"AND vp.COD_PRODUTO = '{cod_produto_prop}' AND vp.COD_MODELO = '{cod_modelo_prop}' AND vp2.COD_PROPOSTA IS NULL"
+            # Filtro por cor_externa desativado por enquanto. Para reativar, buscar
+            # pfd.COR_EXTERNA via prop_ficticia_dados e adicionar:
+            # filtro_modelo += f" AND vp.COR_EXTERNA = '{cor_externa_safe}'"
+
         query = f"""
             SELECT
                 vp.NUMERO_FABRICA,
@@ -546,7 +578,8 @@ def get_veiculos_pedidos():
             WHERE vp.COD_EMPRESA IN (11, 33)
                 AND NVL(vp.STATUS_PEDIDO, ' ') <> 'E'
                 {filtro_vendedor}
-            ORDER BY 2, 1
+                {filtro_modelo}
+            ORDER BY 5, 7
         """
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
