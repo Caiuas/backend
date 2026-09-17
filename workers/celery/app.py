@@ -70,10 +70,14 @@ app.conf.update(
             "task": "tasks.ads_fluxo_loja_runner.run_ads_fluxo_loja_module",
             "schedule": crontab(hour=12, minute=0),
         },
+        "ads-os-fechadas-diario-12-30": {
+            "task": "tasks.ads_os_fechadas_runner.run_ads_os_fechadas_module",
+            "schedule": crontab(hour=12, minute=30),
+        },
     },
 )
 
-app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca", "tasks.myhonda_leads", "tasks.crm_eventos_atraso", "tasks.send_wpp_agendamento", "tasks.ads_fluxo_loja_runner"]
+app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca", "tasks.myhonda_leads", "tasks.crm_eventos_atraso", "tasks.send_wpp_agendamento", "tasks.ads_fluxo_loja_runner", "tasks.ads_os_fechadas_runner"]
 
 @app.task(bind=True)
 def debug_task(self):
