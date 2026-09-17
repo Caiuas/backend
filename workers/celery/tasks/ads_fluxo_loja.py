@@ -60,10 +60,15 @@ LEFT JOIN produtos_modelos pm ON
     pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
 LEFT JOIN caiuas_crm_eventos_descartados ced ON 
     ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
+-- Mesma lista classificada como fluxo de loja em
+-- streamlit_app/views/fluxo_de_loja.py:
+--   1) tipos 785,807 por DATA_CRIACAO com status <> 'D'
+--   2) tipos de visita por DATA_VISITA com status <> 'D'
 WHERE
     ce.cod_tipo_evento IN (
         '785','807'
     )
+    AND ce.status <> 'D'
     AND TRUNC(ce.DATA_CRIACAO) >= TO_DATE('{initial_date.strftime("%Y-%m-%d")}', 'YYYY-MM-DD')
     AND TRUNC(ce.DATA_CRIACAO) <= TO_DATE('{now.strftime("%Y-%m-%d")}', 'YYYY-MM-DD')
  """
@@ -105,10 +110,16 @@ LEFT JOIN produtos_modelos pm ON
     pm.COD_PRODUTO = ce.COD_PRODUTO AND pm.COD_MODELO = ce.COD_MODELO
 LEFT JOIN caiuas_crm_eventos_descartados ced ON 
     ced.cod_empresa = ce.COD_EMPRESA AND ced.cod_evento = ce.COD_EVENTO
+-- Mesma lista classificada como fluxo de loja em
+-- streamlit_app/views/fluxo_de_loja.py:
+-- tipos de visita por DATA_VISITA com status <> 'D'
+-- (sem 785/807 aqui, pois esses ja entram pela query de DATA_CRIACAO acima;
+--  sem '831', com '837' para igualar ao fluxo_de_loja.py)
 WHERE
     ce.cod_tipo_evento IN (
-        '829','831','795','793','797','799','819','821','785','807','815','817','810','812'
+        '819','821','815','817','810','812','829','795','793','797','799','837'
     )
+    AND ce.status <> 'D'
     AND TRUNC(ce.DATA_VISITA) >= TO_DATE('{initial_date.strftime("%Y-%m-%d")}', 'YYYY-MM-DD')
     AND TRUNC(ce.DATA_VISITA) <= TO_DATE('{now.strftime("%Y-%m-%d")}', 'YYYY-MM-DD')
 """
@@ -197,40 +208,40 @@ if access_token:
         telefone = _safe_str(linha.get('FONE_CLIENTE_AVULSO'))
         veiculo = _safe_str(linha.get('DESCRICAO_MODELO'))
         cod_proposta = _safe_str(linha.get('COD_PROPOSTA'))
-        if not cod_proposta:
-            payload = {
-                "event_type": "CONVERSION",
-                "event_family": "CDP",
-                "payload": {
-                    "conversion_identifier": "fluxo_loja_sem_proposta",
-                    "name": nome,
-                    "email": email,
-                    "mobile_phone": telefone,
-                    "company_name": nome,
-                    "vehicle": veiculo,
-                    "tags": ["fluxo_loja_sem_proposta", "NBS", veiculo],
-                    "traffic_source": "NBS",
-                    "traffic_campaign": "NBS"
-                }
+        payload = {
+            "event_type": "CONVERSION",
+            "event_family": "CDP",
+            "payload": {
+                "conversion_identifier": "visitas_showroom",
+                "name": nome,
+                "email": email,
+                "mobile_phone": telefone,
+                "company_name": nome,
+                "vehicle": veiculo,
+                "cf_tipo_veiculo": veiculo,
+                "tags": ["visitas_showroom", "NBS", veiculo],
+                "traffic_source": "NBS",
+                "traffic_campaign": "NBS"
             }
-            headers = {
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            }
-            try:
-                response = requests.post(url, headers=headers, json=payload, timeout=30)
-                if response.status_code in (200, 201):
-                    event_uuid = response.json().get("event_uuid")
-                    df_email.loc[_, 'COD_RDSTATION'] = event_uuid
-                else:
-                    logger.error(
-                        "RD Station rejeitou conversao HTTP %s para email %s: %s",
-                        response.status_code,
-                        email,
-                        response.text,
-                    )
-            except (requests.exceptions.RequestException, ValueError, TypeError) as e:
-                logger.error("Erro ao enviar conversao para RD Station: %s", e)
+        }
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            if response.status_code in (200, 201):
+                event_uuid = response.json().get("event_uuid")
+                df_email.loc[_, 'COD_RDSTATION'] = event_uuid
+            else:
+                logger.error(
+                    "RD Station rejeitou conversao HTTP %s para email %s: %s",
+                    response.status_code,
+                    email,
+                    response.text,
+                )
+        except (requests.exceptions.RequestException, ValueError, TypeError) as e:
+            logger.error("Erro ao enviar conversao para RD Station: %s", e)
         
     
 
