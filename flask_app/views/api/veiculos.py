@@ -637,7 +637,7 @@ def reserva_veiculo():
         possui_acesso = cur_oracle.fetchone() is not None
 
         query = f"""
-            SELECT vp.COD_PROPOSTA, vp.COD_PRODUTO, vp.COD_MODELO, vp.VENDEDOR
+            SELECT vp.COD_PROPOSTA, vp.COD_PRODUTO, vp.COD_MODELO, vp.VENDEDOR, vp.COD_EMPRESA
             FROM VEICULOS_PROPOSTAS vp
             WHERE vp.STATUS_PROPOSTA NOT IN ('V', 'C')
                 AND vp.COD_EMPRESA IN (11, 33)
@@ -698,16 +698,17 @@ def reserva_veiculo():
             return jsonify({'status': 'error', 'message': 'Proposta com veículo diferente do pedido'}), 400
 
         query = f"""
-            UPDATE VEICULOS_PROPOSTAS
-            SET COD_PEDIDO = '{cod_pedido}'
-            WHERE COD_PROPOSTA = '{cod_proposta}'
+            UPDATE VEICULOS_PEDIDOS
+            SET RESERVADO = 'S',
+                COD_EMPRESA = {proposta[4]}
+            WHERE COD_PEDIDO = '{cod_pedido}'
         """
         cur_oracle.execute(query)
 
         query = f"""
-            UPDATE VEICULOS_PEDIDOS
-            SET RESERVADO = 'S'
-            WHERE COD_PEDIDO = '{cod_pedido}'
+            UPDATE VEICULOS_PROPOSTAS
+            SET COD_PEDIDO = '{cod_pedido}'
+            WHERE COD_PROPOSTA = '{cod_proposta}'
         """
         cur_oracle.execute(query)
         conn_oracle.commit()
@@ -802,7 +803,7 @@ def remove_reserva_veiculo():
 
         query = f"""
             UPDATE VEICULOS_PEDIDOS
-            SET RESERVADO = NULL
+            SET RESERVADO = 'N'
             WHERE COD_PEDIDO = '{cod_pedido_atual}'
         """
         cur_oracle.execute(query)
