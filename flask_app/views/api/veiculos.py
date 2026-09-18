@@ -820,6 +820,117 @@ def remove_reserva_veiculo():
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
+@veiculos_bp.route('/api/veiculos/exclui_reserva', methods=['POST'])
+@token_required
+def exclui_reserva():
+    try:
+        data = request.get_json() or {}
+        cod_pedido = data.get('cod_pedido')
+        cod_empresa = data.get('cod_empresa')
+        token_data = request.token_data
+        email = token_data.get('email').strip().lower()
+
+        if not cod_pedido or cod_empresa is None or str(cod_empresa).strip() == '':
+            return jsonify({'status': 'error', 'message': 'cod_pedido e cod_empresa são obrigatórios'}), 400
+
+        cod_pedido_safe = str(cod_pedido).replace("'", "''")
+        try:
+            cod_empresa_int = int(cod_empresa)
+        except (ValueError, TypeError):
+            return jsonify({'status': 'error', 'message': 'cod_empresa inválido'}), 400
+
+        conn_oracle, cur_oracle = oracle()
+        query = f"""
+            SELECT saf.COD_ACESSO
+            FROM empresas_usuarios eu
+            LEFT JOIN SISTEMA_ACESSO_FUNCAO saf ON 1=1
+                AND saf.COD_FUNCAO = eu.COD_FUNCAO
+            WHERE eu.DEMITIDO <> 'S'
+                AND lower(eu.EMAIL) = '{email}'
+                AND saf.COD_ACESSO = '50190'
+            GROUP BY saf.COD_ACESSO
+        """
+        cur_oracle.execute(query)
+        possui_acesso = cur_oracle.fetchone() is not None
+
+        query = f"""
+            SELECT vp.COD_PEDIDO, vp.COD_EMPRESA
+            FROM VEICULOS_PEDIDOS vp
+            WHERE vp.COD_PEDIDO = '{cod_pedido_safe}'
+                AND vp.COD_EMPRESA = {cod_empresa_int}
+        """
+        cur_oracle.execute(query)
+        pedido = cur_oracle.fetchone()
+
+        if not pedido:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Pedido não encontrado'}), 400
+
+        if not possui_acesso:
+            query = f"""
+                SELECT eu.nome
+                FROM empresas_usuarios eu
+                WHERE eu.DEMITIDO <> 'S'
+                    AND lower(eu.EMAIL) = '{email}'
+                GROUP BY eu.COD_EMPRESA, eu.nome
+                ORDER BY eu.cod_empresa
+            """
+            cur_oracle.execute(query)
+            vendedores = [row[0] for row in cur_oracle.fetchall()]
+
+            if not vendedores:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
+
+            vendedores_in = ', '.join(f"'{v}'" for v in vendedores)
+            query = f"""
+                SELECT COUNT(*)
+                FROM VEICULOS_PROPOSTAS vp
+                WHERE vp.COD_PEDIDO = '{cod_pedido_safe}'
+                    AND vp.COD_EMPRESA = {cod_empresa_int}
+                    AND vp.VENDEDOR NOT IN ({vendedores_in})
+            """
+            cur_oracle.execute(query)
+            terceiros = cur_oracle.fetchone()[0]
+
+            if terceiros > 0:
+                cur_oracle.close()
+                conn_oracle.close()
+                return jsonify({'status': 'error', 'message': 'Usuário não autorizado para excluir reserva deste pedido'}), 403
+
+        query = f"""
+            UPDATE VEICULOS_PROPOSTAS
+            SET COD_PEDIDO = NULL
+            WHERE COD_PEDIDO = '{cod_pedido_safe}'
+                AND COD_EMPRESA = {cod_empresa_int}
+        """
+        cur_oracle.execute(query)
+
+        query = f"""
+            DELETE FROM VEICULOS_PEDIDOS
+            WHERE COD_PEDIDO = '{cod_pedido_safe}'
+                AND COD_EMPRESA = {cod_empresa_int}
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        cur_oracle.close()
+        conn_oracle.close()
+
+        return jsonify({'status': 'success', 'message': 'Reserva excluída com sucesso'}), 200
+    except Exception as e:
+        try:
+            conn_oracle.rollback()
+        except:
+            pass
+        try:
+            cur_oracle.close()
+            conn_oracle.close()
+        except:
+            pass
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
 @veiculos_bp.route('/api/veiculos/muda_andamento_veiculo', methods=['POST'])
 @token_required
 def veiculos_muda_andamento_veiculo():
