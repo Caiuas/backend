@@ -72,6 +72,22 @@ def _read_clob(clob_value):
 @veiculos_bp.route('/api/veiculos/estoque', methods=['GET'])
 def get_veiculos_estoque():
     try:
+        inicial_created_at = request.args.get('inicial_created_at')
+        final_created_at = request.args.get('final_created_at')
+
+        if bool(inicial_created_at) != bool(final_created_at):
+            return jsonify({'status': 'error', 'message': 'Datas inicial e final de created_at devem ser informadas juntas'}), 400
+
+        filtro_created_at = ''
+        if inicial_created_at and final_created_at:
+            try:
+                datetime.strptime(inicial_created_at, '%Y-%m-%d')
+                datetime.strptime(final_created_at, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Datas inválidas. Use o formato YYYY-MM-DD'}), 400
+            filtro_created_at = f"""
+                AND TRUNC(crv.created_at) BETWEEN TO_DATE('{inicial_created_at}', 'YYYY-MM-DD') AND TO_DATE('{final_created_at}', 'YYYY-MM-DD')"""
+
         query = f"""
             SELECT 
                 vp.COD_PROPOSTA, 
@@ -122,6 +138,7 @@ def get_veiculos_estoque():
                 AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
                 AND crv.cod_empresa = v.COD_EMPRESA
             WHERE v.status = 'E'
+                {filtro_created_at}
             ORDER BY pm.DESCRICAO_MODELO
         """
         conn_oracle, cur_oracle = oracle()
