@@ -670,7 +670,7 @@ def reserva_veiculo():
                 conn_oracle.close()
                 return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
 
-            if proposta[3] not in vendedores:
+            if proposta[2] not in vendedores:
                 cur_oracle.close()
                 conn_oracle.close()
                 return jsonify({'status': 'error', 'message': 'Usuário não autorizado para reservar nesta proposta'}), 403
@@ -694,15 +694,15 @@ def reserva_veiculo():
             conn_oracle.close()
             return jsonify({'status': 'error', 'message': 'Pedido inexistente ou já usado em outra proposta'}), 400
 
-        if proposta[1] != pedido[0] or proposta[2] != pedido[1]:
-            cur_oracle.close()
-            conn_oracle.close()
-            return jsonify({'status': 'error', 'message': 'Proposta com veículo diferente do pedido'}), 400
+        #if proposta[1] != pedido[0] or proposta[2] != pedido[1]:
+        #   cur_oracle.close()
+        #   conn_oracle.close()
+        #   return jsonify({'status': 'error', 'message': 'Proposta com veículo diferente do pedido'}), 400
 
         query = f"""
             UPDATE VEICULOS_PEDIDOS
             SET RESERVADO = 'S',
-                COD_EMPRESA = {proposta[4]}
+                COD_EMPRESA = {proposta[3]}
             WHERE COD_PEDIDO = '{cod_pedido}'
         """
         cur_oracle.execute(query)
