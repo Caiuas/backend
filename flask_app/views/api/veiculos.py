@@ -72,22 +72,6 @@ def _read_clob(clob_value):
 @veiculos_bp.route('/api/veiculos/estoque', methods=['GET'])
 def get_veiculos_estoque():
     try:
-        inicial_created_at = request.args.get('inicial_created_at')
-        final_created_at = request.args.get('final_created_at')
-
-        if bool(inicial_created_at) != bool(final_created_at):
-            return jsonify({'status': 'error', 'message': 'Datas inicial e final de created_at devem ser informadas juntas'}), 400
-
-        filtro_created_at = ''
-        if inicial_created_at and final_created_at:
-            try:
-                datetime.strptime(inicial_created_at, '%Y-%m-%d')
-                datetime.strptime(final_created_at, '%Y-%m-%d')
-            except ValueError:
-                return jsonify({'status': 'error', 'message': 'Datas inválidas. Use o formato YYYY-MM-DD'}), 400
-            filtro_created_at = f"""
-                AND TRUNC(crv.created_at) BETWEEN TO_DATE('{inicial_created_at}', 'YYYY-MM-DD') AND TO_DATE('{final_created_at}', 'YYYY-MM-DD')"""
-
         query = f"""
             SELECT 
                 vp.COD_PROPOSTA, 
@@ -138,7 +122,6 @@ def get_veiculos_estoque():
                 AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
                 AND crv.cod_empresa = v.COD_EMPRESA
             WHERE v.status = 'E'
-                {filtro_created_at}
             ORDER BY pm.DESCRICAO_MODELO
         """
         conn_oracle, cur_oracle = oracle()
@@ -286,7 +269,8 @@ def get_veiculos_aguardando_faturamento():
                 cvp.DATA_SOLICITACAO,
                 crv.quem_recebeu,
                 crv.created_at data_recebimento,
-                vp2.NUMERO_FABRICA pedido_fabrica
+                vp2.NUMERO_FABRICA pedido_fabrica,
+                vp.COD_EMPRESA cod_empresa
             FROM VEICULOS_PROPOSTAS vp
             LEFT JOIN veiculos v ON 1=1
                 AND v.CHASSI_RESUMIDO = vp.CHASSI_RESUMIDO 
@@ -436,6 +420,7 @@ def get_veiculos_aguardando_faturamento():
                 'data_recebimento': format_date(row[31]),
                 'placa_usado': None,
                 'pedido_fabrica': row[32],
+                'cod_empresa': row[33],
             }
             try:
                 raw_etapas = row[25]
@@ -654,7 +639,7 @@ def reserva_veiculo():
         possui_acesso = cur_oracle.fetchone() is not None
 
         query = f"""
-            SELECT vp.COD_PROPOSTA, vp.COD_PRODUTO, vp.COD_MODELO, vp.VENDEDOR, vp.COD_EMPRESA
+            SELECT vp.COD_PROPOSTA, vp.COD_PEDIDO, vp.VENDEDOR, vp.COD_EMPRESA
             FROM VEICULOS_PROPOSTAS vp
             WHERE vp.STATUS_PROPOSTA NOT IN ('V', 'C')
                 AND vp.COD_EMPRESA IN (11, 33)
@@ -837,24 +822,19 @@ def remove_reserva_veiculo():
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 400
 
-@veiculos_bp.route('/api/veiculos/exclui_reserva', methods=['POST'])
+@veiculos_bp.route('/api/veiculos/excluir_reserva', methods=['POST'])
 @token_required
 def exclui_reserva():
+    cur_oracle = None
+    conn_oracle = None
     try:
         data = request.get_json() or {}
-        cod_pedido = data.get('cod_pedido')
-        cod_empresa = data.get('cod_empresa')
+        cod_proposta = data.get('cod_proposta')
         token_data = request.token_data
         email = token_data.get('email').strip().lower()
 
-        if not cod_pedido or cod_empresa is None or str(cod_empresa).strip() == '':
-            return jsonify({'status': 'error', 'message': 'cod_pedido e cod_empresa são obrigatórios'}), 400
-
-        cod_pedido_safe = str(cod_pedido).replace("'", "''")
-        try:
-            cod_empresa_int = int(cod_empresa)
-        except (ValueError, TypeError):
-            return jsonify({'status': 'error', 'message': 'cod_empresa inválido'}), 400
+        if not cod_proposta:
+            return jsonify({'status': 'error', 'message': 'cod_proposta é obrigatório'}), 400
 
         conn_oracle, cur_oracle = oracle()
         query = f"""
@@ -871,18 +851,19 @@ def exclui_reserva():
         possui_acesso = cur_oracle.fetchone() is not None
 
         query = f"""
-            SELECT vp.COD_PEDIDO, vp.COD_EMPRESA
-            FROM VEICULOS_PEDIDOS vp
-            WHERE vp.COD_PEDIDO = '{cod_pedido_safe}'
-                AND vp.COD_EMPRESA = {cod_empresa_int}
+            SELECT vp.COD_PROPOSTA, vp.COD_PEDIDO, vp.VENDEDOR, vp.COD_EMPRESA
+            FROM VEICULOS_PROPOSTAS vp
+            WHERE vp.STATUS_PROPOSTA NOT IN ('V', 'C')
+                AND vp.COD_EMPRESA IN (11, 33)
+                AND vp.COD_PROPOSTA = '{cod_proposta}'
         """
         cur_oracle.execute(query)
-        pedido = cur_oracle.fetchone()
+        proposta = cur_oracle.fetchone()
 
-        if not pedido:
+        if not proposta:
             cur_oracle.close()
             conn_oracle.close()
-            return jsonify({'status': 'error', 'message': 'Pedido não encontrado'}), 400
+            return jsonify({'status': 'error', 'message': 'Proposta não encontrada ou inválida'}), 400
 
         if not possui_acesso:
             query = f"""
@@ -901,34 +882,30 @@ def exclui_reserva():
                 conn_oracle.close()
                 return jsonify({'status': 'error', 'message': 'Usuário não encontrado'}), 400
 
-            vendedores_in = ', '.join(f"'{v}'" for v in vendedores)
-            query = f"""
-                SELECT COUNT(*)
-                FROM VEICULOS_PROPOSTAS vp
-                WHERE vp.COD_PEDIDO = '{cod_pedido_safe}'
-                    AND vp.COD_EMPRESA = {cod_empresa_int}
-                    AND vp.VENDEDOR NOT IN ({vendedores_in})
-            """
-            cur_oracle.execute(query)
-            terceiros = cur_oracle.fetchone()[0]
-
-            if terceiros > 0:
+            if proposta[2] not in vendedores:
                 cur_oracle.close()
                 conn_oracle.close()
-                return jsonify({'status': 'error', 'message': 'Usuário não autorizado para excluir reserva deste pedido'}), 403
+                return jsonify({'status': 'error', 'message': 'Usuário não autorizado para excluir reserva nesta proposta'}), 403
+
+        cod_pedido_atual = proposta[1]
+        cod_empresa_atual = proposta[3]
+
+        if not cod_pedido_atual:
+            cur_oracle.close()
+            conn_oracle.close()
+            return jsonify({'status': 'error', 'message': 'Proposta sem reserva de veículo'}), 400
 
         query = f"""
             UPDATE VEICULOS_PROPOSTAS
             SET COD_PEDIDO = NULL
-            WHERE COD_PEDIDO = '{cod_pedido_safe}'
-                AND COD_EMPRESA = {cod_empresa_int}
+            WHERE COD_PROPOSTA = '{cod_proposta}'
         """
         cur_oracle.execute(query)
 
         query = f"""
             DELETE FROM VEICULOS_PEDIDOS
-            WHERE COD_PEDIDO = '{cod_pedido_safe}'
-                AND COD_EMPRESA = {cod_empresa_int}
+            WHERE COD_PEDIDO = '{cod_pedido_atual}'
+                AND COD_EMPRESA = {cod_empresa_atual}
         """
         cur_oracle.execute(query)
         conn_oracle.commit()
@@ -938,12 +915,15 @@ def exclui_reserva():
         return jsonify({'status': 'success', 'message': 'Reserva excluída com sucesso'}), 200
     except Exception as e:
         try:
-            conn_oracle.rollback()
+            if conn_oracle:
+                conn_oracle.rollback()
         except:
             pass
         try:
-            cur_oracle.close()
-            conn_oracle.close()
+            if cur_oracle:
+                cur_oracle.close()
+            if conn_oracle:
+                conn_oracle.close()
         except:
             pass
         return jsonify({'status': 'error', 'message': str(e)}), 400
