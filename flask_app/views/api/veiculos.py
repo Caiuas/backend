@@ -4333,9 +4333,30 @@ def recebe_veiculo():
 @token_required
 def consulta_veiculo():
     try:
-        chassi = request.args.get('chassi')
-        if not chassi:
-            return jsonify({'status': 'error', 'message': 'chassi é obrigatório'}), 400
+        chassi = (request.args.get('chassi') or '').strip()
+        inicial_created_at = request.args.get('inicial_created_at')
+        final_created_at = request.args.get('final_created_at')
+
+        if bool(inicial_created_at) != bool(final_created_at):
+            return jsonify({'status': 'error', 'message': 'Datas inicial e final de created_at devem ser informadas juntas'}), 400
+
+        filtro_created_at = ''
+        if inicial_created_at and final_created_at:
+            try:
+                datetime.strptime(inicial_created_at, '%Y-%m-%d')
+                datetime.strptime(final_created_at, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({'status': 'error', 'message': 'Datas inválidas. Use o formato YYYY-MM-DD'}), 400
+            filtro_created_at = f"""
+                AND TRUNC(crv.created_at) BETWEEN TO_DATE('{inicial_created_at}', 'YYYY-MM-DD') AND TO_DATE('{final_created_at}', 'YYYY-MM-DD')"""
+
+        if not chassi and not filtro_created_at:
+            return jsonify({'status': 'error', 'message': 'Informe o chassi ou o período (inicial_created_at e final_created_at)'}), 400
+
+        filtro_chassi = ''
+        if chassi:
+            chassi_safe = chassi.replace("'", "''").lower()
+            filtro_chassi = f"AND lower(v.CHASSI_COMPLETO) like '%{chassi_safe}%'"
 
         current_page = request.args.get('current_page', 1, type=int)
         limit = 200
@@ -4348,8 +4369,14 @@ def consulta_veiculo():
         query = f"""
             SELECT count(*)
                 FROM veiculos v
-                WHERE lower(v.CHASSI_COMPLETO) like '%{chassi.lower()}%'
-                AND v.STATUS IN ('E','V')
+                LEFT JOIN caiuas_recebimento_veiculo crv ON 1=1
+                    AND crv.cod_modelo = v.COD_MODELO
+                    AND crv.cod_produto = v.COD_PRODUTO
+                    AND crv.chassi_resumido = v.CHASSI_RESUMIDO
+                    AND crv.cod_empresa = v.COD_EMPRESA
+                WHERE v.STATUS IN ('E','V')
+                {filtro_chassi}
+                {filtro_created_at}
         """
         cur.execute(query)
         total = cur.fetchone()[0]
@@ -4368,7 +4395,7 @@ def consulta_veiculo():
                 FROM (
                     SELECT t.*, ROWNUM AS rn
                     FROM (
-                        SELECT v.cod_empresa, v.cod_modelo, v.cod_produto, v.chassi_resumido, v.DATA_ENTRADA, pm.DESCRICAO_MODELO, ce.DESCRICAO cor, e.NOME, crv.quem_recebeu, crv.created_at data_recebimento
+                        SELECT v.cod_empresa, v.cod_modelo, v.cod_produto, v.chassi_resumido, v.DATA_ENTRADA, pm.DESCRICAO_MODELO, ce.DESCRICAO cor, e.NOME, crv.quem_recebeu, crv.created_at data_recebimento, v.CHASSI_COMPLETO chassi_completo
                             FROM veiculos v
                             LEFT JOIN produtos_modelos pm ON 1=1
                                 AND pm.COD_PRODUTO = v.COD_PRODUTO 
@@ -4382,8 +4409,9 @@ def consulta_veiculo():
                                 AND crv.cod_produto = v.COD_PRODUTO 
                                 AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
                                 AND crv.cod_empresa = v.COD_EMPRESA 
-                            WHERE lower(v.CHASSI_COMPLETO) like '%{chassi.lower()}%'
-                            AND v.STATUS IN ('E','V')
+                            WHERE v.STATUS IN ('E','V')
+                                {filtro_chassi}
+                                {filtro_created_at}
                         ) t
                 )
                 WHERE
@@ -4411,7 +4439,8 @@ def consulta_veiculo():
                 'cor': row[6],
                 'empresa': row[7],
                 'quem_recebeu': row[8],
-                'data_recebimento': format_oracle_date(row[9])
+                'data_recebimento': format_oracle_date(row[9]),
+                'chassi_completo': row[10]
             })
 
         return jsonify(retorno), 200
