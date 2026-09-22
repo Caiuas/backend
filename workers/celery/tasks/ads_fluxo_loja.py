@@ -208,6 +208,7 @@ if access_token:
         telefone = _safe_str(linha.get('FONE_CLIENTE_AVULSO'))
         veiculo = _safe_str(linha.get('DESCRICAO_MODELO'))
         cod_proposta = _safe_str(linha.get('COD_PROPOSTA'))
+        tags = [tag for tag in ["visitas_showroom", "NBS", veiculo] if tag]
         payload = {
             "event_type": "CONVERSION",
             "event_family": "CDP",
@@ -215,11 +216,12 @@ if access_token:
                 "conversion_identifier": "visitas_showroom",
                 "name": nome,
                 "email": email,
-                "mobile_phone": telefone,
                 "company_name": nome,
                 "vehicle": veiculo,
-                "cf_tipo_veiculo": veiculo,
-                "tags": ["visitas_showroom", "NBS", veiculo],
+                "cf_modelo_do_carro": veiculo,
+                "cf_fone_cliente": telefone,
+                "cf_cod_proposta": cod_proposta,
+                "tags": tags,
                 "traffic_source": "NBS",
                 "traffic_campaign": "NBS"
             }
@@ -233,6 +235,11 @@ if access_token:
             if response.status_code in (200, 201):
                 event_uuid = response.json().get("event_uuid")
                 df_email.loc[_, 'COD_RDSTATION'] = event_uuid
+                logger.info(
+                    "RD Station conversao criada para email %s: %s",
+                    email,
+                    event_uuid,
+                )
             else:
                 logger.error(
                     "RD Station rejeitou conversao HTTP %s para email %s: %s",
@@ -261,7 +268,7 @@ url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
 logger.info("Gerando relatorio Planilha...")
 message = f"Relatorio Fluxo Loja - {now.strftime('%d/%m/%Y')}"
 files = {
-    "document": ("relatorio.xlsx", planilha.getvalue())
+    "document": ("relatorio_showroom.xlsx", planilha.getvalue())
 }
 data = {
     "chat_id": TELEGRAM_CHATS["Pablo"],
