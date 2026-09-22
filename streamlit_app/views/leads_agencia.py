@@ -29,8 +29,8 @@ def render():
     data_final_chat = st.sidebar.date_input("Data Final", datetime.now().date(), key="chat_data_final")
     
     query_chatwoot = f"""
-    SELECT DISTINCT ON (m.conversation_id)
-        m.conversation_id,
+    SELECT DISTINCT ON (c.display_id)
+        c.display_id,
         m.account_id,
         c.created_at,
         CASE
@@ -56,7 +56,7 @@ def render():
     )
         AND c.created_at::date >= DATE '{data_inicial_chat}'
         AND c.created_at::date <= DATE '{data_final_chat}'
-    ORDER BY m.conversation_id, c.created_at
+    ORDER BY c.display_id, c.created_at
     """
     
     conn_chatwoot, cur_chatwoot = chatwoot()
@@ -70,8 +70,8 @@ def render():
     df_chatwoot = df_chatwoot.fillna('')
     df_chatwoot = df_chatwoot.replace('None', '')
     df_chatwoot['link_chat'] = df_chatwoot.apply(
-        lambda row: f"https://chat.caiuas.com.br/app/accounts/{row['account_id']}/conversations/{row['conversation_id']}"
-        if str(row.get('account_id', '')).strip() != '' and str(row.get('conversation_id', '')).strip() != ''
+        lambda row: f"https://chat.caiuas.com.br/app/accounts/{row['account_id']}/conversations/{row['display_id']}"
+        if str(row.get('account_id', '')).strip() != '' and str(row.get('display_id', '')).strip() != ''
         else '',
         axis=1
     )
@@ -80,7 +80,7 @@ def render():
     if df_chatwoot.empty or df_chatwoot['responsavel'].str.strip().eq('').all():
         st.info("Nenhum dado encontrado para o período.")
     else:
-        pivot_vendedor = pd.pivot_table(df_chatwoot, index='responsavel', values='conversation_id', aggfunc='count').reset_index().rename(columns={'conversation_id': 'total_chats'})
+        pivot_vendedor = pd.pivot_table(df_chatwoot, index='responsavel', values='display_id', aggfunc='count').reset_index().rename(columns={'display_id': 'total_chats'})
        
         total_row_chats = pd.DataFrame({'responsavel': ['Total'], 'total_chats': [pivot_vendedor['total_chats'].sum()]})
         pivot_vendedor_total = pd.concat([pivot_vendedor, total_row_chats], ignore_index=True)
@@ -89,7 +89,7 @@ def render():
         )
         st.dataframe(styled_chats, hide_index=True, use_container_width=True)
     
-    df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','source_id','link_crm','link_chat','status']].copy()
+    df_chatwoot_excel = df_chatwoot[['display_id','responsavel', 'created_at', 'link_campanha','source_id','link_crm','link_chat','status']].copy()
     df_chatwoot_excel['evento'] = df_chatwoot_excel['link_crm'].apply(lambda x: x.split('?')[0] if x.strip() != '' else '')
     df_chatwoot_excel['evento'] = df_chatwoot_excel['evento'].apply(lambda x: x.split('/')[-1] if x.strip() != '' else '')
     
@@ -150,7 +150,7 @@ def render():
         key="download_chatwoot_chat"
     )
     st.dataframe(
-        df_chatwoot_excel[['conversation_id','responsavel', 'created_at', 'link_campanha', 'link_crm', 'link_chat', 'termometro']],
+        df_chatwoot_excel[['display_id','responsavel', 'created_at', 'link_campanha', 'link_crm', 'link_chat', 'termometro']],
         hide_index=True,
         use_container_width=True,
         column_config={
