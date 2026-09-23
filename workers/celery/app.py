@@ -66,6 +66,11 @@ app.conf.update(
             "task": "tasks.send_wpp_agendamento.process_send_wpp_agendamento",
             "schedule": 5.0,
         },
+        "atribuir-conversa-posvenda-every-2s": {
+            "task": "tasks.atribuir_conversa_posvenda.atribuir_conversa_posvenda",
+            "schedule": 2.0,
+            "options": {"expires": 1.5},
+        },
         "ads-fluxo-loja-diario-12-00": {
             "task": "tasks.ads_fluxo_loja_runner.run_ads_fluxo_loja_module",
             "schedule": crontab(hour=12, minute=0),
