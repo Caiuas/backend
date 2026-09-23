@@ -196,3 +196,5 @@ workers/celery/data/rdstation_tokens.json
 workers/celery/data/rdstation_tokens.json
 
 workers/celery/data/rdstation_tokens_caiuas.json
+workers/celery/data/atribuir_conversa_posvenda.json
+workers/celery/data/atribuir_conversa_posvenda.lock
