@@ -217,6 +217,7 @@ def download_nf_xml(controle):
                     AND nm.numr_controle = '{controle}'
                     AND nm.serie_nfe = '{serie}'
                     AND nm.id_empresa = '{empresa}'
+                    AND nm.tipo_NF = 2
             """
             cur_oracle.execute(query)
             r = cur_oracle.fetchall()
