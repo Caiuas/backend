@@ -87,10 +87,14 @@ app.conf.update(
             "task": "tasks.ads_veiculos_entregues_runner.run_ads_veiculos_entregues_module",
             "schedule": crontab(hour=13, minute=30),
         },
+        "notifica-processo-08-00": {
+            "task": "tasks.notifica_processo_runner.run_notifica_processo_module",
+            "schedule": crontab(hour=8, minute=0, day_of_week='1-6'),
+        },
     },
 )
 
-app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca", "tasks.myhonda_leads", "tasks.crm_eventos_atraso", "tasks.send_wpp_agendamento", "tasks.ads_fluxo_loja_runner", "tasks.ads_os_fechadas_runner", "tasks.ads_orcamentos_runner", "tasks.ads_veiculos_entregues_runner", "tasks.atribuir_conversa_posvenda"]
+app.conf.imports = ["tasks.fix_connections", "tasks.acompanhamento_diretoria", "tasks.fix_crm_proposta", "tasks.sync_rdstation", "tasks.sync_rdstation_caiuas", "tasks.prospeccao_oficina_troca", "tasks.myhonda_leads", "tasks.crm_eventos_atraso", "tasks.send_wpp_agendamento", "tasks.ads_fluxo_loja_runner", "tasks.ads_os_fechadas_runner", "tasks.ads_orcamentos_runner", "tasks.ads_veiculos_entregues_runner", "tasks.atribuir_conversa_posvenda", "tasks.notifica_processo_runner"]
 
 @app.task(bind=True)
 def debug_task(self):
