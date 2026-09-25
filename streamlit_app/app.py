@@ -34,6 +34,7 @@ from views.acompanhamento_diario import EMAILS_ACOMPANHAMENTO_DIARIO
 from views.acompanhamento_crm import EMAILS_ACOMPANHAMENTO_CRM
 from views.propostas import EMAILS_PRPOSTAS
 from views.fechamento_mes import EMAILS_FECHAMENTO_MES
+from views.fechamento_whatsappp import EMAILS_FECHAMENTO_WHATSAPPP
 from views.ciclo_veiculos import EMAILS_POS_VENDAS2
 from views.processos import EMAILS_PROCESSOS
 from utils.auth import realizar_login, validar_token, check_authentication
@@ -54,6 +55,7 @@ from views import acompanhamento_diario
 from views import acompanhamento_crm
 from views import propostas
 from views import fechamento_mes
+from views import fechamento_whatsappp
 from views import ciclo_veiculos
 from views import processos
 
@@ -128,6 +130,8 @@ else:
         menus_disponiveis.append("Propostas")
     if tem_acesso(email_usuario, EMAILS_FECHAMENTO_MES):
         menus_disponiveis.append("Fechamento Mês")
+    if tem_acesso(email_usuario, EMAILS_FECHAMENTO_WHATSAPPP):
+        menus_disponiveis.append("Fechamento Whatsapp")
     if tem_acesso(email_usuario, EMAILS_POS_VENDAS2):
         menus_disponiveis.append("Ciclo de veículos")
     if tem_acesso(email_usuario, EMAILS_PROCESSOS):
@@ -165,6 +169,7 @@ else:
         "Acompanhamento Diário": acompanhamento_diario.render,
         "Propostas": propostas.render,
         "Fechamento Mês": fechamento_mes.render,
+        "Fechamento Whatsapp": fechamento_whatsappp.render,
         "Ciclo de veículos": ciclo_veiculos.render,
         "Relatório de processos": processos.render,
     }
