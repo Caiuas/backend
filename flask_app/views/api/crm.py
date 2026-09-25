@@ -4,6 +4,9 @@ from dotenv import load_dotenv
 from datetime import datetime
 from auth import token_required
 import re
+import os
+import json
+import requests
 from io import BytesIO
 load_dotenv()
 
@@ -5802,6 +5805,91 @@ def crm_eventos_transfere_vendedor(id_evento):
         """
         cur_oracle.execute(query)
         conn_oracle.commit()
+        
+        data_hoje_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        query = f"""
+            update crm_eventos
+            set data_novo_contato = TO_DATE('{data_hoje_str}', 'YYYY-MM-DD HH24:MI:SS'),
+            quem_remarcou = '{quem_criou}'
+            where cod_empresa = {cod_empresa}
+            and cod_evento = {cod_evento}
+        """
+        cur_oracle.execute(query)
+        
+        query = f"""
+            insert into crm_acoes
+            (cod_empresa,cod_evento, responsavel, tipo_acao, data, observacao, status, cod_acao, quem_criou, data_novo_contato)
+            values (
+                {cod_empresa},
+                {cod_evento},
+                '{quem_criou}',
+                13,
+                SYSDATE,
+                'Contato remarcado para {data_hoje_str} por {quem_criou}',
+                'P',
+                seq_crm_COD_ACAO.nextval,
+                '{quem_criou}',
+                TO_DATE('{data_hoje_str}', 'YYYY-MM-DD HH24:MI:SS')
+            )
+        """
+        cur_oracle.execute(query)
+        conn_oracle.commit()
+        
+        try:
+            query = f"""
+                SELECT 
+                    ce.COD_EVENTO,
+                    ce.NOME_CLIENTE_AVULSO name, 
+                    ce.EMAIL_CLIENTE_AVULSO email,
+                    CASE 
+                        WHEN pm.DESCRICAO_MODELO is NULL THEN 'NAO INFORMADO'
+                        ELSE pm.DESCRICAO_MODELO
+                    END cf_modelo_do_carro 
+                FROM crm_eventos ce
+                LEFT JOIN produtos_modelos pm ON 1=1
+                    AND pm.COD_PRODUTO = ce.COD_PRODUTO 
+                    AND pm.COD_MODELO = ce.COD_MODELO
+                WHERE 1=1
+                    AND ce.COD_EMPRESA = {cod_empresa}
+                    AND ce.COD_EVENTO = {cod_evento}
+                    AND ce.EMAIL_CLIENTE_AVULSO IS NOT NULL
+            """
+            cur_oracle.execute(query)
+            row_rd = cur_oracle.fetchone()
+            if row_rd and row_rd[2] and str(row_rd[2]).strip():
+                nome_rd = str(row_rd[1]).strip() if row_rd[1] else ''
+                email_rd = str(row_rd[2]).strip()
+                modelo_rd = str(row_rd[3]).strip() if row_rd[3] else 'NAO INFORMADO'
+                
+                url_rd = "https://api.rd.services/auth/token"
+                payload_rd = json.dumps({
+                    "client_id": os.getenv("RDSTATION_CLIENT_ID_CAIUAS", ""),
+                    "client_secret": os.getenv("RDSTATION_CLIENT_SECRET_CAIUAS", ""),
+                    "refresh_token": os.getenv("RDSTATION_REFRESH_TOKEN_CAIUAS", "")
+                })
+                response_rd = requests.request("POST", url_rd, headers={"Content-Type": "application/json"}, data=payload_rd)
+                response_rd.raise_for_status()
+                access_token_rd = response_rd.json().get("access_token")
+                if access_token_rd:
+                    url_rd = "https://api.rd.services/platform/events?event_type=conversion"
+                    payload_rd = {
+                        "event_type": "CONVERSION",
+                        "event_family": "CDP",
+                        "payload": {
+                            "conversion_identifier": "ENVIADO_AO_VENDEDOR",
+                            "name": nome_rd,
+                            "email": email_rd,
+                            "cf_modelo_do_carro": modelo_rd
+                        }
+                    }
+                    headers_rd = {
+                        "Authorization": f"Bearer {access_token_rd}",
+                        "Content-Type": "application/json",
+                    }
+                    requests.post(url_rd, headers=headers_rd, json=payload_rd, timeout=30)
+        except Exception:
+            pass
         
         cur_oracle.close()
         conn_oracle.close()
