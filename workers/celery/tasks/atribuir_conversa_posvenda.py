@@ -13,7 +13,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-AGENTES_POSVENDA = [149, 74]
+AGENTES_POSVENDA = [117]
 INBOX_ID = 1
 CONTA_ID = 1
 BASE_URL = "https://chat.caiuas.com.br/api/v1/accounts"
