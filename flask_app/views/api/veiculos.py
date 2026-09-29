@@ -352,7 +352,7 @@ def get_veiculos_aguardando_faturamento():
                 {filtro_vendedor}
                 {filtro_repasse}
             ORDER BY CASE WHEN v.CHASSI_COMPLETO IS NOT NULL THEN 0 ELSE 1 END,
-    cvp.DATA_SOLICITACAO,vp.EMISSAO DESC
+            cvp.DATA_SOLICITACAO,vp.EMISSAO DESC
         """
         cur_oracle.execute(query)
         result = cur_oracle.fetchall()
