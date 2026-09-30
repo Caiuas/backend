@@ -994,6 +994,14 @@ def veiculos_faturados():
         else:
             filtro_sem_entrega = ''
 
+        veic_chegou = (request.args.get('veic_chegou') or '').strip().upper()
+        if veic_chegou in ('S', 'SIM'):
+            filtro_veic_chegou = 'AND crv.created_at IS NOT NULL'
+        elif veic_chegou == 'N':
+            filtro_veic_chegou = 'AND crv.created_at IS NULL'
+        else:
+            filtro_veic_chegou = ''
+
         if request.args.get('cod_sala') and cod_sala is None:
             return jsonify({
                 'status': 'error',
@@ -1239,6 +1247,7 @@ def veiculos_faturados():
                 {filtro_busca}
                 {filtro_repasse}
                 {filtro_sem_entrega}
+                {filtro_veic_chegou}
                 {filtro_sala}
             ORDER BY {order_by_field} DESC NULLS LAST, pm.DESCRICAO_MODELO
                 ) resultado
