@@ -24,6 +24,18 @@ gestores = [
     "ricardo.camargo@caiuas.com.br"
 ]
 
+DESTINATARIOS_POR_EMPRESA = {
+    11: "welder@caiuas.com.br",
+    33: "guilherme.machado@caiuas.com.br",
+}
+
+
+def normaliza_cod_empresa(valor):
+    try:
+        return int(float(str(valor).strip()))
+    except (TypeError, ValueError):
+        return None
+
 
 def ler_lob(valor):
     if valor is None or isinstance(valor, str):
@@ -81,6 +93,7 @@ query = """
                 TRUNC(SYSDATE) - TRUNC(vp.DATA_VENDA) AS dias_emissao,
                 --vp.VENDEDOR AS cod_vendedor,  
                 eu.EMAIL,
+                eu.COD_EMPRESA,
                 eu.NOME_COMPLETO AS nome_vendedor, 
                 pm.DESCRICAO_MODELO AS modelo, 
                 ce.DESCRICAO AS cor, 
@@ -306,6 +319,11 @@ for veiculo in veiculos:
 """
 
     destinatarios = [dados["EMAIL"]] if dados.get("EMAIL") else [SES_RECIPIENT]
+    email_empresa = DESTINATARIOS_POR_EMPRESA.get(
+        normaliza_cod_empresa(dados.get("COD_EMPRESA"))
+    )
+    if email_empresa and email_empresa not in destinatarios:
+        destinatarios.append(email_empresa)
     copia = sorted(
         {
             pessoas[login.upper()][1]
