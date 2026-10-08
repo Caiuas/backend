@@ -551,6 +551,104 @@ else:
 
 # print(passagens)
 
+# modelos de veículos (estoque x grade)
+query = """
+    SELECT p.DESCRICAO_PRODUTO, pm.DESCRICAO_MODELO, pm.COD_PRODUTO, pm.COD_MODELO
+    FROM PRODUTOS_MODELOS pm
+    LEFT JOIN PRODUTOS p ON 1=1
+        AND p.COD_PRODUTO = pm.COD_PRODUTO
+    WHERE 1=1
+        AND pm.ATIVO = 'S'
+        AND p.DESCRICAO_PRODUTO LIKE ('AUTO-%')
+        AND p.DESCRICAO_PRODUTO NOT IN (
+            'AUTO-ACCORD ( I )',
+            'AUTO-ZR-V',
+            'AUTO-NEW FIT',
+            'AUTO-CIVIC'
+        )
+    ORDER BY p.DESCRICAO_PRODUTO, pm.DESCRICAO_MODELO
+"""
+cur.execute(query)
+result = cur.fetchall()
+modelos_df = pd.DataFrame(result, columns=[desc[0] for desc in cur.description])
+
+# estoque por modelo
+query = """
+    SELECT pm.DESCRICAO_MODELO modelo, pm.COD_PRODUTO, pm.COD_MODELO
+    FROM veiculos v
+    LEFT JOIN produtos pr ON pr.COD_PRODUTO = v.COD_PRODUTO
+    LEFT JOIN CORES_EXTERNAS ce ON ce.COR_EXTERNA = v.COR_EXTERNA
+    LEFT JOIN produtos_modelos pm ON pm.COD_PRODUTO = v.COD_PRODUTO
+        AND pm.COD_MODELO = v.COD_MODELO
+    LEFT JOIN VEICULOS_PROPOSTAS vp ON vp.CHASSI_RESUMIDO = v.CHASSI_RESUMIDO
+        AND vp.STATUS_PROPOSTA <> 'C'
+    LEFT JOIN clientes c ON c.COD_CLIENTE = vp.COD_CLIENTE
+    LEFT JOIN patio p ON p.COD_PATIO = v.COD_PATIO
+    LEFT JOIN EMPRESAS_USUARIOS eu ON eu.NOME = vp.VENDEDOR
+    LEFT JOIN empresas_usuarios eu2 ON eu2.nome = vp.QUEM_APROVOU
+    LEFT JOIN empresas e ON e.cod_empresa = v.COD_EMPRESA
+    LEFT JOIN caiuas_recebimento_veiculo crv ON crv.cod_modelo = v.COD_MODELO
+        AND crv.cod_produto = v.COD_PRODUTO
+        AND crv.chassi_resumido = v.CHASSI_RESUMIDO
+        AND crv.cod_empresa = v.COD_EMPRESA
+    WHERE v.status = 'E'
+      AND e.cod_empresa IN ('11','33')
+      AND NVL(v.novo_usado, 'N') <> 'U'
+      AND v.COD_PROPOSTA_INTERNET IS NULL
+      AND vp.COD_PROPOSTA is null
+      AND NVL(vp.INTERNET, ' ') <> 'F'
+    ORDER BY pm.DESCRICAO_MODELO
+"""
+cur.execute(query)
+result = cur.fetchall()
+estoque_modelos_df = pd.DataFrame(result, columns=[desc[0] for desc in cur.description])
+
+# grade por modelo
+query = """
+    SELECT vp.COD_PRODUTO, vp.COD_MODELO
+    FROM VEICULOS_PEDIDOS vp
+    LEFT JOIN VEICULOS_PROPOSTAS vp2 ON 1=1
+        AND vp.COD_PEDIDO = vp2.COD_PEDIDO
+        AND vp2.STATUS_PROPOSTA <> 'C'
+    LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+        AND eu.NOME = vp2.VENDEDOR
+    LEFT JOIN PRODUTOS_MODELOS pm ON 1=1
+        AND pm.COD_PRODUTO = vp.COD_PRODUTO
+        AND vp.COD_MODELO = pm.COD_MODELO
+    LEFT JOIN CORES_EXTERNAS ce ON 1=1
+        AND ce.COR_EXTERNA = vp.COR_EXTERNA
+    WHERE 1=1
+        AND NVL(vp.STATUS_PEDIDO, ' ') <> 'E'
+        AND vp.COD_EMPRESA IN (11,33)
+        AND vp2.COD_PROPOSTA IS null
+"""
+cur.execute(query)
+result = cur.fetchall()
+grade_modelos_df = pd.DataFrame(result, columns=[desc[0] for desc in cur.description])
+
+# cruza modelos com estoque e grade
+modelos_df['COD_PRODUTO'] = modelos_df['COD_PRODUTO'].astype(str)
+modelos_df['COD_MODELO'] = modelos_df['COD_MODELO'].astype(str)
+modelos_df['chave'] = modelos_df['COD_PRODUTO'] + '|' + modelos_df['COD_MODELO']
+
+estoque_modelos_df['chave'] = (
+    estoque_modelos_df['COD_PRODUTO'].astype(str) + '|' + estoque_modelos_df['COD_MODELO'].astype(str)
+)
+grade_modelos_df['chave'] = (
+    grade_modelos_df['COD_PRODUTO'].astype(str) + '|' + grade_modelos_df['COD_MODELO'].astype(str)
+)
+
+modelos_df['ESTOQUE'] = modelos_df['chave'].map(estoque_modelos_df.groupby('chave').size()).fillna(0).astype(int)
+modelos_df['GRADE'] = modelos_df['chave'].map(grade_modelos_df.groupby('chave').size()).fillna(0).astype(int)
+modelos_df['TOTAL'] = modelos_df['ESTOQUE'] + modelos_df['GRADE']
+
+# agrupa modelos repetidos (mesmo nome em anos diferentes) somando as quantidades
+modelos_df = (
+    modelos_df.groupby(['DESCRICAO_PRODUTO', 'DESCRICAO_MODELO'], as_index=False)[['ESTOQUE', 'GRADE', 'TOTAL']]
+    .sum()
+    .sort_values(['DESCRICAO_PRODUTO', 'DESCRICAO_MODELO'])
+)
+
 cur.close()
 conn.close()
 # faça uma tabela com a meta x qtd vendida por empresa
@@ -668,6 +766,50 @@ try:
                                edgecolor=COR_LINHA, linewidth=1))
         return y
 
+    def _tabela_modelos(ax, x, y_topo, largura, linhas):
+        cabecalhos = ['Modelo', 'Estoque', 'Grade', 'Total']
+        fracoes = [0.52, 0.16, 0.16, 0.16]
+        altura_cabecalho = 0.42
+        altura_linha = 0.32
+        fonte = 8.5
+
+        xs = [x]
+        for fracao in fracoes[:-1]:
+            xs.append(xs[-1] + largura * fracao)
+
+        ax.add_patch(Rectangle((x, y_topo - altura_cabecalho), largura, altura_cabecalho,
+                               facecolor=COR_CABECALHO, edgecolor='none'))
+        for i, cabecalho in enumerate(cabecalhos):
+            largura_col = largura * fracoes[i]
+            alinhamento = 'left' if i == 0 else 'right'
+            tx = xs[i] + 0.14 if i == 0 else xs[i] + largura_col - 0.14
+            ax.text(tx, y_topo - altura_cabecalho / 2, cabecalho, ha=alinhamento,
+                    va='center', fontsize=9.5, color='#ffffff', fontweight='bold')
+
+        y = y_topo - altura_cabecalho
+        for tipo, modelo, estoque, grade, total, zebra in linhas:
+            if tipo == 'item':
+                fundo = '#f8fafc' if zebra % 2 == 0 else '#ffffff'
+                cor, peso, prefixo = COR_TEXTO, 'normal', '   '
+            elif tipo == 'subtotal':
+                fundo, cor, peso, prefixo = '#dbeafe', COR_TEXTO, 'bold', ''
+            else:
+                fundo, cor, peso, prefixo = COR_CABECALHO, '#ffffff', 'bold', ''
+
+            ax.add_patch(Rectangle((x, y - altura_linha), largura, altura_linha,
+                                   facecolor=fundo, edgecolor='none'))
+            for i, valor in enumerate([prefixo + str(modelo), _num(estoque), _num(grade), _num(total)]):
+                largura_col = largura * fracoes[i]
+                alinhamento = 'left' if i == 0 else 'right'
+                tx = xs[i] + 0.14 if i == 0 else xs[i] + largura_col - 0.14
+                ax.text(tx, y - altura_linha / 2, valor, ha=alinhamento, va='center',
+                        fontsize=fonte, color=cor, fontweight=peso)
+            y -= altura_linha
+
+        ax.add_patch(Rectangle((x, y), largura, y_topo - y, fill=False,
+                               edgecolor=COR_LINHA, linewidth=1))
+        return y
+
     def gerar_dashboard_pdf(caminho='dashboard_vendas.pdf'):
         # vendidos = mesma base da planilha "Fechamento Geral" (df todos)
         vendas_dash = todos.copy()
@@ -737,6 +879,25 @@ try:
                 _num(linha['Test drives']),
             ])
 
+        # modelos (estoque x grade) com subtotal por descrição de produto
+        modelos_linhas = []
+        zebra = 0
+        for produto, grupo in modelos_df.groupby('DESCRICAO_PRODUTO', sort=False):
+            for _, linha in grupo.iterrows():
+                modelos_linhas.append((
+                    'item', linha['DESCRICAO_MODELO'],
+                    int(linha['ESTOQUE']), int(linha['GRADE']), int(linha['TOTAL']), zebra,
+                ))
+                zebra += 1
+            modelos_linhas.append((
+                'subtotal', f"Subtotal {produto}",
+                int(grupo['ESTOQUE'].sum()), int(grupo['GRADE'].sum()), int(grupo['TOTAL'].sum()), 0,
+            ))
+        modelos_linhas.append((
+            'total', 'Total geral',
+            int(modelos_df['ESTOQUE'].sum()), int(modelos_df['GRADE'].sum()), int(modelos_df['TOTAL'].sum()), 0,
+        ))
+
         # layout
         LARGURA = 8.27
         MARGEM = 0.5
@@ -748,6 +909,7 @@ try:
         n_pos_sor = max(len(posicao_sorocaba_linhas), 1)
         n_pos_ind = max(len(posicao_indaiatuba_linhas), 1)
         n_fluxo = max(len(fluxo_linhas), 1)
+        n_modelos = len(modelos_linhas)
 
         def secao(n):
             return 0.42 + (0.42 + n * ALTURA_LINHA)
@@ -758,6 +920,7 @@ try:
         altura += secao(n_pos_sor) + 0.62
         altura += secao(n_pos_ind) + 0.62
         altura += secao(n_fluxo) + 0.62
+        altura += 0.42 + (0.42 + n_modelos * 0.32) + 0.62
         altura += 0.45
 
         fig = plt.figure(figsize=(LARGURA, altura), dpi=200)
@@ -847,6 +1010,10 @@ try:
         y = _tabela(ax, MARGEM, y, UTIL,
                     ['Loja', 'Pass. dia ant.', 'Pass. mês', 'Média/dia', 'TD dia ant.', 'TD mês'],
                     fluxo_linhas, [0.22, 0.16, 0.15, 0.15, 0.16, 0.16])
+        y -= 0.62
+
+        y = _titulo(ax, MARGEM, y, 'Veículos por modelo (estoque x grade)')
+        y = _tabela_modelos(ax, MARGEM, y, UTIL, modelos_linhas)
         y -= 0.62
 
         fig.savefig(caminho, format='pdf', facecolor=COR_FUNDO)
