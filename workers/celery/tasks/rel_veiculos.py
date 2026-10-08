@@ -597,4 +597,254 @@ with pd.ExcelWriter('rel_veiculos.xlsx', engine='xlsxwriter') as writer:
     todos.to_excel(writer, sheet_name='Todos')
     clientes_repetidos.to_excel(writer, sheet_name='Clientes Repetidos')
     passagens.to_excel(writer, sheet_name='Passagens')
-   
+
+
+# ============================================================
+# Dashboard de vendas em PDF (layout moderno, foco em celular)
+# ============================================================
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import FancyBboxPatch, Rectangle
+
+    COR_FUNDO = '#eef2f7'
+    COR_CABECALHO = '#0f172a'
+    COR_CARD = '#ffffff'
+    COR_TEXTO = '#111827'
+    COR_SUAVE = '#64748b'
+    COR_LINHA = '#e2e8f0'
+    COR_AZUL = '#2563eb'
+    COR_VERDE = '#16a34a'
+    COR_LARANJA = '#f59e0b'
+    COR_VERMELHO = '#dc2626'
+
+    def _num(valor):
+        try:
+            return f"{int(round(float(valor))):,}".replace(',', '.')
+        except (TypeError, ValueError):
+            return '0'
+
+    def _limpar_familia(nome):
+        if isinstance(nome, str) and len(nome.split('-')) > 1:
+            return nome.split('-')[1].strip()
+        return nome
+
+    def _montar_posicao(df):
+        posicao = (
+            df.groupby(['FAMILIA_VEICULO', 'NOVO_USADO'])
+            .size()
+            .unstack(fill_value=0)
+        )
+        for coluna in ['Novo', 'Direta']:
+            if coluna not in posicao.columns:
+                posicao[coluna] = 0
+        posicao = posicao[['Novo', 'Direta']]
+        total = int(posicao['Novo'].sum() + posicao['Direta'].sum())
+        posicao = posicao.sort_values(['Novo', 'Direta'], ascending=False)
+        linhas = [
+            [modelo, _num(linha['Novo']), _num(linha['Direta'])]
+            for modelo, linha in posicao.iterrows()
+        ]
+        return linhas, total
+
+    def _box(ax, x, y, w, h, cor=COR_CARD, raio=0.14):
+        ax.add_patch(FancyBboxPatch(
+            (x, y), w, h,
+            boxstyle=f"round,pad=0,rounding_size={raio}",
+            linewidth=0, facecolor=cor, mutation_aspect=1,
+        ))
+
+    def _titulo(ax, x, y, texto, cor=COR_AZUL):
+        ax.add_patch(Rectangle((x, y - 0.26), 0.07, 0.26, facecolor=cor, edgecolor='none'))
+        ax.text(x + 0.18, y - 0.13, texto, ha='left', va='center',
+                fontsize=12.5, color=COR_TEXTO, fontweight='bold')
+        return y - 0.42
+
+    def _tabela(ax, x, y_topo, largura, cabecalhos, linhas, fracoes,
+                altura_linha=0.34, altura_cabecalho=0.42, fonte=9.5):
+        xs = [x]
+        for fracao in fracoes[:-1]:
+            xs.append(xs[-1] + largura * fracao)
+
+        ax.add_patch(Rectangle((x, y_topo - altura_cabecalho), largura, altura_cabecalho,
+                               facecolor=COR_CABECALHO, edgecolor='none'))
+        for i, cabecalho in enumerate(cabecalhos):
+            largura_col = largura * fracoes[i]
+            alinhamento = 'left' if i == 0 else 'right'
+            tx = xs[i] + 0.14 if i == 0 else xs[i] + largura_col - 0.14
+            ax.text(tx, y_topo - altura_cabecalho / 2, str(cabecalho), ha=alinhamento,
+                    va='center', fontsize=fonte, color='#ffffff', fontweight='bold')
+
+        y = y_topo - altura_cabecalho
+        for indice, linha in enumerate(linhas):
+            fundo = '#f8fafc' if indice % 2 == 0 else '#ffffff'
+            ax.add_patch(Rectangle((x, y - altura_linha), largura, altura_linha,
+                                   facecolor=fundo, edgecolor='none'))
+            for i, valor in enumerate(linha):
+                largura_col = largura * fracoes[i]
+                alinhamento = 'left' if i == 0 else 'right'
+                tx = xs[i] + 0.14 if i == 0 else xs[i] + largura_col - 0.14
+                ax.text(tx, y - altura_linha / 2, str(valor), ha=alinhamento, va='center',
+                        fontsize=fonte, color=COR_TEXTO)
+            y -= altura_linha
+
+        ax.add_patch(Rectangle((x, y), largura, y_topo - y, fill=False,
+                               edgecolor=COR_LINHA, linewidth=1))
+        return y
+
+    def gerar_dashboard_pdf(caminho='dashboard_vendas.pdf'):
+        # posição atual (faturados por modelo)
+        faturados_dash = faturados.copy()
+        faturados_dash['FAMILIA_VEICULO'] = faturados_dash['FAMILIA_VEICULO'].apply(_limpar_familia)
+        faturados_dash = faturados_dash[faturados_dash['NOVO_USADO'].isin(['Novo', 'Direta'])]
+        faturado_loja = {
+            int(codigo): int(qtd)
+            for codigo, qtd in faturados_dash.groupby('EMPRESA_VENDEDOR').size().items()
+            if pd.notna(codigo)
+        }
+
+        posicao_linhas, total_faturado = _montar_posicao(faturados_dash)
+
+        codigo_loja = pd.to_numeric(faturados_dash['EMPRESA_VENDEDOR'], errors='coerce')
+        posicao_sorocaba_linhas, _ = _montar_posicao(faturados_dash[codigo_loja == 11])
+        posicao_indaiatuba_linhas, _ = _montar_posicao(faturados_dash[codigo_loja == 33])
+
+        meta_total = int(fechamento_empresa['QTD_META'].sum())
+        percentual_meta = (total_faturado / meta_total * 100) if meta_total else 0
+
+        # meta por loja (com o percentual atingido de cada uma) e quanto falta por loja
+        meta_loja_linhas = []
+        faltam_loja = {}
+        for loja, meta in fechamento_empresa[['EMPRESA_VENDEDOR', 'QTD_META']].values.tolist():
+            codigo = 11 if loja == 'Sorocaba' else 33
+            faturado = faturado_loja.get(codigo, 0)
+            percentual = (faturado / meta * 100) if meta else 0
+            meta_loja_linhas.append([loja, _num(meta), _num(faturado), f"{percentual:.1f}%"])
+            faltam_loja[loja] = int(meta) - faturado
+
+        # total que falta para bater a meta (meta - vendido)
+        total_faltam = meta_total - total_faturado
+        meta_por_dia = (
+            total_faltam / qtd_dias_uteis_restantes if qtd_dias_uteis_restantes else 0
+        )
+        meta_por_dia_loja = {
+            loja: (falta / qtd_dias_uteis_restantes if qtd_dias_uteis_restantes else 0)
+            for loja, falta in faltam_loja.items()
+        }
+
+        # layout
+        LARGURA = 8.27
+        MARGEM = 0.5
+        UTIL = LARGURA - 2 * MARGEM
+        ALTURA_LINHA = 0.34
+
+        n_meta = max(len(meta_loja_linhas), 1)
+        n_pos = max(len(posicao_linhas), 1)
+        n_pos_sor = max(len(posicao_sorocaba_linhas), 1)
+        n_pos_ind = max(len(posicao_indaiatuba_linhas), 1)
+
+        def secao(n):
+            return 0.42 + (0.42 + n * ALTURA_LINHA)
+
+        altura = 0.45 + 1.15 + 0.55 + 1.2 + 0.35 + 1.2 + 0.6
+        altura += secao(n_meta) + 0.62
+        altura += secao(n_pos) + 0.62
+        altura += secao(n_pos_sor) + 0.62
+        altura += secao(n_pos_ind) + 0.62
+        altura += 1.15 + 0.45
+
+        fig = plt.figure(figsize=(LARGURA, altura), dpi=200)
+        fig.patch.set_facecolor(COR_FUNDO)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_xlim(0, LARGURA)
+        ax.set_ylim(0, altura)
+        ax.axis('off')
+
+        y = altura - 0.45
+
+        # cabeçalho
+        _box(ax, MARGEM, y - 1.15, UTIL, 1.15, COR_CABECALHO)
+        ax.text(MARGEM + 0.35, y - 0.42, 'Dashboard de Vendas', color='#ffffff',
+                fontsize=19, fontweight='bold', va='center')
+        ax.text(MARGEM + 0.35, y - 0.82, 'Caiuás  •  Sorocaba & Indaiatuba', color='#94a3b8',
+                fontsize=10.5, va='center')
+        ax.text(LARGURA - MARGEM - 0.35, y - 0.42, 'Dia', color='#94a3b8',
+                fontsize=10, ha='right', va='center')
+        ax.text(LARGURA - MARGEM - 0.35, y - 0.82,
+                (hoje - datetime.timedelta(days=1)).strftime('%d/%m/%Y'), color='#ffffff',
+                fontsize=15, fontweight='bold', ha='right', va='center')
+        y -= 1.15 + 0.55
+
+        # KPIs
+        kpis_linha1 = [
+            ('Meta das lojas', _num(meta_total), COR_AZUL),
+            ('Faturados', _num(total_faturado), COR_VERDE),
+            ('% da meta', f"{percentual_meta:.1f}%", COR_LARANJA),
+            ('Dias úteis restantes', _num(qtd_dias_uteis_restantes), COR_AZUL),
+        ]
+        kpis_linha2 = [
+            ('Faltam (geral)', _num(total_faltam), COR_VERMELHO),
+            ('Faltam Sorocaba', _num(faltam_loja.get('Sorocaba', 0)), COR_VERMELHO),
+            ('Faltam Indaiatuba', _num(faltam_loja.get('Indaiatuba', 0)), COR_VERMELHO),
+            ('Meta por dia', f"{meta_por_dia:.1f}", COR_LARANJA),
+        ]
+        gap = 0.18
+        altura_kpi = 1.2
+
+        def desenhar_linha_kpis(kpis, y):
+            largura_kpi = (UTIL - gap * (len(kpis) - 1)) / len(kpis)
+            for i, (rotulo, valor, cor) in enumerate(kpis):
+                x = MARGEM + i * (largura_kpi + gap)
+                _box(ax, x, y - altura_kpi, largura_kpi, altura_kpi)
+                ax.add_patch(Rectangle((x + 0.12, y - altura_kpi), largura_kpi - 0.24, 0.08,
+                                       facecolor=cor, edgecolor='none'))
+                centro = x + largura_kpi / 2
+                ax.text(centro, y - 0.42, rotulo, fontsize=9, color=COR_SUAVE,
+                        va='center', ha='center')
+                ax.text(centro, y - 0.82, valor, fontsize=17, color=COR_TEXTO,
+                        fontweight='bold', va='center', ha='center')
+            return y - altura_kpi
+
+        y = desenhar_linha_kpis(kpis_linha1, y)
+        y -= 0.35
+        y = desenhar_linha_kpis(kpis_linha2, y)
+        y -= 0.6
+
+        y = _titulo(ax, MARGEM, y, 'META')
+        y = _tabela(ax, MARGEM, y, UTIL, ['Loja', 'Meta', 'Vendas', '% da meta'],
+                    meta_loja_linhas, [0.4, 0.2, 0.2, 0.2])
+        y -= 0.62
+
+        y = _titulo(ax, MARGEM, y, 'Posição atual geral')
+        y = _tabela(ax, MARGEM, y, UTIL, ['Modelo', 'Novo', 'Direta'],
+                    posicao_linhas, [0.55, 0.225, 0.225])
+        y -= 0.62
+
+        y = _titulo(ax, MARGEM, y, 'Posição atual - Sorocaba')
+        y = _tabela(ax, MARGEM, y, UTIL, ['Modelo', 'Novo', 'Direta'],
+                    posicao_sorocaba_linhas, [0.55, 0.225, 0.225])
+        y -= 0.62
+
+        y = _titulo(ax, MARGEM, y, 'Posição atual - Indaiatuba')
+        y = _tabela(ax, MARGEM, y, UTIL, ['Modelo', 'Novo', 'Direta'],
+                    posicao_indaiatuba_linhas, [0.55, 0.225, 0.225])
+        y -= 0.62
+
+        # rodapé
+        _box(ax, MARGEM, y - 1.15, UTIL, 1.15, COR_AZUL)
+        ax.text(MARGEM + 0.35, y - 0.42, 'Quantidade a faturar até o fim do mês',
+                color='#dbeafe', fontsize=11, va='center')
+        ax.text(MARGEM + 0.35, y - 0.82, _num(total_faltam), color='#ffffff',
+                fontsize=20, fontweight='bold', va='center')
+        ax.text(LARGURA - MARGEM - 0.35, y - 0.62,
+                f"{_num(qtd_dias_uteis_restantes)} dias úteis restantes",
+                color='#dbeafe', fontsize=11, ha='right', va='center')
+
+        fig.savefig(caminho, format='pdf', facecolor=COR_FUNDO)
+        plt.close(fig)
+        print(f'Dashboard salvo em {caminho}')
+
+    gerar_dashboard_pdf('dashboard_vendas.pdf')
+except Exception as erro:
+    print(f'Dashboard não gerado: {erro}')
