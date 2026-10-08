@@ -299,25 +299,13 @@ query = f"""
 cur.execute(query)
 result = cur.fetchall()
 venda_grade = pd.DataFrame(result, columns=[desc[0] for desc in cur.description])
-# apenas o que tem pedido_fabrica diferente de null
 venda_grade = venda_grade[venda_grade['PEDIDO_FABRICA'].notnull()]
-
-
-# une os dois dataframes
 todos = pd.concat([faturados, venda_grade, venda_estoque], ignore_index=True)
-
 varejo = todos[todos['NOVO_USADO'] == 'Novo']
 vd = todos[todos['NOVO_USADO'] == 'Direta']
-# LX = todo que contem " LX" no modelo
 LX = todos[todos['MODELO'].str.contains(" LX", na=False)]
-# remove todos os LX de todos
-# todos = todos[~todos['MODELO'].str.contains(" LX", na=False)]
-# renomeia familia LX para LX
 todos.loc[todos['MODELO'].str.contains(" LX", na=False), 'FAMILIA_VEICULO'] = 'LX'
-# remove 'AUTO-' do iniicio do nome do modelo
 todos['MODELO'] = todos['MODELO'].str.replace('AUTO - ', '', regex=False)
-
-# formatação
 col_familia = next((c for c in todos.columns if c.lower() == 'familia_veiculo'), None)
 todos[col_familia] = todos[col_familia].apply(
     lambda x: x.split('-')[1].strip() if isinstance(x, str) and len(x.split('-')) > 1 else x
@@ -325,19 +313,12 @@ todos[col_familia] = todos[col_familia].apply(
 
 Sorocaba = todos[todos['EMPRESA_VENDEDOR'] == 11]
 Indaiatuba = todos[todos['EMPRESA_VENDEDOR'] == 33]
-
-# Agrupa onde a linha é a familia e coluna é novo_usado e soma a quantidade (LX primeiro, demais em ordem alfabética)
 ordem_familias = lambda df: sorted(df.index, key=lambda x: (x != 'LX', str(x)))
-
 fechamento_sorocaba = Sorocaba.groupby(['FAMILIA_VEICULO', 'NOVO_USADO']).size().unstack(fill_value=0)
 fechamento_sorocaba = fechamento_sorocaba.reindex(ordem_familias(fechamento_sorocaba))
-
 fechamento_indaiatuba = Indaiatuba.groupby(['FAMILIA_VEICULO', 'NOVO_USADO']).size().unstack(fill_value=0)
 fechamento_indaiatuba = fechamento_indaiatuba.reindex(ordem_familias(fechamento_indaiatuba))
-
-# remove todos os veiculos que não estão em nenhum dos dois dataframes
 todos = todos[todos['FAMILIA_VEICULO'].isin(fechamento_sorocaba.index) | todos['FAMILIA_VEICULO'].isin(fechamento_indaiatuba.index)]
-# Agrupa onde a linha é a familia e coluna é novo_usado e soma a quantidade (LX primeiro, demais em ordem alfabética)
 fechamento_geral = todos.groupby(['FAMILIA_VEICULO', 'NOVO_USADO']).size().unstack(fill_value=0)
 fechamento_geral = fechamento_geral.reindex(ordem_familias(fechamento_geral))
 
@@ -360,23 +341,17 @@ fechamento_vendedores = pd.merge(fechamento_vendedores, meta, left_on='COD_VENDE
 fechamento_vendedores['% Meta'] = (fechamento_vendedores['Total'] / fechamento_vendedores['QTD_META']) * 100
 fechamento_vendedores['% Meta'] = fechamento_vendedores['% Meta'].round(2)
 
-# soma total de faturados e qtd_comissao
 fechamento_empresa = pd.pivot_table(fechamento_vendedores, index='EMPRESA_VENDEDOR', values=['Total', 'QTD_META'], aggfunc='sum').reset_index()
 fechamento_empresa['% Meta'] = (fechamento_empresa['Total'] / fechamento_empresa['QTD_META']) * 100
 fechamento_empresa['% Meta'] = fechamento_empresa['% Meta'].round(2)
 
-# renomeia empresa_vendedor de 11 para Sorocaba e 33 para Indaiatuba
 fechamento_empresa = fechamento_empresa.replace({'EMPRESA_VENDEDOR': {11: 'Sorocaba', 33: 'Indaiatuba'}})
-# print(fechamento_empresa)
-# print(fechamento_vendedores)
 
-# apenas os veiculos que possuem cod_cliente repetido
 col_cliente = next((c for c in todos.columns if c.lower() == 'cod_cliente'), None)
 clientes_repetidos = todos.dropna(subset=[col_cliente])
 clientes_repetidos = clientes_repetidos[clientes_repetidos.duplicated(subset=[col_cliente], keep=False)]
 clientes_repetidos = clientes_repetidos.sort_values(by=col_cliente)
 
-# quantidade de veiculos por modelo (varejo x venda direta)
 col_modelo = next((c for c in todos.columns if c.lower() == 'familia_veiculo'), None)
 col_novo_usado = next((c for c in todos.columns if c.lower() == 'novo_usado'), None)
 
