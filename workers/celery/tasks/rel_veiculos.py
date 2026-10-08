@@ -367,8 +367,8 @@ fechamento_empresa['% Meta'] = fechamento_empresa['% Meta'].round(2)
 
 # renomeia empresa_vendedor de 11 para Sorocaba e 33 para Indaiatuba
 fechamento_empresa = fechamento_empresa.replace({'EMPRESA_VENDEDOR': {11: 'Sorocaba', 33: 'Indaiatuba'}})
-print(fechamento_empresa)
-print(fechamento_vendedores)
+# print(fechamento_empresa)
+# print(fechamento_vendedores)
 
 # apenas os veiculos que possuem cod_cliente repetido
 col_cliente = next((c for c in todos.columns if c.lower() == 'cod_cliente'), None)
@@ -462,6 +462,29 @@ else:
     )
 
 print(qtd_dias_uteis_restantes)
+
+# meta proporcional aos dias úteis já decorridos e quanto falta para bater a meta do mês
+dias_uteis_decorridos = qtd_dias_uteis - qtd_dias_uteis_restantes
+
+if qtd_dias_uteis > 0:
+    fechamento_empresa['Meta até agora'] = (
+        fechamento_empresa['QTD_META'] * (dias_uteis_decorridos / qtd_dias_uteis)
+    ).round(2)
+else:
+    fechamento_empresa['Meta até agora'] = 0
+
+fechamento_empresa['Faltam p/ fim do mês'] = (
+    fechamento_empresa['QTD_META'] - fechamento_empresa['Total']
+).round(2)
+
+if qtd_dias_uteis_restantes > 0:
+    fechamento_empresa['Meta por dia'] = (
+        fechamento_empresa['Faltam p/ fim do mês'] / qtd_dias_uteis_restantes
+    ).round(2)
+else:
+    fechamento_empresa['Meta por dia'] = 0
+
+print(fechamento_empresa)
 
 cur.close()
 conn.close()
