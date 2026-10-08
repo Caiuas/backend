@@ -694,37 +694,38 @@ try:
         return y
 
     def gerar_dashboard_pdf(caminho='dashboard_vendas.pdf'):
-        # posição atual (faturados por modelo)
-        faturados_dash = faturados.copy()
-        faturados_dash['FAMILIA_VEICULO'] = faturados_dash['FAMILIA_VEICULO'].apply(_limpar_familia)
-        faturados_dash = faturados_dash[faturados_dash['NOVO_USADO'].isin(['Novo', 'Direta'])]
-        faturado_loja = {
+        # vendidos = mesma base da planilha "Fechamento Geral" (df todos)
+        vendas_dash = todos.copy()
+        vendas_dash = vendas_dash[vendas_dash['NOVO_USADO'].isin(['Novo', 'Direta'])]
+
+        vendido_loja = {
             int(codigo): int(qtd)
-            for codigo, qtd in faturados_dash.groupby('EMPRESA_VENDEDOR').size().items()
+            for codigo, qtd in vendas_dash.groupby('EMPRESA_VENDEDOR').size().items()
             if pd.notna(codigo)
         }
 
-        posicao_linhas, total_faturado = _montar_posicao(faturados_dash)
+        posicao_linhas, _ = _montar_posicao(vendas_dash)
+        total_vendido = int(fechamento_geral.sum().sum())
 
-        codigo_loja = pd.to_numeric(faturados_dash['EMPRESA_VENDEDOR'], errors='coerce')
-        posicao_sorocaba_linhas, _ = _montar_posicao(faturados_dash[codigo_loja == 11])
-        posicao_indaiatuba_linhas, _ = _montar_posicao(faturados_dash[codigo_loja == 33])
+        codigo_loja = pd.to_numeric(vendas_dash['EMPRESA_VENDEDOR'], errors='coerce')
+        posicao_sorocaba_linhas, _ = _montar_posicao(vendas_dash[codigo_loja == 11])
+        posicao_indaiatuba_linhas, _ = _montar_posicao(vendas_dash[codigo_loja == 33])
 
         meta_total = int(fechamento_empresa['QTD_META'].sum())
-        percentual_meta = (total_faturado / meta_total * 100) if meta_total else 0
+        percentual_meta = (total_vendido / meta_total * 100) if meta_total else 0
 
         # meta por loja (com o percentual atingido de cada uma) e quanto falta por loja
         meta_loja_linhas = []
         faltam_loja = {}
         for loja, meta in fechamento_empresa[['EMPRESA_VENDEDOR', 'QTD_META']].values.tolist():
             codigo = 11 if loja == 'Sorocaba' else 33
-            faturado = faturado_loja.get(codigo, 0)
-            percentual = (faturado / meta * 100) if meta else 0
-            meta_loja_linhas.append([loja, _num(meta), _num(faturado), f"{percentual:.1f}%"])
-            faltam_loja[loja] = int(meta) - faturado
+            vendido = vendido_loja.get(codigo, 0)
+            percentual = (vendido / meta * 100) if meta else 0
+            meta_loja_linhas.append([loja, _num(meta), _num(vendido), f"{percentual:.1f}%"])
+            faltam_loja[loja] = int(meta) - vendido
 
         # total que falta para bater a meta (meta - vendido)
-        total_faltam = meta_total - total_faturado
+        total_faltam = meta_total - total_vendido
         meta_por_dia = (
             total_faltam / qtd_dias_uteis_restantes if qtd_dias_uteis_restantes else 0
         )
@@ -732,6 +733,34 @@ try:
             loja: (falta / qtd_dias_uteis_restantes if qtd_dias_uteis_restantes else 0)
             for loja, falta in faltam_loja.items()
         }
+
+        # fluxo de loja (passagens e test drives) - geral e por loja
+        fluxo_base = passagens.copy()
+        for coluna in ('Passagens dia anterior', 'Passagens no mês',
+                       'Test drives dia anterior', 'Test drives', 'Média passagens/dia'):
+            if coluna not in fluxo_base.columns:
+                fluxo_base[coluna] = 0
+
+        def _soma(coluna):
+            return float(fluxo_base[coluna].sum())
+
+        fluxo_linhas = [[
+            'Geral',
+            _num(_soma('Passagens dia anterior')),
+            _num(_soma('Passagens no mês')),
+            f"{_soma('Média passagens/dia'):.1f}",
+            _num(_soma('Test drives dia anterior')),
+            _num(_soma('Test drives')),
+        ]]
+        for _, linha in fluxo_base.iterrows():
+            fluxo_linhas.append([
+                linha['Empresa'],
+                _num(linha['Passagens dia anterior']),
+                _num(linha['Passagens no mês']),
+                f"{float(linha['Média passagens/dia']):.1f}",
+                _num(linha['Test drives dia anterior']),
+                _num(linha['Test drives']),
+            ])
 
         # layout
         LARGURA = 8.27
@@ -743,16 +772,18 @@ try:
         n_pos = max(len(posicao_linhas), 1)
         n_pos_sor = max(len(posicao_sorocaba_linhas), 1)
         n_pos_ind = max(len(posicao_indaiatuba_linhas), 1)
+        n_fluxo = max(len(fluxo_linhas), 1)
 
         def secao(n):
             return 0.42 + (0.42 + n * ALTURA_LINHA)
 
-        altura = 0.45 + 1.15 + 0.55 + 1.2 + 0.35 + 1.2 + 0.6
+        altura = 0.45 + 1.15 + 0.55 + 1.2 + 0.35 + 1.2 + 0.35 + 1.2 + 0.6
         altura += secao(n_meta) + 0.62
         altura += secao(n_pos) + 0.62
         altura += secao(n_pos_sor) + 0.62
         altura += secao(n_pos_ind) + 0.62
-        altura += 1.15 + 0.45
+        altura += secao(n_fluxo) + 0.62
+        altura += 0.45
 
         fig = plt.figure(figsize=(LARGURA, altura), dpi=200)
         fig.patch.set_facecolor(COR_FUNDO)
@@ -769,17 +800,17 @@ try:
                 fontsize=19, fontweight='bold', va='center')
         ax.text(MARGEM + 0.35, y - 0.82, 'Caiuás  •  Sorocaba & Indaiatuba', color='#94a3b8',
                 fontsize=10.5, va='center')
-        ax.text(LARGURA - MARGEM - 0.35, y - 0.42, 'Dia', color='#94a3b8',
+        ax.text(LARGURA - MARGEM - 0.35, y - 0.42, 'Relatório gerado em', color='#94a3b8',
                 fontsize=10, ha='right', va='center')
         ax.text(LARGURA - MARGEM - 0.35, y - 0.82,
-                (hoje - datetime.timedelta(days=1)).strftime('%d/%m/%Y'), color='#ffffff',
+                datetime.datetime.now().strftime('%d/%m/%Y %H:%M'), color='#ffffff',
                 fontsize=15, fontweight='bold', ha='right', va='center')
         y -= 1.15 + 0.55
 
         # KPIs
         kpis_linha1 = [
             ('Meta das lojas', _num(meta_total), COR_AZUL),
-            ('Faturados', _num(total_faturado), COR_VERDE),
+            ('Vendidos', _num(total_vendido), COR_VERDE),
             ('% da meta', f"{percentual_meta:.1f}%", COR_LARANJA),
             ('Dias úteis restantes', _num(qtd_dias_uteis_restantes), COR_AZUL),
         ]
@@ -787,7 +818,11 @@ try:
             ('Faltam (geral)', _num(total_faltam), COR_VERMELHO),
             ('Faltam Sorocaba', _num(faltam_loja.get('Sorocaba', 0)), COR_VERMELHO),
             ('Faltam Indaiatuba', _num(faltam_loja.get('Indaiatuba', 0)), COR_VERMELHO),
+        ]
+        kpis_linha3 = [
             ('Meta por dia', f"{meta_por_dia:.1f}", COR_LARANJA),
+            ('Meta/dia Sorocaba', f"{meta_por_dia_loja.get('Sorocaba', 0):.1f}", COR_LARANJA),
+            ('Meta/dia Indaiatuba', f"{meta_por_dia_loja.get('Indaiatuba', 0):.1f}", COR_LARANJA),
         ]
         gap = 0.18
         altura_kpi = 1.2
@@ -809,6 +844,8 @@ try:
         y = desenhar_linha_kpis(kpis_linha1, y)
         y -= 0.35
         y = desenhar_linha_kpis(kpis_linha2, y)
+        y -= 0.35
+        y = desenhar_linha_kpis(kpis_linha3, y)
         y -= 0.6
 
         y = _titulo(ax, MARGEM, y, 'META')
@@ -831,15 +868,11 @@ try:
                     posicao_indaiatuba_linhas, [0.55, 0.225, 0.225])
         y -= 0.62
 
-        # rodapé
-        _box(ax, MARGEM, y - 1.15, UTIL, 1.15, COR_AZUL)
-        ax.text(MARGEM + 0.35, y - 0.42, 'Quantidade a faturar até o fim do mês',
-                color='#dbeafe', fontsize=11, va='center')
-        ax.text(MARGEM + 0.35, y - 0.82, _num(total_faltam), color='#ffffff',
-                fontsize=20, fontweight='bold', va='center')
-        ax.text(LARGURA - MARGEM - 0.35, y - 0.62,
-                f"{_num(qtd_dias_uteis_restantes)} dias úteis restantes",
-                color='#dbeafe', fontsize=11, ha='right', va='center')
+        y = _titulo(ax, MARGEM, y, 'Fluxo de loja (passagens e test drives)')
+        y = _tabela(ax, MARGEM, y, UTIL,
+                    ['Loja', 'Pass. dia ant.', 'Pass. mês', 'Média/dia', 'TD dia ant.', 'TD mês'],
+                    fluxo_linhas, [0.22, 0.16, 0.15, 0.15, 0.16, 0.16])
+        y -= 0.62
 
         fig.savefig(caminho, format='pdf', facecolor=COR_FUNDO)
         plt.close(fig)
