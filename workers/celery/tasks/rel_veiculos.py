@@ -380,21 +380,6 @@ clientes_repetidos = clientes_repetidos.sort_values(by=col_cliente)
 col_modelo = next((c for c in todos.columns if c.lower() == 'familia_veiculo'), None)
 col_novo_usado = next((c for c in todos.columns if c.lower() == 'novo_usado'), None)
 
-# faça uma formula onde eu tenho os dias uteis removendo os dabados e feriados que tenho na consulta
-# SELECT 
-#     TO_CHAR(TRUNC(f.DATA), 'YYYY-MM-DD') AS ano_mes,
-# 	TRUNC(f.DATA)                     AS data_feriado,
-# 	LISTAGG(f.MOTIVO, ', ') WITHIN GROUP (ORDER BY f.MOTIVO) AS motivos
-# FROM feriado f
-# WHERE 1=1
-# 	AND EXTRACT(YEAR FROM data) = 2026
-# 	AND EXTRACT(month FROM data) = 10
-# GROUP BY
-#     TO_CHAR(TRUNC(f.DATA), 'YYYY-MM-DD'),
-#     TRUNC(f.DATA)
-# ORDER BY 
-#     data_feriado
-
 query = f"""
     SELECT 
     TO_CHAR(TRUNC(f.DATA), 'YYYY-MM-DD') AS ano_mes,
@@ -409,7 +394,6 @@ GROUP BY
     TRUNC(f.DATA)
 ORDER BY 
     data_feriado
-
 """
 
 cur.execute(query)
@@ -486,6 +470,98 @@ else:
 
 print(fechamento_empresa)
 
+# passagens e retornos por empresa (baseado em streamlit_app/views/fluxo_de_loja.py)
+# passagens do mês são contabilizadas até o dia anterior (não inclui hoje)
+dia_anterior = min(hoje - datetime.timedelta(days=1), ultimo_dia)
+
+if dia_anterior < primeiro_dia:
+    dia_anterior = None
+
+tipos_passagens = "785, 807"
+tipos_visitas = "819, 821, 815, 817, 810, 812, 829, 795, 793, 797, 799, 837"
+tipos_retornos = "819, 821, 815, 817, 810, 812, 829, 795, 793, 797, 799, 837"
+
+if dia_anterior is not None:
+    primeiro_dia_sql = primeiro_dia.strftime('%Y-%m-%d')
+    dia_fim_sql = dia_anterior.strftime('%Y-%m-%d')
+    dia_anterior_sql = dia_anterior.strftime('%Y-%m-%d')
+
+    query = f"""
+        SELECT empresa,
+            COUNT(CASE WHEN data_passagem = TO_DATE('{dia_anterior_sql}', 'YYYY-MM-DD') THEN 1 END) passagens_dia_anterior,
+            COUNT(*) passagens_mes
+        FROM (
+            SELECT eu.cod_empresa empresa, TRUNC(ce.data_criacao) data_passagem
+            FROM crm_eventos ce
+            LEFT JOIN empresas_usuarios eu ON 1=1
+                AND eu.nome = ce.responsavel_pelo_evento
+            WHERE ce.cod_tipo_evento IN ({tipos_passagens})
+              AND ce.status <> 'D'
+              AND eu.cod_empresa IN (11, 33)
+              AND TRUNC(ce.data_criacao) BETWEEN TO_DATE('{primeiro_dia_sql}', 'YYYY-MM-DD') AND TO_DATE('{dia_fim_sql}', 'YYYY-MM-DD')
+            UNION ALL
+            SELECT eu.cod_empresa empresa, TRUNC(ce.data_visita) data_passagem
+            FROM crm_eventos ce
+            LEFT JOIN empresas_usuarios eu ON 1=1
+                AND eu.nome = ce.responsavel_pelo_evento
+            WHERE ce.cod_tipo_evento IN ({tipos_visitas})
+              AND ce.status <> 'D'
+              AND eu.cod_empresa IN (11, 33)
+              AND TRUNC(ce.data_visita) BETWEEN TO_DATE('{primeiro_dia_sql}', 'YYYY-MM-DD') AND TO_DATE('{dia_fim_sql}', 'YYYY-MM-DD')
+        )
+        GROUP BY empresa
+    """
+    cur.execute(query)
+    result = cur.fetchall()
+    passagens = pd.DataFrame(result, columns=[desc[0] for desc in cur.description])
+
+    query = f"""
+        SELECT ccr.cod_empresa empresa, COUNT(*) retornos_dia_anterior
+        FROM caiuas_crm_retorno ccr
+        LEFT JOIN crm_eventos ce ON 1=1
+            AND ce.cod_evento = ccr.cod_evento
+            AND ce.cod_empresa = ccr.cod_empresa
+        WHERE ce.status <> 'D'
+          AND ce.cod_tipo_evento IN ({tipos_retornos})
+          AND ccr.cod_empresa IN (11, 33)
+          AND TRUNC(ccr.created_at) = TO_DATE('{dia_anterior_sql}', 'YYYY-MM-DD')
+        GROUP BY ccr.cod_empresa
+    """
+    cur.execute(query)
+    result = cur.fetchall()
+    retornos = pd.DataFrame(result, columns=[desc[0] for desc in cur.description])
+
+    passagens = pd.merge(passagens, retornos, on='EMPRESA', how='outer')
+
+    dias_uteis_ate_atual = sum(
+        1
+        for dia in range(1, dia_anterior.day + 1)
+        if datetime.date(ano, mes, dia).weekday() != calendar.SUNDAY
+        and datetime.date(ano, mes, dia) not in datas_feriado
+    )
+
+    if dias_uteis_ate_atual > 0:
+        passagens['Média passagens/dia'] = (
+            passagens['PASSAGENS_MES'] / dias_uteis_ate_atual
+        ).round(2)
+    else:
+        passagens['Média passagens/dia'] = 0
+
+    passagens = passagens.fillna(0)
+    passagens['EMPRESA'] = passagens['EMPRESA'].replace({11: 'Sorocaba', 33: 'Indaiatuba'})
+    passagens = passagens.rename(columns={
+        'EMPRESA': 'Empresa',
+        'PASSAGENS_DIA_ANTERIOR': 'Passagens dia anterior',
+        'RETORNOS_DIA_ANTERIOR': 'Retornos dia anterior',
+        'PASSAGENS_MES': 'Passagens no mês',
+    })
+else:
+    passagens = pd.DataFrame(columns=[
+        'Empresa', 'Passagens dia anterior', 'Retornos dia anterior', 'Passagens no mês', 'Média passagens/dia'
+    ])
+
+print(passagens)
+
 cur.close()
 conn.close()
 # faça uma tabela com a meta x qtd vendida por empresa
@@ -506,4 +582,5 @@ with pd.ExcelWriter('rel_veiculos.xlsx', engine='xlsxwriter') as writer:
     LX.to_excel(writer, sheet_name='LX')
     todos.to_excel(writer, sheet_name='Todos')
     clientes_repetidos.to_excel(writer, sheet_name='Clientes Repetidos')
+    passagens.to_excel(writer, sheet_name='Passagens')
    
