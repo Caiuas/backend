@@ -549,7 +549,7 @@ else:
         'Empresa', 'Passagens dia anterior', 'Retornos dia anterior', 'Passagens no mês', 'Test drives', 'Test drives dia anterior', 'Média passagens/dia'
     ])
 
-print(passagens)
+# print(passagens)
 
 cur.close()
 conn.close()
@@ -557,21 +557,21 @@ conn.close()
 # meta_empresa = pd.pivot_table(todos, values='COD_PROPOSTA', index='EMPRESA_VENDEDOR', columns='NOVO_USADO', aggfunc='count')
 
 
-with pd.ExcelWriter('rel_veiculos.xlsx', engine='xlsxwriter') as writer:
-    meta.to_excel(writer, sheet_name='Meta')
-    fechamento_vendedores.to_excel(writer, sheet_name='Fechamento Vendedores')
-    fechamento_geral.to_excel(writer, sheet_name='Fechamento Geral')
-    fechamento_sorocaba.to_excel(writer, sheet_name='Fechamento Sorocaba')
-    fechamento_indaiatuba.to_excel(writer, sheet_name='Fechamento Indaiatuba')
-    faturados.to_excel(writer, sheet_name='Faturados')
-    venda_estoque.to_excel(writer, sheet_name='Venda_estoque')
-    venda_grade.to_excel(writer, sheet_name='Venda_grade')
-    varejo.to_excel(writer, sheet_name='Varejo')
-    vd.to_excel(writer, sheet_name='VD')
-    LX.to_excel(writer, sheet_name='LX')
-    todos.to_excel(writer, sheet_name='Todos')
-    clientes_repetidos.to_excel(writer, sheet_name='Clientes Repetidos')
-    passagens.to_excel(writer, sheet_name='Passagens')
+# with pd.ExcelWriter('rel_veiculos.xlsx', engine='xlsxwriter') as writer:
+#     meta.to_excel(writer, sheet_name='Meta')
+#     fechamento_vendedores.to_excel(writer, sheet_name='Fechamento Vendedores')
+#     fechamento_geral.to_excel(writer, sheet_name='Fechamento Geral')
+#     fechamento_sorocaba.to_excel(writer, sheet_name='Fechamento Sorocaba')
+#     fechamento_indaiatuba.to_excel(writer, sheet_name='Fechamento Indaiatuba')
+#     faturados.to_excel(writer, sheet_name='Faturados')
+#     venda_estoque.to_excel(writer, sheet_name='Venda_estoque')
+#     venda_grade.to_excel(writer, sheet_name='Venda_grade')
+#     varejo.to_excel(writer, sheet_name='Varejo')
+#     vd.to_excel(writer, sheet_name='VD')
+#     LX.to_excel(writer, sheet_name='LX')
+#     todos.to_excel(writer, sheet_name='Todos')
+#     clientes_repetidos.to_excel(writer, sheet_name='Clientes Repetidos')
+#     passagens.to_excel(writer, sheet_name='Passagens')
 
 
 # ============================================================
