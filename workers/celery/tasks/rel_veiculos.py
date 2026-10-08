@@ -437,6 +437,32 @@ if col_feriado is not None:
 qtd_dias_uteis = qtd_dias_mes - qtd_domingos - qtd_feriados_uteis
 print(qtd_dias_uteis)
 
+# dias úteis de hoje até o último dia do mês
+hoje = datetime.date.today()
+primeiro_dia = datetime.date(ano, mes, 1)
+ultimo_dia = datetime.date(ano, mes, qtd_dias_mes)
+
+datas_feriado = set()
+if col_feriado is not None:
+    datas_feriado = {
+        pd.Timestamp(data_feriado).date()
+        for data_feriado in feriados[col_feriado]
+        if pd.notna(data_feriado)
+    }
+
+if hoje > ultimo_dia:
+    qtd_dias_uteis_restantes = 0
+else:
+    dia_inicio = max(primeiro_dia, hoje).day
+    qtd_dias_uteis_restantes = sum(
+        1
+        for dia in range(dia_inicio, qtd_dias_mes + 1)
+        if datetime.date(ano, mes, dia).weekday() != calendar.SUNDAY
+        and datetime.date(ano, mes, dia) not in datas_feriado
+    )
+
+print(qtd_dias_uteis_restantes)
+
 cur.close()
 conn.close()
 # faça uma tabela com a meta x qtd vendida por empresa
