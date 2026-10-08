@@ -489,9 +489,16 @@ if dia_anterior is not None:
     query = f"""
         SELECT empresa,
             COUNT(CASE WHEN data_passagem = TO_DATE('{dia_anterior_sql}', 'YYYY-MM-DD') THEN 1 END) passagens_dia_anterior,
-            COUNT(*) passagens_mes
+            COUNT(*) passagens_mes,
+            SUM(tem_test_drive) test_drives,
+            SUM(CASE WHEN data_passagem = TO_DATE('{dia_anterior_sql}', 'YYYY-MM-DD') THEN tem_test_drive ELSE 0 END) test_drives_dia_anterior
         FROM (
-            SELECT eu.cod_empresa empresa, TRUNC(ce.data_criacao) data_passagem
+            SELECT eu.cod_empresa empresa, TRUNC(ce.data_criacao) data_passagem,
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM caiuas_crm_test_drive cctd
+                    WHERE cctd.cod_empresa = ce.cod_empresa
+                      AND cctd.cod_evento = ce.cod_evento
+                ) THEN 1 ELSE 0 END tem_test_drive
             FROM crm_eventos ce
             LEFT JOIN empresas_usuarios eu ON 1=1
                 AND eu.nome = ce.responsavel_pelo_evento
@@ -500,7 +507,12 @@ if dia_anterior is not None:
               AND eu.cod_empresa IN (11, 33)
               AND TRUNC(ce.data_criacao) BETWEEN TO_DATE('{primeiro_dia_sql}', 'YYYY-MM-DD') AND TO_DATE('{dia_fim_sql}', 'YYYY-MM-DD')
             UNION ALL
-            SELECT eu.cod_empresa empresa, TRUNC(ce.data_visita) data_passagem
+            SELECT eu.cod_empresa empresa, TRUNC(ce.data_visita) data_passagem,
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM caiuas_crm_test_drive cctd
+                    WHERE cctd.cod_empresa = ce.cod_empresa
+                      AND cctd.cod_evento = ce.cod_evento
+                ) THEN 1 ELSE 0 END tem_test_drive
             FROM crm_eventos ce
             LEFT JOIN empresas_usuarios eu ON 1=1
                 AND eu.nome = ce.responsavel_pelo_evento
@@ -554,10 +566,12 @@ if dia_anterior is not None:
         'PASSAGENS_DIA_ANTERIOR': 'Passagens dia anterior',
         'RETORNOS_DIA_ANTERIOR': 'Retornos dia anterior',
         'PASSAGENS_MES': 'Passagens no mês',
+        'TEST_DRIVES': 'Test drives',
+        'TEST_DRIVES_DIA_ANTERIOR': 'Test drives dia anterior',
     })
 else:
     passagens = pd.DataFrame(columns=[
-        'Empresa', 'Passagens dia anterior', 'Retornos dia anterior', 'Passagens no mês', 'Média passagens/dia'
+        'Empresa', 'Passagens dia anterior', 'Retornos dia anterior', 'Passagens no mês', 'Test drives', 'Test drives dia anterior', 'Média passagens/dia'
     ])
 
 print(passagens)
