@@ -1322,6 +1322,7 @@ def reports_dashboard_showroom():
             WHERE v.status = 'V'
                 AND TO_CHAR(v.cod_cliente) <> '22534303000127'
                 AND vp.VENDEDOR <> 'DIRETORIA'
+                AND vp.COD_EMPRESA_VENDA IN (11,33)
                 AND (cvp.REPASSE IS NULL OR cvp.REPASSE <> 'S')
                 AND TRUNC(vp.data_venda ) >= TO_DATE('{_ini}', 'YYYY-MM-DD')
                 AND TRUNC(vp.data_venda ) <= TO_DATE('{_fim}', 'YYYY-MM-DD')
@@ -1944,6 +1945,45 @@ def reports_dashboard_showroom():
                 ]
                 return linhas, total
 
+            def _montar_posicao_vendedor(df, codigos=(11, 33)):
+                lojas = {11: 'Sorocaba', 33: 'Indaiatuba'}
+                base = df.copy()
+                base['EMPRESA_VENDEDOR'] = pd.to_numeric(base['EMPRESA_VENDEDOR'], errors='coerce')
+                base = base[base['EMPRESA_VENDEDOR'].isin(codigos)]
+                posicao = (
+                    base.groupby(['EMPRESA_VENDEDOR', 'COD_VENDEDOR', 'NOME_VENDEDOR', 'NOVO_USADO'])
+                    .size()
+                    .unstack(fill_value=0)
+                )
+                for coluna in ['Novo', 'Direta']:
+                    if coluna not in posicao.columns:
+                        posicao[coluna] = 0
+                posicao = posicao[['Novo', 'Direta']].reset_index()
+
+                linhas = []
+                total_novo = 0
+                total_direta = 0
+                for codigo in codigos:
+                    grupo = posicao[posicao['EMPRESA_VENDEDOR'] == codigo]
+                    if grupo.empty:
+                        continue
+                    loja = lojas.get(codigo, str(codigo))
+                    grupo = grupo.sort_values('NOME_VENDEDOR')
+                    for zebra, (_, linha) in enumerate(grupo.iterrows()):
+                        nome = linha['NOME_VENDEDOR']
+                        if pd.isna(nome) or str(nome).strip() == '':
+                            nome = linha['COD_VENDEDOR']
+                        linhas.append(('item', loja, str(nome),
+                                       int(linha['Novo']), int(linha['Direta']), zebra))
+                    sub_novo = int(grupo['Novo'].sum())
+                    sub_direta = int(grupo['Direta'].sum())
+                    linhas.append(('subtotal', f'Subtotal {loja}', '',
+                                   sub_novo, sub_direta, 0))
+                    total_novo += sub_novo
+                    total_direta += sub_direta
+                linhas.append(('total', 'Total geral', '', total_novo, total_direta, 0))
+                return linhas
+
             def _box(ax, x, y, w, h, cor=COR_CARD, raio=0.14):
                 ax.add_patch(FancyBboxPatch(
                     (x, y), w, h,
@@ -2033,6 +2073,51 @@ def reports_dashboard_showroom():
                                        edgecolor=COR_LINHA, linewidth=1))
                 return y
 
+            def _tabela_vendedores(ax, x, y_topo, largura, linhas):
+                cabecalhos = ['Loja', 'Vendedor', 'Novo', 'Direta']
+                fracoes = [0.2, 0.4, 0.2, 0.2]
+                alinhados_esquerda = (0, 1)
+                altura_cabecalho = 0.42
+                altura_linha = 0.32
+                fonte = 8.5
+
+                xs = [x]
+                for fracao in fracoes[:-1]:
+                    xs.append(xs[-1] + largura * fracao)
+
+                ax.add_patch(Rectangle((x, y_topo - altura_cabecalho), largura, altura_cabecalho,
+                                       facecolor=COR_CABECALHO, edgecolor='none'))
+                for i, cabecalho in enumerate(cabecalhos):
+                    largura_col = largura * fracoes[i]
+                    alinhamento = 'left' if i in alinhados_esquerda else 'right'
+                    tx = xs[i] + 0.14 if i in alinhados_esquerda else xs[i] + largura_col - 0.14
+                    ax.text(tx, y_topo - altura_cabecalho / 2, cabecalho, ha=alinhamento,
+                            va='center', fontsize=9.5, color='#ffffff', fontweight='bold')
+
+                y = y_topo - altura_cabecalho
+                for tipo, loja, nome, novo, direta, zebra in linhas:
+                    if tipo == 'item':
+                        fundo = '#f8fafc' if zebra % 2 == 0 else '#ffffff'
+                        cor, peso = COR_TEXTO, 'normal'
+                    elif tipo == 'subtotal':
+                        fundo, cor, peso = '#dbeafe', COR_TEXTO, 'bold'
+                    else:
+                        fundo, cor, peso = COR_CABECALHO, '#ffffff', 'bold'
+
+                    ax.add_patch(Rectangle((x, y - altura_linha), largura, altura_linha,
+                                           facecolor=fundo, edgecolor='none'))
+                    for i, valor in enumerate([loja, nome, _num(novo), _num(direta)]):
+                        largura_col = largura * fracoes[i]
+                        alinhamento = 'left' if i in alinhados_esquerda else 'right'
+                        tx = xs[i] + 0.14 if i in alinhados_esquerda else xs[i] + largura_col - 0.14
+                        ax.text(tx, y - altura_linha / 2, str(valor), ha=alinhamento, va='center',
+                                fontsize=fonte, color=cor, fontweight=peso)
+                    y -= altura_linha
+
+                ax.add_patch(Rectangle((x, y), largura, y_topo - y, fill=False,
+                                       edgecolor=COR_LINHA, linewidth=1))
+                return y
+
             def gerar_dashboard_pdf(caminho='dashboard_vendas.pdf'):
                 # vendidos = mesma base da planilha "Fechamento Geral" (df todos)
                 vendas_dash = todos.copy()
@@ -2045,11 +2130,37 @@ def reports_dashboard_showroom():
                 }
 
                 posicao_linhas, _ = _montar_posicao(vendas_dash)
-                total_vendido = int(fechamento_geral.sum().sum())
+                total_vendido = int(vendas_dash.shape[0])
 
                 codigo_loja = pd.to_numeric(vendas_dash['EMPRESA_VENDEDOR'], errors='coerce')
                 posicao_sorocaba_linhas, _ = _montar_posicao(vendas_dash[codigo_loja == 11])
                 posicao_indaiatuba_linhas, _ = _montar_posicao(vendas_dash[codigo_loja == 33])
+                posicao_vendedor_linhas = _montar_posicao_vendedor(vendas_dash)
+
+                # propostas de empresas diferentes de Sorocaba (11) e Indaiatuba (33)
+                outras_empresas = todos.copy()
+                outras_empresas['EMPRESA_VENDEDOR'] = pd.to_numeric(
+                    outras_empresas['EMPRESA_VENDEDOR'], errors='coerce'
+                )
+                outras_empresas = outras_empresas[
+                    outras_empresas['EMPRESA_VENDEDOR'].notna()
+                    & ~outras_empresas['EMPRESA_VENDEDOR'].isin([11, 33])
+                ]
+                outras_empresas_linhas = []
+                for _, linha in outras_empresas.sort_values('EMPRESA_VENDEDOR').iterrows():
+                    nome = linha.get('NOME_VENDEDOR')
+                    if pd.isna(nome) or str(nome).strip() == '':
+                        nome = linha.get('COD_VENDEDOR')
+                    data = linha.get('DATA_PROPOSTA')
+                    try:
+                        data_txt = pd.to_datetime(data).strftime('%d/%m/%Y') if pd.notna(data) else ''
+                    except (TypeError, ValueError):
+                        data_txt = str(data)
+                    proposta = linha.get('COD_PROPOSTA')
+                    proposta_txt = '' if pd.isna(proposta) else str(proposta)
+                    outras_empresas_linhas.append([
+                        str(int(linha['EMPRESA_VENDEDOR'])), str(nome), proposta_txt, data_txt,
+                    ])
 
                 meta_total = int(fechamento_empresa['QTD_META'].sum())
                 percentual_meta = (total_vendido / meta_total * 100) if meta_total else 0
@@ -2131,8 +2242,10 @@ def reports_dashboard_showroom():
                 n_pos = max(len(posicao_linhas), 1)
                 n_pos_sor = max(len(posicao_sorocaba_linhas), 1)
                 n_pos_ind = max(len(posicao_indaiatuba_linhas), 1)
+                n_vend = len(posicao_vendedor_linhas)
                 n_fluxo = max(len(fluxo_linhas), 1)
                 n_modelos = len(modelos_linhas)
+                n_outras = len(outras_empresas_linhas)
 
                 def secao(n):
                     return 0.42 + (0.42 + n * ALTURA_LINHA)
@@ -2142,8 +2255,11 @@ def reports_dashboard_showroom():
                 altura += secao(n_pos) + 0.62
                 altura += secao(n_pos_sor) + 0.62
                 altura += secao(n_pos_ind) + 0.62
+                altura += 0.42 + (0.42 + n_vend * 0.32) + 0.62
                 altura += secao(n_fluxo) + 0.62
                 altura += 0.42 + (0.42 + n_modelos * 0.32) + 0.62
+                if n_outras:
+                    altura += secao(n_outras) + 0.62
                 altura += 0.45
 
                 fig = plt.figure(figsize=(LARGURA, altura), dpi=200)
@@ -2229,6 +2345,10 @@ def reports_dashboard_showroom():
                             posicao_indaiatuba_linhas, [0.55, 0.225, 0.225])
                 y -= 0.62
 
+                y = _titulo(ax, MARGEM, y, 'Posição atual por vendedor')
+                y = _tabela_vendedores(ax, MARGEM, y, UTIL, posicao_vendedor_linhas)
+                y -= 0.62
+
                 y = _titulo(ax, MARGEM, y, 'Fluxo de loja (passagens e test drives)')
                 y = _tabela(ax, MARGEM, y, UTIL,
                             ['Loja', 'Pass. dia ant.', 'Pass. mês', 'Média/dia', 'TD dia ant.', 'TD mês'],
@@ -2238,6 +2358,14 @@ def reports_dashboard_showroom():
                 y = _titulo(ax, MARGEM, y, 'Veículos disponíveis por modelo (estoque x grade)')
                 y = _tabela_modelos(ax, MARGEM, y, UTIL, modelos_linhas)
                 y -= 0.62
+
+                if n_outras:
+                    y = _titulo(ax, MARGEM, y,
+                                'Propostas de outras empresas (revisar cadastro)', COR_VERMELHO)
+                    y = _tabela(ax, MARGEM, y, UTIL,
+                                ['Empresa', 'Vendedor', 'Proposta', 'Emissão'],
+                                outras_empresas_linhas, [0.12, 0.4, 0.24, 0.24])
+                    y -= 0.62
 
                 fig.savefig(caminho, format='pdf', facecolor=COR_FUNDO)
                 plt.close(fig)
