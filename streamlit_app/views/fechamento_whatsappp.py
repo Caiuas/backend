@@ -294,6 +294,8 @@ def render():
             * 100
         ).fillna(0)
 
+        df_campanha = df_campanha.sort_values("campanha", ascending=True)
+
         df_plot = df_campanha.melt(
             id_vars="campanha",
             value_vars=["qtd_atendimentos", "qtd_evento_nbs"],
@@ -325,7 +327,12 @@ def render():
             color_discrete_map={"Atendimentos": "#3498db", "Com evento NBS": "#2ecc71"},
         )
         fig_campanha.update_traces(textposition="outside")
-        fig_campanha.update_layout(xaxis_title="", yaxis_title="Quantidade", legend_title="")
+        fig_campanha.update_layout(
+            xaxis_title="",
+            yaxis_title="Quantidade",
+            legend_title="",
+            xaxis={"categoryorder": "category ascending"},
+        )
         st.plotly_chart(fig_campanha, use_container_width=True)
 
         total_atend = int(df_campanha["qtd_atendimentos"].sum())
