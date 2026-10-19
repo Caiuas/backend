@@ -1672,7 +1672,11 @@ def reports_dashboard_showroom():
 
         # passagens e retornos por empresa (baseado em streamlit_app/views/fluxo_de_loja.py)
         # passagens do mês são contabilizadas até o dia anterior (não inclui hoje)
-        dia_anterior = min(hoje - datetime.timedelta(days=1), ultimo_dia)
+        # quando gerado na segunda-feira, considera o sábado (domingo não tem passagens)
+        if hoje.weekday() == calendar.MONDAY:
+            dia_anterior = min(hoje - datetime.timedelta(days=2), ultimo_dia)
+        else:
+            dia_anterior = min(hoje - datetime.timedelta(days=1), ultimo_dia)
 
         if dia_anterior < primeiro_dia:
             dia_anterior = None
