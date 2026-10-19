@@ -1385,6 +1385,7 @@ def reports_dashboard_showroom():
                         AND crv.chassi_resumido = v.CHASSI_RESUMIDO 
                         AND crv.cod_empresa = v.COD_EMPRESA
                     WHERE v.status = 'E'
+                        AND v.novo_usado = 'N'
                     ORDER BY pm.DESCRICAO_MODELO
         """
         cur.execute(query)
@@ -1785,7 +1786,7 @@ def reports_dashboard_showroom():
                 AND pm.ATIVO = 'S'
                 AND p.DESCRICAO_PRODUTO LIKE ('AUTO-%')
                 AND p.DESCRICAO_PRODUTO NOT IN (
-                    'AUTO-ACCORD ( I )',
+                    --'AUTO-ACCORD ( I )',
                     'AUTO-ZR-V',
                     'AUTO-NEW FIT',
                     'AUTO-CIVIC'
@@ -1821,6 +1822,7 @@ def reports_dashboard_showroom():
               AND v.COD_PROPOSTA_INTERNET IS NULL
               AND vp.COD_PROPOSTA is null
               AND NVL(vp.INTERNET, ' ') <> 'F'
+              AND NVL(pm.DESCRICAO_MODELO, ' ') <> 'CR-V FH TOURING'
             ORDER BY pm.DESCRICAO_MODELO
         """
         cur.execute(query)
