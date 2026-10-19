@@ -18,10 +18,11 @@ import plotly.graph_objects as go
 
 EMAILS_CRM_SHOWROOM = [
     "pablo.ti@caiuas.com.br",
-    "cristiane.aguilar@caiuas.com.br","nathalli.pereira@caiuas.com.br",
-    "cristiane.aguilar@caiuas.com.br","nathalli.pereira@caiuas.com.br",
+    "nathalli.pereira@caiuas.com.br",
+    "cristiane.aguilar@caiuas.com.br",
     "franciele.mayer@caiuas.com.br",
-    "gabrieli.auditoria@caiuas.com.br"
+    "gabrieli.auditoria@caiuas.com.br",
+    "guilherme.machado@caiuas.com.br"
 ]
 
 
