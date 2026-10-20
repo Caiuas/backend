@@ -1682,8 +1682,8 @@ def reports_dashboard_showroom():
             dia_anterior = None
 
         tipos_passagens = "785, 807"
-        tipos_visitas = "819, 821, 815, 817, 810, 812, 829, 795, 793, 797, 799, 837"
-        tipos_retornos = "819, 821, 815, 817, 810, 812, 829, 795, 793, 797, 799, 837"
+        tipos_visitas = "819, 821, 815, 817, 810, 812, 829, 795, 793, 797, 799, 810, 812, 837, 785, 807, 835, 833"
+        tipos_retornos = "819, 821, 815, 817, 810, 812, 829, 795, 793, 797, 799, 810, 812, 837, 785, 807, 835, 833"
 
         if dia_anterior is not None:
             primeiro_dia_sql = primeiro_dia.strftime('%Y-%m-%d')
