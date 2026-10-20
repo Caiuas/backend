@@ -197,14 +197,24 @@ def render():
         LEFT JOIN VEICULOS_PROPOSTAS vp ON 1=1
             AND vp.COD_PROPOSTA = ce.COD_PROPOSTA
         WHERE 1=1
-            AND ce.COD_TIPO_EVENTO IN (819,821,815,817,810,812,829,
+            AND ce.COD_TIPO_EVENTO IN (819,
+        		821,
+        		815,
+        		817,
+        		810,
+        		812,
+        		829,
                 795,
                 793,
                 797,
                 799,
                 810,
-812,
-837)
+                812,
+                837,
+                785,
+				807,
+				835,
+				833)
             AND ce.status <> 'D'
             AND TRUNC(ce.DATA_VISITA) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD') AND TRUNC(ce.DATA_VISITA) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
     """
@@ -284,14 +294,24 @@ def render():
         AND ce.COD_EMPRESA_ANTERIOR = cel.COD_EMPRESA
     WHERE 1=1
         AND ce.status <> 'D'
-        and ce.COD_TIPO_EVENTO IN (819,821,815,817,810,812,829,
+        and ce.COD_TIPO_EVENTO IN (819,
+        		821,
+        		815,
+        		817,
+        		810,
+        		812,
+        		829,
                 795,
                 793,
                 797,
                 799,
                 810,
-812,
-837)
+                812,
+                837,
+                785,
+				807,
+				835,
+				833)
         AND TRUNC(ccr.created_at) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD')
         AND TRUNC(ccr.created_at) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
     """
