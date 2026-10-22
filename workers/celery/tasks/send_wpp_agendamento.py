@@ -21,7 +21,7 @@ def _extrair_telefones(registro):
     comercial = ''.join(filter(str.isdigit, str(registro[3])))
     fax = ''.join(filter(str.isdigit, str(registro[4])))
     celular = ''.join(filter(str.isdigit, str(registro[5])))
-    whatsapp = ''.join(filter(str.isdigit, str(registro[8])))
+    whatsapp = ''.join(filter(str.isdigit, str(registro[6])))
 
     if residencial and len(residencial) == 11 and residencial[2] == "9":
         telefones.append(residencial)
@@ -39,21 +39,47 @@ def _extrair_telefones(registro):
 
 
 def _upsert_contato_chatwoot(cur_chatwoot, conn_chatwoot, nome, telefone):
-    query = f"""
+    cur_chatwoot.execute(
+        """
+        SELECT ci.contact_id
+        FROM contact_inboxes ci
+        WHERE ci.inbox_id = 1
+          AND ci.source_id = ?
+        ORDER BY ci.id
+        LIMIT 1
+        """,
+        [telefone],
+    )
+    row = cur_chatwoot.fetchone()
+
+    if row:
+        contact_id = row[0]
+        cur_chatwoot.execute(
+            """
+            UPDATE contacts
+            SET "name" = ?, updated_at = now(), last_activity_at = now()
+            WHERE id = ?
+            """,
+            [nome, contact_id],
+        )
+        conn_chatwoot.commit()
+        return contact_id
+
+    query = """
         WITH update_result AS (
             UPDATE contacts
             SET
-                "name" = '{nome}',
+                "name" = ?,
                 updated_at = now(),
                 last_activity_at = now()
-            WHERE phone_number = '+{telefone}'
+            WHERE phone_number = ?
             RETURNING id
         ),
         insert_result AS (
             INSERT INTO contacts
             ("name", email, phone_number, account_id, created_at, updated_at, additional_attributes, identifier, custom_attributes, last_activity_at, contact_type, middle_name, last_name, "location", country_code, "blocked")
             SELECT
-                '{nome}', NULL, '+{telefone}', 1, now(), now(), '{{}}'::jsonb, NULL, '{{}}'::jsonb, now(), 1, '', '', NULL, NULL, false
+                ?, NULL, ?, 1, now(), now(), '{}'::jsonb, NULL, '{}'::jsonb, now(), 1, '', '', NULL, NULL, false
             WHERE NOT EXISTS (SELECT 1 FROM update_result)
             RETURNING id
         )
@@ -61,9 +87,10 @@ def _upsert_contato_chatwoot(cur_chatwoot, conn_chatwoot, nome, telefone):
         UNION ALL
         SELECT id FROM insert_result;
     """
-    cur_chatwoot.execute(query)
+    cur_chatwoot.execute(query, [nome, f"+{telefone}", nome, f"+{telefone}"])
+    contact_id = cur_chatwoot.fetchone()[0]
     conn_chatwoot.commit()
-    return cur_chatwoot.fetchone()[0]
+    return contact_id
 
 
 def _marcar_status(cur_oracle, conn_oracle, id_log, status):
