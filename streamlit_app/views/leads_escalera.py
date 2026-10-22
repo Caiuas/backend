@@ -24,6 +24,15 @@ EMAILS_ESCALERA = [
 ]
 
 
+def extrair_ddd(phone_number):
+    digits = ''.join(ch for ch in str(phone_number or '') if ch.isdigit())
+    if not digits:
+        return ''
+    if digits.startswith('55') and len(digits) >= 12:
+        digits = digits[2:]
+    return digits[:2] if len(digits) >= 10 else ''
+
+
 def render():
     st.title("Leads Escalera")
     data_inicial_chat = st.sidebar.date_input("Data Inicial", datetime.now().date(), key="escalera_data_inicial")
@@ -44,14 +53,23 @@ def render():
         entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' AS id_campanha,
         c.custom_attributes->>'evento_nbs' AS link_crm,
         u.name AS responsavel,
+        t.name AS team,
+        ct.phone_number AS phone_number,
         c.custom_attributes,
         entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id' as source_id,
+        fc.nome_campanha,
+        fc.nome_anuncio,
         c.status
     FROM messages m
     LEFT JOIN whatsapp_raw_payloads wrp ON wrp.source_id = m.source_id
     CROSS JOIN LATERAL jsonb_array_elements(wrp.payload->'entry') AS entry
     LEFT JOIN conversations c ON c.id = m.conversation_id
+    LEFT JOIN contacts ct ON ct.id = c.contact_id
     LEFT JOIN users u ON u.id = c.assignee_id
+    LEFT JOIN team_members tm ON tm.user_id = u.id
+    LEFT JOIN teams t ON t.id = tm.team_id
+    LEFT JOIN facebook_campanhas fc
+        ON fc.source_id = entry->'changes'->0->'value'->'messages'->0->'referral'->>'source_id'
     WHERE 1=1
         AND (
             entry->'changes'->0->'value'->'messages'->0->'referral' IS NOT NULL
@@ -60,7 +78,7 @@ def render():
         )
         AND c.created_at::date >= DATE '{data_inicial_query}'
         AND c.created_at::date <= DATE '{data_final_chat}'
-    ORDER BY m.conversation_id, c.created_at
+    ORDER BY m.conversation_id, c.created_at, t.name
     """
     
     conn_chatwoot, cur_chatwoot = chatwoot()
@@ -87,6 +105,7 @@ def render():
     
     df_chatwoot = df_chatwoot.fillna('')
     df_chatwoot = df_chatwoot.replace('None', '')
+    df_chatwoot['ddd'] = df_chatwoot['phone_number'].apply(extrair_ddd)
     df_chatwoot['link_chat'] = df_chatwoot.apply(
         lambda row: f"https://chat.caiuas.com.br/app/accounts/{row['account_id']}/conversations/{row['conversation_id']}"
         if str(row.get('account_id', '')).strip() != '' and str(row.get('conversation_id', '')).strip() != ''
@@ -165,7 +184,34 @@ def render():
         else:
             st.info("Nenhum dado para exibir o gráfico no período.")
 
-    df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'created_at', 'link_campanha','source_id','link_crm','link_chat','status']].copy()
+    st.subheader("Chats por time")
+    if df_chatwoot.empty or df_chatwoot['team'].str.strip().eq('').all():
+        st.info("Nenhum dado encontrado para o período.")
+    else:
+        df_times = (
+            df_chatwoot[df_chatwoot['team'].str.strip() != '']
+            .groupby('team', as_index=False)['conversation_id']
+            .nunique()
+            .rename(columns={'conversation_id': 'Qtd'})
+            .sort_values('Qtd', ascending=False)
+        )
+        fig_times = px.bar(
+            df_times,
+            x='team',
+            y='Qtd',
+            text_auto=True,
+            color_discrete_sequence=['#e63946'],
+        )
+        fig_times.update_layout(
+            xaxis_title="",
+            yaxis_title="Quantidade de Chats",
+            margin=dict(t=20, b=40),
+            showlegend=False,
+        )
+        fig_times.update_xaxes(tickangle=45)
+        st.plotly_chart(fig_times, use_container_width=True)
+
+    df_chatwoot_excel = df_chatwoot[['conversation_id','responsavel', 'team', 'ddd', 'created_at', 'nome_campanha','nome_anuncio','link_campanha','source_id','link_crm','link_chat','status']].copy()
     df_chatwoot_excel['evento'] = df_chatwoot_excel['link_crm'].apply(lambda x: x.split('?')[0] if x.strip() != '' else '')
     df_chatwoot_excel['evento'] = df_chatwoot_excel['evento'].apply(lambda x: x.split('/')[-1] if x.strip() != '' else '')
 
@@ -323,10 +369,13 @@ def render():
         df_chatwoot_excel['andamento_atendimento'] = ''
 
     st.dataframe(
-        df_chatwoot_excel[['conversation_id','responsavel', 'created_at', 'link_campanha', 'andamento_atendimento', 'termometro']],
+        df_chatwoot_excel[['conversation_id','responsavel', 'team', 'created_at', 'nome_campanha', 'nome_anuncio', 'link_campanha', 'andamento_atendimento', 'termometro']],
         hide_index=True,
         use_container_width=True,
         column_config={
+            "team": st.column_config.TextColumn("Time"),
+            "nome_campanha": st.column_config.TextColumn("Nome da Campanha"),
+            "nome_anuncio": st.column_config.TextColumn("Nome do Anúncio"),
             "link_campanha": st.column_config.LinkColumn("Link Campanha", display_text="Abrir"),
             "andamento_atendimento": "Andamento Atendimento",
             "termometro": "Temperatura"
