@@ -89,12 +89,23 @@ def consultar_anuncio(source_id):
     return nome_campanha, nome_anuncio
 
 
-def atualizar_status(cursor, source_id, status):
+def salvar_erro(cursor, source_id):
     cursor.execute(
-        "UPDATE facebook_campanhas SET status = ? WHERE source_id = ?",
-        [status, source_id],
+        "UPDATE facebook_campanhas SET status = 'Erro' WHERE source_id = ?",
+        [source_id],
     )
-    return cursor.rowcount
+
+    if cursor.rowcount > 0:
+        return "updated"
+
+    cursor.execute(
+        """
+        INSERT INTO facebook_campanhas (source_id, nome_campanha, nome_anuncio, status)
+        VALUES (?, ?, ?, 'Erro')
+        """,
+        [source_id, "", ""],
+    )
+    return "inserted"
 
 
 def salvar_sucesso(cursor, source_id, nome_campanha, nome_anuncio):
@@ -139,10 +150,14 @@ def sync_campanha_fb(self):
         anuncio = consultar_anuncio(source_id)
 
         if anuncio is None:
-            atualizar_status(cursor, source_id, "Erro")
+            acao = salvar_erro(cursor, source_id)
             conn.commit()
-            logger.warning("syn_campanha_fb: status atualizado para Erro - source_id=%s", source_id)
-            return {"status": "error", "source_id": source_id}
+            logger.warning(
+                "syn_campanha_fb: status atualizado para Erro - source_id=%s - acao=%s",
+                source_id,
+                acao,
+            )
+            return {"status": "error", "source_id": source_id, "acao": acao}
 
         nome_campanha, nome_anuncio = anuncio
         acao = salvar_sucesso(cursor, source_id, nome_campanha, nome_anuncio)
