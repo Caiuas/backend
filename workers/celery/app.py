@@ -69,7 +69,6 @@ app.conf.update(
         "atribuir-conversa-posvenda-every-2s": {
             "task": "tasks.atribuir_conversa_posvenda.atribuir_conversa_posvenda",
             "schedule": 2.0,
-            "options": {"expires": 1.5},
         },
         "ads-fluxo-loja-diario-12-00": {
             "task": "tasks.ads_fluxo_loja_runner.run_ads_fluxo_loja_module",
@@ -94,10 +93,6 @@ app.conf.update(
         "rel-veic-chao-sem-faturar-08-10": {
             "task": "tasks.rel_veic_chao_sem_faturar_runner.run_rel_veic_chao_sem_faturar_module",
             "schedule": crontab(hour=8, minute=10),
-        },
-        "sync-campanha-fb-every-10s": {
-            "task": "tasks.syn_campanha_fb.sync_campanha_fb",
-            "schedule": 10.0,
         },
     },
 )

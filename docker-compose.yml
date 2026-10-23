@@ -172,6 +172,17 @@
       - ./flask_app:/flask_app
     command: "celery -A app worker --loglevel=info --concurrency=4 -B"
 
+  worker_campanha_fb:
+    build: ./workers/celery
+    container_name: worker_campanha_fb
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./workers/celery:/app
+      - ./flask_app:/flask_app
+    command: "python3 -m tasks.syn_campanha_fb"
+
   flower:
     build: ./workers/celery
     container_name: flower

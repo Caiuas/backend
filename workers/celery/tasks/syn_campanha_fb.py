@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 import requests
 from dotenv import load_dotenv
 from app import app
@@ -131,8 +132,7 @@ def salvar_sucesso(cursor, source_id, nome_campanha, nome_anuncio):
     return "inserted"
 
 
-@app.task(bind=True, max_retries=2, default_retry_delay=120)
-def sync_campanha_fb(self):
+def executar_sync_campanha_fb():
     conn = None
     cursor = None
 
@@ -179,9 +179,38 @@ def sync_campanha_fb(self):
         logger.error("syn_campanha_fb: erro: %s", exc)
         if conn:
             conn.rollback()
-        raise self.retry(exc=exc)
+        raise
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
+
+
+@app.task(bind=True, max_retries=2, default_retry_delay=120)
+def sync_campanha_fb(self):
+    try:
+        return executar_sync_campanha_fb()
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+
+def main():
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    intervalo = float(os.getenv("SYNC_CAMPANHA_FB_INTERVAL", "10"))
+    logger.info("syn_campanha_fb: loop iniciado (intervalo=%ss)", intervalo)
+
+    while True:
+        try:
+            resultado = executar_sync_campanha_fb()
+            logger.info("syn_campanha_fb: ciclo concluido: %s", resultado)
+        except Exception:
+            logger.exception("syn_campanha_fb: erro no ciclo; tentando novamente")
+        time.sleep(intervalo)
+
+
+if __name__ == "__main__":
+    main()
