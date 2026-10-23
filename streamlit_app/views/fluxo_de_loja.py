@@ -211,8 +211,6 @@ def render():
                 810,
                 812,
                 837,
-                785,
-				807,
 				835,
 				833)
             AND ce.status <> 'D'
@@ -235,85 +233,85 @@ def render():
     
     
     query = f"""
-    SELECT
-        ccr.cod_empresa,
-        concat(ce.COD_EMPRESA, ce.COD_EVENTO) cod_evento,
-        TRUNC(ccr.created_at) data_retorno,
-        CASE
-            WHEN ca.andamento IS NULL THEN 'Não informado'
-            ELSE ca.andamento
-        END andamento,
-        CASE
-            WHEN ce.status = 'P' THEN 'Pendente'
-            WHEN ce.status = 'E' THEN 'Encerrado'
-            WHEN ce.status = 'D' THEN 'Descartado'
-            WHEN ce.status = 'V' THEN 'Pendente'
-            WHEN ce.status = 'R' THEN 'Pendente'
-            WHEN ce.status = 'A' THEN 'Pendente'
-            ELSE 'Não informado'
-        END status,
-        CASE
-            WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO
-            ELSE c.NOME
-        END nome_cliente,
-        ce.cod_proposta,
-        upper(cet.DESC_TIPO_EVENTO) tipo_evento,
-        CASE
-            WHEN eu.NOME_COMPLETO IS NOT NULL THEN upper(eu.NOME_COMPLETO)
-            ELSE 'SEM RESPONSÁVEL'
-        END responsavel,
-        CASE
-            WHEN ce.cod_modelo IS NOT NULL THEN pm.descricao_modelo
-            ELSE 'VEÍCULO NAO DEFINIDO'
-        END veiculo,
-        (SELECT count(*) FROM CAIUAS_CRM_RETORNO ccr2
-         WHERE ccr2.COD_EMPRESA = ce.COD_EMPRESA
-           AND ccr2.COD_EVENTO = ce.COD_EVENTO) qtd_retornos,
-        CASE
-            WHEN (SELECT count(*) FROM caiuas_crm_test_drive cctd WHERE cctd.COD_EMPRESA = ce.COD_EMPRESA AND cctd.COD_EVENTO = ce.COD_EVENTO) > 0 THEN 'TEM'
-            ELSE 'NÃO'
-        END tem_test_drive,
-        TRUNC(ce.data_criacao) data_criacao
-    FROM CAIUAS_CRM_RETORNO ccr
-    LEFT JOIN crm_eventos ce ON 1=1
-        AND ce.COD_EVENTO = ccr.COD_EVENTO
-        AND ce.COD_EMPRESA = ccr.COD_EMPRESA
-    LEFT JOIN CRM_ANDAMENTO ca ON 1=1
-        AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
-    LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
-        AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
-    LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
-        AND eu.NOME = ce.RESPONSAVEL_PELO_EVENTO
-    LEFT JOIN PRODUTOS_MODELOS pm ON 1=1
-        AND pm.COD_MODELO = ce.COD_MODELO
-    LEFT JOIN MIDIA m ON 1=1
-        AND m.COD_MIDIA = ce.COD_MIDIA
-    LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
-    LEFT JOIN crm_eventos cel ON 1=1
-        AND ce.COD_EVENTO_ANTERIOR = cel.COD_EVENTO 
-        AND ce.COD_EMPRESA_ANTERIOR = cel.COD_EMPRESA
-    WHERE 1=1
-        AND ce.status <> 'D'
-        and ce.COD_TIPO_EVENTO IN (819,
-        		821,
-        		815,
-        		817,
-        		810,
-        		812,
-        		829,
-                795,
-                793,
-                797,
-                799,
-                810,
-                812,
-                837,
-                785,
-				807,
-				835,
-				833)
-        AND TRUNC(ccr.created_at) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD')
-        AND TRUNC(ccr.created_at) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
+            SELECT
+                ccr.cod_empresa,
+                concat(ce.COD_EMPRESA, ce.COD_EVENTO) cod_evento,
+                TRUNC(ccr.created_at) data_retorno,
+                CASE
+                    WHEN ca.andamento IS NULL THEN 'Não informado'
+                    ELSE ca.andamento
+                END andamento,
+                CASE
+                    WHEN ce.status = 'P' THEN 'Pendente'
+                    WHEN ce.status = 'E' THEN 'Encerrado'
+                    WHEN ce.status = 'D' THEN 'Descartado'
+                    WHEN ce.status = 'V' THEN 'Pendente'
+                    WHEN ce.status = 'R' THEN 'Pendente'
+                    WHEN ce.status = 'A' THEN 'Pendente'
+                    ELSE 'Não informado'
+                END status,
+                CASE
+                    WHEN ce.COD_CLIENTE = 1 THEN ce.NOME_CLIENTE_AVULSO
+                    ELSE c.NOME
+                END nome_cliente,
+                ce.cod_proposta,
+                upper(cet.DESC_TIPO_EVENTO) tipo_evento,
+                CASE
+                    WHEN eu.NOME_COMPLETO IS NOT NULL THEN upper(eu.NOME_COMPLETO)
+                    ELSE 'SEM RESPONSÁVEL'
+                END responsavel,
+                CASE
+                    WHEN ce.cod_modelo IS NOT NULL THEN pm.descricao_modelo
+                    ELSE 'VEÍCULO NAO DEFINIDO'
+                END veiculo,
+                (SELECT count(*) FROM CAIUAS_CRM_RETORNO ccr2
+                WHERE ccr2.COD_EMPRESA = ce.COD_EMPRESA
+                AND ccr2.COD_EVENTO = ce.COD_EVENTO) qtd_retornos,
+                CASE
+                    WHEN (SELECT count(*) FROM caiuas_crm_test_drive cctd WHERE cctd.COD_EMPRESA = ce.COD_EMPRESA AND cctd.COD_EVENTO = ce.COD_EVENTO) > 0 THEN 'TEM'
+                    ELSE 'NÃO'
+                END tem_test_drive,
+                TRUNC(ce.data_criacao) data_criacao
+            FROM CAIUAS_CRM_RETORNO ccr
+            LEFT JOIN crm_eventos ce ON 1=1
+                AND ce.COD_EVENTO = ccr.COD_EVENTO
+                AND ce.COD_EMPRESA = ccr.COD_EMPRESA
+            LEFT JOIN CRM_ANDAMENTO ca ON 1=1
+                AND ca.COD_ANDAMENTO = ce.COD_ANDAMENTO
+            LEFT JOIN CRM_EVENTOS_TIPO cet ON 1=1
+                AND cet.COD_TIPO_EVENTO = ce.COD_TIPO_EVENTO
+            LEFT JOIN EMPRESAS_USUARIOS eu ON 1=1
+                AND eu.NOME = ce.RESPONSAVEL_PELO_EVENTO
+            LEFT JOIN PRODUTOS_MODELOS pm ON 1=1
+                AND pm.COD_MODELO = ce.COD_MODELO
+            LEFT JOIN MIDIA m ON 1=1
+                AND m.COD_MIDIA = ce.COD_MIDIA
+            LEFT JOIN clientes c ON ce.COD_CLIENTE = c.COD_CLIENTE
+            LEFT JOIN crm_eventos cel ON 1=1
+                AND ce.COD_EVENTO_ANTERIOR = cel.COD_EVENTO 
+                AND ce.COD_EMPRESA_ANTERIOR = cel.COD_EMPRESA
+            WHERE 1=1
+                AND ce.status <> 'D'
+                and ce.COD_TIPO_EVENTO IN (819,
+                        821,
+                        815,
+                        817,
+                        810,
+                        812,
+                        829,
+                        795,
+                        793,
+                        797,
+                        799,
+                        810,
+                        812,
+                        837,
+                        785,
+                        807,
+                        835,
+                        833)
+                AND TRUNC(ccr.created_at) >= TO_DATE('{data_inicial}', 'YYYY-MM-DD')
+                AND TRUNC(ccr.created_at) <= TO_DATE('{data_final}', 'YYYY-MM-DD')
     """
     cur.execute(query)
     results = cur.fetchall()
