@@ -90,8 +90,13 @@ def process_leads():
             cod_tipo_evento = 795
         elif row[3] == 'BHB - Banco Honda':
             cod_tipo_evento = 793
+        elif row[3] == 'Motor de Oportunidade':
+            cod_tipo_evento = 843
         elif row[3] == 'CNH - Consórcio Honda':
             cod_tipo_evento = 797
+
+        if row[6] == 'Motor de Oportunidade':
+            cod_tipo_evento = 843
 
         query_oracle = f"""
                 insert into crm_eventos(COD_EMPRESA,

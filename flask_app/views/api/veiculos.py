@@ -2884,7 +2884,7 @@ def update_observacao_por_proposta(cod_proposta):
             'obs_faturamento': {'pablo.ti', 'franciele.mayer', 'tais.schrepel'},
             'obs_entrega': {'pablo.ti', 'fernanda.suzuki'},
             'obs_liberacao': {'pablo.ti', 'vanessa.vilela'},
-            'obs_documentacao': {'franciele.mayer', 'flavia', 'pablo.ti', 'fernanda.cristina'},
+            'obs_documentacao': {'franciele.mayer', 'flavia', 'pablo.ti', 'fernanda.cristina','evelyn.alves'},
             'obs_isencao': {'flavia_co', 'pablo.ti'},
             'obs_acessorios': {'pablo.ti'},
         }
