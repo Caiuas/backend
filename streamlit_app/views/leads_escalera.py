@@ -35,8 +35,9 @@ def extrair_ddd(phone_number):
 
 def render():
     st.title("Leads Escalera")
-    data_inicial_chat = st.sidebar.date_input("Data Inicial", datetime.now().date(), key="escalera_data_inicial")
-    data_final_chat = st.sidebar.date_input("Data Final", datetime.now().date(), key="escalera_data_final")
+    data_padrao = (datetime.now() - timedelta(days=1)).date()
+    data_inicial_chat = st.sidebar.date_input("Data Inicial", data_padrao, key="escalera_data_inicial")
+    data_final_chat = st.sidebar.date_input("Data Final", data_padrao, key="escalera_data_final")
     
     data_inicial_query = data_inicial_chat - timedelta(days=7)
     
