@@ -1204,27 +1204,41 @@ def reports_passagens_oficina():
 @reports_bp.route('/api/reports/dashboard_showroom', methods=['GET'])
 @token_required
 def reports_dashboard_showroom():
+    usuarios_permitidos = {'franciele.mayer', 'pablo.ti', 'tais.schrepel', 'marcelotcf'}
+
+    token_data = request.token_data
+    email = (token_data.get('email') or '').strip().lower()
+    usuario = email.split('@')[0]
+    if usuario not in usuarios_permitidos:
+        return jsonify({'message': 'Usuário não autorizado a gerar este relatório.'}), 403
+
+    ano = request.args.get('ano')
+    mes = request.args.get('mes')
+    if not ano or not mes:
+        return jsonify({'message': 'Os parâmetros ano e mes são obrigatórios.'}), 400
     try:
-        usuarios_permitidos = {'franciele.mayer', 'pablo.ti', 'tais.schrepel', 'marcelotcf'}
+        ano = int(ano)
+        mes = int(mes)
+    except (TypeError, ValueError):
+        return jsonify({'message': 'Ano e mês devem ser números.'}), 400
+    if ano < 2000 or not 1 <= mes <= 12:
+        return jsonify({'message': 'Ano ou mês inválidos.'}), 400
 
-        token_data = request.token_data
-        email = (token_data.get('email') or '').strip().lower()
-        usuario = email.split('@')[0]
-        if usuario not in usuarios_permitidos:
-            return jsonify({'message': 'Usuário não autorizado a gerar este relatório.'}), 403
+    try:
+        _buffer, filename = gerar_dashboard_showroom(ano, mes)
+    except Exception as e:
+        return jsonify({'message': str(e)}), 400
 
-        ano = request.args.get('ano')
-        mes = request.args.get('mes')
-        if not ano or not mes:
-            return jsonify({'message': 'Os parâmetros ano e mes são obrigatórios.'}), 400
-        try:
-            ano = int(ano)
-            mes = int(mes)
-        except (TypeError, ValueError):
-            return jsonify({'message': 'Ano e mês devem ser números.'}), 400
-        if ano < 2000 or not 1 <= mes <= 12:
-            return jsonify({'message': 'Ano ou mês inválidos.'}), 400
+    return send_file(
+        _buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename,
+    )
 
+
+def gerar_dashboard_showroom(ano, mes, data_inicial=None, data_final=None):
+    try:
         import calendar
         import datetime
         import os
@@ -1240,8 +1254,8 @@ def reports_dashboard_showroom():
 
         conn, cur = oracle()
 
-        _ini = datetime.date(ano, mes, 1).strftime('%Y-%m-%d')
-        _fim = datetime.date(ano, mes, calendar.monthrange(ano, mes)[1]).strftime('%Y-%m-%d')
+        _ini = (data_inicial or datetime.date(ano, mes, 1)).strftime('%Y-%m-%d')
+        _fim = (data_final or datetime.date(ano, mes, calendar.monthrange(ano, mes)[1])).strftime('%Y-%m-%d')
 
         # Veiculos Faturados
 
@@ -2383,11 +2397,6 @@ def reports_dashboard_showroom():
             print(f'Dashboard não gerado: {erro}')
 
         _buffer.seek(0)
-        return send_file(
-            _buffer,
-            mimetype='application/pdf',
-            as_attachment=True,
-            download_name=f'dashboard_showroom_{ano}_{mes:02d}.pdf',
-        )
+        return _buffer, f'dashboard_showroom_{ano}_{mes:02d}.pdf'
     except Exception as e:
-        return jsonify({'message': str(e)}), 400
+        raise

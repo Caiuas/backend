@@ -22,6 +22,7 @@ from views.api.pecas import pecas_bp
 from views.api.mcp import mcp_bp
 from views.api.calendario import calendario_bp
 from views.api.rdstation import rdstation_bp
+from views.api.telegram import telegram_bp
 load_dotenv()
 
 app = Flask(__name__)
@@ -46,6 +47,7 @@ app.register_blueprint(pecas_bp)
 app.register_blueprint(mcp_bp)
 app.register_blueprint(calendario_bp)
 app.register_blueprint(rdstation_bp)
+app.register_blueprint(telegram_bp)
 
 
 def token_required(f):
