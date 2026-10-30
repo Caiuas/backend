@@ -2,8 +2,10 @@ from flask import Blueprint, jsonify, request
 from psycopg2.extras import Json
 import calendar
 from datetime import date, datetime, timedelta, timezone
+import json
 import os
 import re
+import uuid
 import requests
 
 from database import postgres_site
@@ -11,14 +13,9 @@ from database import postgres_site
 telegram_bp = Blueprint('telegram', __name__)
 
 MENU_TEXT = 'Opções de relatórios'
-SHOWROOM_BUTTON = {
-    'text': '1 - Vendas Showroom',
-    'callback_data': 'vendas_showroom',
-}
 ASK_INITIAL_DATE = 'Selecione a data inicial:'
 ASK_FINAL_DATE = 'Selecione a data final:'
 INVALID_DATE = 'Data inválida. Selecione nos botões abaixo ou digite no formato DD/MM/AAAA.'
-ALLOWED_TELEGRAM_IDS = {548519349, 8105764200, 8703967479}
 UNAUTHORIZED_MESSAGE = 'Pesquisas não autorizadas'
 
 MONTH_NAMES = (
@@ -188,14 +185,44 @@ def _call_telegram(method, payload):
         return False
 
 
-def _send_menu(chat_id):
-    return _call_telegram('sendMessage', {
-        'chat_id': chat_id,
-        'text': MENU_TEXT,
-        'reply_markup': {
-            'inline_keyboard': [[SHOWROOM_BUTTON]]
-        }
-    })
+def _enqueue_celery_task(task_name, args=None, kwargs=None):
+    task_id = str(uuid.uuid4())
+    body = json.dumps([
+        list(args or []),
+        dict(kwargs or {}),
+        {'callbacks': None, 'errbacks': None, 'chain': None, 'chord': None},
+    ])
+    payload = {
+        'properties': {
+            'content_type': 'application/json',
+            'content_encoding': 'utf-8',
+            'correlation_id': task_id,
+            'delivery_mode': 2,
+            'headers': {
+                'lang': 'py',
+                'task': task_name,
+                'id': task_id,
+                'root_id': task_id,
+            },
+        },
+        'routing_key': 'celery',
+        'payload': body,
+        'payload_encoding': 'string',
+    }
+    rabbit_url = os.getenv(
+        'RABBITMQ_HTTP_PUBLISH_URL',
+        'http://rabbitmq:15672/api/exchanges/%2F/celery/publish',
+    )
+    rabbit_user = os.getenv('RABBITMQ_DEFAULT_USER', 'guest')
+    rabbit_pass = os.getenv('RABBITMQ_DEFAULT_PASS', 'guest')
+    resp = requests.post(
+        rabbit_url,
+        auth=(rabbit_user, rabbit_pass),
+        json=payload,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json().get('routed', False)
 
 
 def _send_document(chat_id, filename, content, caption=None):
@@ -220,45 +247,157 @@ def _send_document(chat_id, filename, content, caption=None):
         return False
 
 
-def _ensure_state_table(cur):
+def _ensure_tables(cur):
     global STATE_TABLE_READY
     if STATE_TABLE_READY:
         return
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS rel_telegram (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            codigo TEXT UNIQUE NOT NULL,
+            nome TEXT NOT NULL,
+            ordem INTEGER NOT NULL DEFAULT 1,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rel_telegram_acessos (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            telegram_id BIGINT NOT NULL,
+            rel_telegram_id UUID REFERENCES rel_telegram(id) ON DELETE CASCADE,
+            nome TEXT,
+            ativo BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (telegram_id, rel_telegram_id)
+        )
+        """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS telegram_conversation_state (
             chat_id BIGINT PRIMARY KEY,
             state TEXT NOT NULL,
+            report_type TEXT NOT NULL DEFAULT 'vendas_showroom',
             initial_date DATE,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """
     )
+    cur.execute(
+        """
+        ALTER TABLE telegram_conversation_state
+        ADD COLUMN IF NOT EXISTS report_type TEXT NOT NULL DEFAULT 'vendas_showroom'
+        """
+    )
     STATE_TABLE_READY = True
+
+
+def _get_active_reports(cur):
+    cur.execute(
+        """
+        SELECT id, codigo, nome, ordem
+        FROM rel_telegram
+        WHERE ativo = TRUE
+        ORDER BY ordem ASC, nome ASC
+        """
+    )
+    return cur.fetchall()
+
+
+def _resolve_report(cur, raw_input):
+    cleaned = (raw_input or '').strip()
+    if cleaned.startswith('rel:'):
+        cleaned = cleaned.split(':', 1)[1].strip()
+    reports = _get_active_reports(cur)
+    for rel in reports:
+        if cleaned == rel['codigo'] or cleaned == str(rel['ordem']):
+            return rel
+    return None
+
+
+def _has_report_access(cur, telegram_id, report_codigo=None):
+    if not telegram_id:
+        return False
+    if report_codigo:
+        cur.execute(
+            """
+            SELECT 1
+            FROM rel_telegram_acessos a
+            LEFT JOIN rel_telegram r ON r.id = a.rel_telegram_id
+            WHERE a.telegram_id = %s
+              AND a.ativo = TRUE
+              AND (
+                  a.rel_telegram_id IS NULL
+                  OR (r.codigo = %s AND r.ativo = TRUE)
+              )
+            LIMIT 1
+            """,
+            (telegram_id, report_codigo),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT 1
+            FROM rel_telegram_acessos a
+            LEFT JOIN rel_telegram r ON r.id = a.rel_telegram_id
+            WHERE a.telegram_id = %s
+              AND a.ativo = TRUE
+              AND (a.rel_telegram_id IS NULL OR r.ativo = TRUE)
+            LIMIT 1
+            """,
+            (telegram_id,),
+        )
+    return cur.fetchone() is not None
+
+
+def _build_menu_action(cur):
+    reports = _get_active_reports(cur)
+    keyboard = [
+        [{
+            'text': f"{rel['ordem']} - {rel['nome']}",
+            'callback_data': rel['codigo'],
+        }]
+        for rel in reports
+    ]
+    return {
+        'type': 'text',
+        'text': MENU_TEXT,
+        'reply_markup': {'inline_keyboard': keyboard},
+    }
 
 
 def _get_state(cur, chat_id):
     cur.execute(
-        'SELECT state, initial_date FROM telegram_conversation_state WHERE chat_id = %s',
+        'SELECT state, report_type, initial_date FROM telegram_conversation_state WHERE chat_id = %s',
         (chat_id,)
     )
     row = cur.fetchone()
     if not row:
-        return None, None
-    return row['state'], row['initial_date']
+        return None, None, None
+    return row['state'], row['report_type'], row['initial_date']
 
 
-def _set_state(cur, chat_id, state, initial_date=None):
+def _set_state(cur, chat_id, state, initial_date=None, report_type=None):
+    if not report_type:
+        _, existing_report, _ = _get_state(cur, chat_id)
+        report_type = existing_report or 'vendas_showroom'
     cur.execute(
         """
-        INSERT INTO telegram_conversation_state (chat_id, state, initial_date, updated_at)
-        VALUES (%s, %s, %s, NOW())
+        INSERT INTO telegram_conversation_state (chat_id, state, report_type, initial_date, updated_at)
+        VALUES (%s, %s, %s, %s, NOW())
         ON CONFLICT (chat_id) DO UPDATE SET
             state = EXCLUDED.state,
+            report_type = EXCLUDED.report_type,
             initial_date = EXCLUDED.initial_date,
             updated_at = NOW()
         """,
-        (chat_id, state, initial_date)
+        (chat_id, state, report_type, initial_date)
     )
 
 
@@ -306,21 +445,26 @@ def _ask_final_action(initial_date, year=None, month=None, prefix_text=None):
     }
 
 
-def _plan_report(cur, chat_id, initial_date, final_date):
+def _plan_report(cur, chat_id, initial_date, final_date, report_type='vendas_showroom'):
     if not initial_date:
-        _set_state(cur, chat_id, 'awaiting_initial')
+        _set_state(cur, chat_id, 'awaiting_initial', report_type=report_type)
         return _ask_initial_action()
     if not final_date:
-        _set_state(cur, chat_id, 'awaiting_final', initial_date)
+        _set_state(cur, chat_id, 'awaiting_final', initial_date, report_type=report_type)
         return _ask_final_action(initial_date)
     if final_date < initial_date:
-        _set_state(cur, chat_id, 'awaiting_final', initial_date)
+        _set_state(cur, chat_id, 'awaiting_final', initial_date, report_type=report_type)
         return _ask_final_action(
             initial_date,
             prefix_text='A data final deve ser maior ou igual à data inicial.',
         )
     _clear_state(cur, chat_id)
-    return {'type': 'report', 'initial': initial_date, 'final': final_date}
+    return {
+        'type': 'report',
+        'report_type': report_type or 'vendas_showroom',
+        'initial': initial_date,
+        'final': final_date,
+    }
 
 
 def _plan_response(cur, chat_id, text, sender_id, is_callback=False, message_id=None):
@@ -331,22 +475,24 @@ def _plan_response(cur, chat_id, text, sender_id, is_callback=False, message_id=
 
     if raw == 'menu':
         _clear_state(cur, chat_id)
-        return {'type': 'menu'}
+        return _build_menu_action(cur)
 
-    if raw in ('1', 'vendas_showroom'):
-        if sender_id not in ALLOWED_TELEGRAM_IDS:
+    selected_report = _resolve_report(cur, raw)
+    if selected_report:
+        report_codigo = selected_report['codigo']
+        if not _has_report_access(cur, sender_id, report_codigo):
             _clear_state(cur, chat_id)
             return {'type': 'text', 'text': UNAUTHORIZED_MESSAGE}
-        _set_state(cur, chat_id, 'awaiting_initial')
+        _set_state(cur, chat_id, 'awaiting_initial', report_type=report_codigo)
         return _ask_initial_action()
 
     if raw.startswith('cal_nav:'):
-        if sender_id not in ALLOWED_TELEGRAM_IDS:
+        _, report_type, initial_date = _get_state(cur, chat_id)
+        if not _has_report_access(cur, sender_id, report_type):
             return {'type': 'text', 'text': UNAUTHORIZED_MESSAGE}
         parts = raw.split(':')
         if len(parts) == 4:
             step, year, month = parts[1], int(parts[2]), int(parts[3])
-            _, initial_date = _get_state(cur, chat_id)
             min_date = initial_date if step == 'fim' else None
             return {
                 'type': 'edit_markup',
@@ -355,49 +501,55 @@ def _plan_response(cur, chat_id, text, sender_id, is_callback=False, message_id=
             }
 
     if raw.startswith('date_ini:'):
-        if sender_id not in ALLOWED_TELEGRAM_IDS:
+        _, report_type, _ = _get_state(cur, chat_id)
+        if not _has_report_access(cur, sender_id, report_type):
             return {'type': 'text', 'text': UNAUTHORIZED_MESSAGE}
         dates = _parse_dates(raw.split(':', 1)[1])
         if dates:
-            _set_state(cur, chat_id, 'awaiting_final', dates[0])
+            _set_state(cur, chat_id, 'awaiting_final', dates[0], report_type=report_type)
             return _ask_final_action(dates[0])
 
     if raw.startswith('date_fim:'):
-        if sender_id not in ALLOWED_TELEGRAM_IDS:
+        _, report_type, initial_date = _get_state(cur, chat_id)
+        if not _has_report_access(cur, sender_id, report_type):
             return {'type': 'text', 'text': UNAUTHORIZED_MESSAGE}
-        _, initial_date = _get_state(cur, chat_id)
         dates = _parse_dates(raw.split(':', 1)[1])
         if dates:
-            return _plan_report(cur, chat_id, initial_date, dates[0])
+            if not _has_report_access(cur, sender_id, report_type):
+                return {'type': 'text', 'text': UNAUTHORIZED_MESSAGE}
+            return _plan_report(cur, chat_id, initial_date, dates[0], report_type=report_type)
 
-    state, initial_date = _get_state(cur, chat_id)
+    state, report_type, initial_date = _get_state(cur, chat_id)
     dates = _parse_dates(raw)
 
     if state == 'awaiting_initial' and dates:
+        if not _has_report_access(cur, sender_id, report_type):
+            _clear_state(cur, chat_id)
+            return {'type': 'text', 'text': UNAUTHORIZED_MESSAGE}
         if len(dates) >= 2:
-            return _plan_report(cur, chat_id, dates[0], dates[1])
-        _set_state(cur, chat_id, 'awaiting_final', dates[0])
+            return _plan_report(cur, chat_id, dates[0], dates[1], report_type=report_type)
+        _set_state(cur, chat_id, 'awaiting_final', dates[0], report_type=report_type)
         return _ask_final_action(dates[0])
 
     if state == 'awaiting_final' and dates:
+        if not _has_report_access(cur, sender_id, report_type):
+            _clear_state(cur, chat_id)
+            return {'type': 'text', 'text': UNAUTHORIZED_MESSAGE}
         if len(dates) >= 2:
-            return _plan_report(cur, chat_id, dates[0], dates[1])
-        return _plan_report(cur, chat_id, initial_date, dates[0])
+            return _plan_report(cur, chat_id, dates[0], dates[1], report_type=report_type)
+        return _plan_report(cur, chat_id, initial_date, dates[0], report_type=report_type)
 
-    # Qualquer outra mensagem recebida retorna o menu de relatórios
     _clear_state(cur, chat_id)
-    return {'type': 'menu'}
+    return _build_menu_action(cur)
 
 
-def _perform_action(action, chat_id, sender_id):
+def _perform_action(action, chat_id):
     if not action or not chat_id:
         return False
 
     action_type = action.get('type')
     if action_type == 'none':
         return True
-    if action_type == 'menu':
-        return _send_menu(chat_id)
     if action_type == 'edit_markup':
         if not action.get('message_id'):
             return False
@@ -415,14 +567,31 @@ def _perform_action(action, chat_id, sender_id):
             payload['reply_markup'] = action['reply_markup']
         return _call_telegram('sendMessage', payload)
     if action_type == 'report':
-        if sender_id not in ALLOWED_TELEGRAM_IDS:
-            return _call_telegram('sendMessage', {
-                'chat_id': chat_id,
-                'text': UNAUTHORIZED_MESSAGE,
-            })
         initial_date = action['initial']
         final_date = action['final']
+        report_type = action.get('report_type') or 'vendas_showroom'
         period = f'{initial_date.strftime("%d/%m/%Y")} a {final_date.strftime("%d/%m/%Y")}'
+
+        if report_type == 'fechamento_leads_agencia':
+            try:
+                _enqueue_celery_task(
+                    'tasks.fechamento_leads_agencia.gerar_fechamento_leads_agencia',
+                    args=[chat_id, initial_date.isoformat(), final_date.isoformat()],
+                )
+                return _call_telegram('sendMessage', {
+                    'chat_id': chat_id,
+                    'text': (
+                        f'⏳ Solicitação recebida! O relatório Fechamento Leads Agência ({period}) '
+                        'está sendo gerado em segundo plano e será enviado aqui assim que concluir.'
+                    ),
+                })
+            except Exception as e:
+                print(f'Erro ao enfileirar task Fechamento Leads Agência: {e}')
+                return _call_telegram('sendMessage', {
+                    'chat_id': chat_id,
+                    'text': f'Não foi possível iniciar o relatório: {e}',
+                })
+
         _call_telegram('sendMessage', {
             'chat_id': chat_id,
             'text': f'Gerando relatório de Vendas Showroom ({period})...',
@@ -529,7 +698,7 @@ def telegram_webhook():
 
         action = None
         if chat.get('id') and not sender.get('is_bot'):
-            _ensure_state_table(cur)
+            _ensure_tables(cur)
             action = _plan_response(
                 cur,
                 chat['id'],
@@ -549,7 +718,7 @@ def telegram_webhook():
                 'callback_query_id': callback_query.get('id')
             })
 
-        sent = _perform_action(action, chat.get('id'), sender.get('id'))
+        sent = _perform_action(action, chat.get('id'))
         return jsonify({'ok': True, 'sent': sent}), 200
     except Exception as e:
         if conn:
